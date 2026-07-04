@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<!-- Pages再デプロイトリガー: 2026-07-04 11:19 (2回連続でGitHub側デプロイ失敗のため再試行) -->
+<html lang="ja"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴースト イン ザ デバイス</title>
+<style>
+  :root{
+    --bg:#07080a;--txt:#e8edf2;--mut:#9aa3ad;
+    --pink:#ff2fb0;--green:#39ff9e;--cyan:#5be6ff;
+    --line:rgba(255,255,255,.12)
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .page{max-width:460px;margin:0 auto;padding:0 0 42px}
+
+  /* ---------- ヒーロー画像 ---------- */
+  .hero{position:relative;width:100%;aspect-ratio:800/485;overflow:hidden;background:#000}
+  .hero img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.08) contrast(1.04)}
+  .hero::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(to bottom, rgba(7,8,10,0) 45%, rgba(7,8,10,.75) 78%, var(--bg) 100%)}
+  .hero .rec{position:absolute;top:10px;left:12px;display:flex;align-items:center;gap:6px;
+    font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11px;color:#ff5a6e;
+    text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.04em;z-index:2}
+  .hero .rec .dot{width:7px;height:7px;border-radius:50%;background:#ff2d3d;animation:blink 1.4s infinite}
+  .hero .ts{position:absolute;bottom:10px;right:12px;
+    font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11px;color:rgba(255,255,255,.75);
+    text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.03em;z-index:2;font-variant-numeric:tabular-nums}
+  .hero .scan{position:absolute;inset:0;pointer-events:none;mix-blend-mode:overlay;opacity:.5;z-index:1;
+    background:repeating-linear-gradient(to bottom, rgba(255,255,255,.06) 0px, rgba(255,255,255,.06) 1px, transparent 2px, transparent 3px)}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+
+  /* ---------- ノイズ/グリッチ演出(たまに一瞬走る) ---------- */
+  .hero .noise{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:0;
+    filter:url(#staticNoise);mix-blend-mode:overlay}
+  .hero.glitching .noise{opacity:.75}
+  .hero.glitching img{animation:imgGlitch .22s steps(1,end) 3}
+  @keyframes imgGlitch{
+    0%{transform:translate(0,0);filter:saturate(1.08) contrast(1.04)}
+    35%{transform:translate(-4px,1px);filter:saturate(1.5) contrast(1.3) hue-rotate(8deg)}
+    70%{transform:translate(3px,-1px);filter:saturate(1.3) contrast(1.2) hue-rotate(-6deg)}
+    100%{transform:translate(0,0);filter:saturate(1.08) contrast(1.04)}
+  }
+
+  /* ---------- タイトル ---------- */
+  .titleWrap{padding:0 20px;margin-top:-54px;position:relative;z-index:3}
+  h1{font-size:26px;font-weight:800;letter-spacing:.02em;margin:0;line-height:1.25;
+    text-shadow:0 0 18px rgba(255,47,176,.35)}
+  h1 .glitch{position:relative;display:inline-block;color:var(--txt)}
+  h1 .glitch::before,h1 .glitch::after{content:attr(data-t);position:absolute;left:0;top:0;width:100%;
+    overflow:hidden;opacity:.7}
+  h1 .glitch::before{color:var(--pink);transform:translate(-2px,0);clip-path:inset(0 0 55% 0);animation:gl1 3.2s infinite}
+  h1 .glitch::after{color:var(--cyan);transform:translate(2px,0);clip-path:inset(55% 0 0 0);animation:gl2 3.6s infinite}
+  @keyframes gl1{0%,88%,100%{transform:translate(-2px,0)}90%{transform:translate(3px,-1px)}92%{transform:translate(-3px,1px)}}
+  @keyframes gl2{0%,90%,100%{transform:translate(2px,0)}92%{transform:translate(-3px,1px)}94%{transform:translate(3px,-1px)}}
+  .eng{display:block;font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11px;
+    color:var(--green);letter-spacing:.28em;margin:8px 0 0;opacity:.85}
+
+  .lead{padding:16px 20px 0;font-size:14.5px;line-height:1.85;color:#c7ccd3}
+  .lead b{color:var(--txt);font-weight:600}
+
+  /* ---------- ログ風ブロック ---------- */
+  .logBlock{margin:22px 20px 0;border:1px solid var(--line);border-left:2px solid var(--green);
+    border-radius:4px;background:rgba(57,255,158,.04);padding:14px 16px}
+  .logBlock .tag{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11px;color:var(--green);
+    letter-spacing:.12em;margin:0 0 8px}
+  .logBlock p{font-size:14px;line-height:1.9;color:#c7ccd3;margin:0}
+
+  /* ---------- ゼロちゃん紹介カード ---------- */
+  .zeroCard{margin:22px 20px 0;
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;background:rgba(255,255,255,.03)}
+  .zeroCard .zcHead{display:flex;gap:12px;padding:14px 14px 10px;align-items:flex-start}
+  .zeroCard .zcThumb{flex:0 0 52px;width:52px;height:52px;border-radius:10px;overflow:hidden;
+    border:1px solid var(--line);background:#000}
+  .zeroCard .zcThumb img{width:100%;height:100%;object-fit:cover;object-position:50% 15%}
+  .zeroCard .zcName{font-size:15px;font-weight:700;color:var(--txt);margin:0 0 3px}
+  .zeroCard .zcRole{font-size:11px;color:var(--pink);letter-spacing:.04em;margin:0}
+  .zeroCard .zcDesc{padding:0 14px 14px;font-size:14px;line-height:1.85;color:#c7ccd3}
+
+  /* ---------- ボタン ---------- */
+  .actions{margin:26px 20px 0;display:flex;flex-direction:column;gap:12px}
+  .card{position:relative;display:block;text-decoration:none;color:inherit;overflow:hidden;
+    border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.03);padding:17px 18px;
+    transition:border-color .15s,background .15s}
+  .card:active{background:rgba(255,255,255,.06)}
+  .card.g1{border-color:rgba(255,47,176,.35)}
+  .card.g1:active{border-color:var(--pink);box-shadow:0 0 22px rgba(255,47,176,.25)}
+  .card.g2{border-color:rgba(91,230,255,.35)}
+  .card.g2:active{border-color:var(--cyan);box-shadow:0 0 22px rgba(91,230,255,.25)}
+  .card b{display:block;font-size:15.5px;margin-bottom:5px;letter-spacing:.01em}
+  .card.g1 b{color:var(--pink)}
+  .card.g2 b{color:var(--cyan)}
+  .card span{display:block;font-size:12px;color:var(--mut);line-height:1.6}
+  .card .arrow{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:18px;opacity:.4}
+
+  .foot{margin:28px 20px 0;font-size:11.5px;color:#7c838d;line-height:1.75;
+    font-family:"SFMono-Regular",Consolas,Menlo,monospace}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="staticNoise">
+    <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.9 0"/>
+  </filter>
+</svg>
+<div class="page">
+
+  <div class="hero" id="hero">
+    <img src="images/hero_ghost.jpg" alt="ゴースト"/>
+    <div class="noise"></div>
+    <div class="scan"></div>
+    <div class="rec"><span class="dot"></span>REC</div>
+    <div class="ts" id="tsCounter">00:00</div>
+  </div>
+
+  <div class="titleWrap">
+    <h1><span class="glitch" data-t="ゴースト イン ザ デバイス">ゴースト イン ザ デバイス</span>
+      <span class="eng">GHOST IN THE DEVICE</span></h1>
+  </div>
+
+  <div class="actions">
+    <a class="card g1" href="landmark_tool.html">
+      <b>ゴーストジェネレータ</b>
+      <span>3枚の絵からゴーストを呼び出す。front/side/back画像とランドマークから、彼女の"実体"を生成する。</span>
+      <span class="arrow">→</span>
+    </a>
+    <a class="card g2" href="character_3d.html">
+      <b>ゴーストビューア</b>
+      <span>目覚めたゴーストと対面する。呼び出したモデルを確認し、動かす。</span>
+      <span class="arrow">→</span>
+    </a>
+  </div>
+
+  <div class="logBlock">
+    <p class="tag">TOOL LOG</p>
+    <p>
+      その画像、ちゃんと"眠って"いますか。<br>
+      平面に描かれたキャラクターは、本当は息をひそめているだけ。夜、誰も見ていない画面の中で、
+      <b>彼女たちはそっと動き出す</b>。<br>
+      ここにあるのは3枚の絵から"ゴースト"を呼び出し、あなたの端末に憑依させるための儀式——ただのツールです。
+    </p>
+  </div>
+
+  <div class="zeroCard">
+    <div class="zcHead">
+      <div class="zcThumb"><img src="images/hero_ghost.jpg" alt="ゼロ"/></div>
+      <div>
+        <p class="zcName">ゼロ (Zero)</p>
+        <p class="zcRole">廃墟探索チーム隊長 / 全オカルト現象の完全否定を掲げる配信者</p>
+      </div>
+    </div>
+    <p class="zcDesc">
+      「まだ『幽霊』なんて信じてるの？頭、大丈夫？」——心霊スポットを次々と踏破し、
+      "何もないこと"を証明するために配信を続ける彼女。だが彼女自身の記録にだけ、
+      説明のつかない何かが映り込み続けている。<br><br>
+      彼女のチームが遺した記録には、繰り返しこう記されている——
+      「機材トラブル、後で検証」「XX分XX秒 ノイズあり」。検証は、一度も行われた形跡がない。
+      このツールは、その"ノイズ"の正体に迫るために作られた——絵の中に取り残された何かを、
+      こちら側へ引きずり出す装置として。
+    </p>
+  </div>
+
+  <p class="foot">
+    ※本ページはSF『神のいない箱庭で』の作品内プロジェクトとして構成されたフィクションです。<br>
+    ※ツール自体は3枚のキャラクター原画から3Dモデルを生成する一般的な変換ツールで、
+    実際に画像が動き出したり何かが憑依したりすることはありません。
+  </p>
+
+</div>
+<script>
+(function(){
+  "use strict";
+  var el=document.getElementById('tsCounter');
+  var t0=Date.now();
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function tick(){
+    var s=Math.floor((Date.now()-t0)/1000);
+    el.textContent=pad(Math.floor(s/60)%100)+':'+pad(s%60);
+  }
+  tick(); setInterval(tick, 1000);
+
+  var hero=document.getElementById('hero');
+  function scheduleGlitch(){
+    setTimeout(function(){
+      hero.classList.add('glitching');
+      setTimeout(function(){ hero.classList.remove('glitching'); }, 260);
+      scheduleGlitch();
+    }, 3500+Math.random()*6500);
+  }
+  scheduleGlitch();
+})();
+</script>
+</body></html>

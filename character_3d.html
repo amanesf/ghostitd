@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴーストビューア</title>
+<style>
+  :root{--bg:#0d0f12;--panel:rgba(20,24,29,.92);--line:rgba(255,255,255,.10);--mut:#8b94a0;--mint:#52e0c4;--txt:#e8edf2}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #c{position:fixed;inset:0;display:block;touch-action:none;width:100vw!important;height:100vh!important}
+  .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
+    text-shadow:0 1px 6px rgba(0,0,0,.7)}
+  #err{position:fixed;top:34px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none}
+  #backToLandmark{position:fixed;top:8px;right:10px;z-index:7;height:34px;padding:0 14px;border-radius:10px;
+    border:1px solid var(--line);background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
+  #backToLandmark:active{background:rgba(82,224,196,.15)}
+
+  /* center drop card */
+  .drop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,86vw);padding:28px;
+    text-align:center;z-index:6;background:var(--panel);border:1px solid var(--line);border-radius:16px}
+  .drop.hide{display:none}
+  .drop h2{margin:.1em 0 .3em;font-size:16px}
+  .drop p{color:var(--mut);font-size:13px;margin:.3em 0 1.1em}
+
+  /* mode choice card */
+  .modeCard{display:block;cursor:pointer;text-align:left;border:1px solid var(--line);border-radius:14px;
+    background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
+  .modeCard:active{background:rgba(82,224,196,.10);border-color:rgba(82,224,196,.4)}
+  .modeCard.mint{border-color:rgba(82,224,196,.4)}
+  .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
+  .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+
+  /* single bottom control bar */
+  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;display:none;
+    flex-direction:column;gap:8px;padding:10px 10px calc(10px + env(safe-area-inset-bottom));
+    background:linear-gradient(to top,rgba(13,15,18,.96),rgba(13,15,18,.74) 70%,transparent);
+    backdrop-filter:blur(6px)}
+  .bar.show{display:flex}
+  .bar .row{display:flex;gap:7px;align-items:center;justify-content:center;flex-wrap:nowrap;width:100%}
+  .btn{flex:1 1 0;min-width:0;height:42px;border-radius:11px;border:1px solid var(--line);
+    background:rgba(255,255,255,.05);color:var(--txt);font-size:13px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;white-space:nowrap;transition:.12s;user-select:none}
+  .btn:active{transform:scale(.96)}
+  .btn.on{color:var(--mint);border-color:rgba(82,224,196,.6);background:rgba(82,224,196,.10)}
+  .btn.sm{flex:0 0 46px}
+  select{height:42px;border-radius:11px;border:1px solid var(--line);background:#161a1f;color:var(--txt);
+    font-size:13px;padding:0 10px;outline:none;flex:1 1 0;min-width:0}
+  .lbl{flex:0 0 auto;color:var(--mut);font-size:11px;padding:0 2px}
+  input[type=range]{flex:1 1 0;min-width:0;height:30px;accent-color:var(--mint);background:transparent}
+  .slideWrap{display:flex;align-items:center;gap:6px;flex:1 1 0;min-width:0}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div class="title">ゴーストビューア</div>
+<button id="backToLandmark" title="ゴーストジェネレータに戻る">← ジェネレータ</button>
+<div id="err"></div>
+
+<div class="drop hide" id="modeChoice">
+  <h2>モードを選んでください</h2>
+  <div class="modeCard mint" id="modeSampleBtn">
+    <b>サンプルモードで開く</b>
+    <span>同梱のサンプルmodel.glb/モーションを自動読込してお試しできます。</span>
+  </div>
+  <div class="modeCard" id="modeNormalBtn">
+    <b>通常モード</b>
+    <span>自分の.glbファイルを選択/ドラッグ&ドロップして表示します。</span>
+  </div>
+</div>
+
+<div class="drop hide" id="drop">
+  <h2>3Dモデルを表示</h2>
+  <p>.glb ファイルを選択、またはドラッグ＆ドロップ<br>(モデルを読み込んだ後、モーション.glbを追加で読み込めます)</p>
+  <button class="btn" id="pick" style="flex:0 1 auto;padding:0 20px;display:inline-flex">ファイルを選択</button>
+  <input type="file" id="file" accept=".glb,.gltf" style="display:none"/>
+</div>
+
+<div class="bar" id="bar">
+  <div class="row">
+    <button class="btn" id="vFront">正面</button>
+    <button class="btn" id="vSide">側面</button>
+    <button class="btn" id="vBack">背面</button>
+    <button class="btn sm" id="camUp">↑</button>
+    <button class="btn sm" id="camDn">↓</button>
+    <button class="btn sm" id="camL">←</button>
+    <button class="btn sm" id="camR">→</button>
+  </div>
+  <div class="row">
+    <button class="btn" id="spin">自動回転</button>
+    <button class="btn" id="reset">リセット</button>
+    <button class="btn" id="skel">関節</button>
+    <button class="btn" id="bgWhite">背景白</button>
+    <button class="btn" id="load2">別のglb</button>
+    <button class="btn" id="download">ダウンロード</button>
+  </div>
+  <div class="row">
+    <button class="btn on" id="cel" style="flex:0 0 80px">セル影</button>
+    <div class="slideWrap"><input type="range" id="celStrength" min="0" max="100" value="70"></div>
+    <button class="btn on" id="outline" style="flex:0 0 80px">輪郭線</button>
+    <div class="slideWrap"><input type="range" id="outlineStrength" min="0" max="100" value="40"></div>
+  </div>
+  <div class="row" id="animRow" style="display:none">
+    <span class="lbl">モーション</span>
+    <select id="animSel"></select>
+    <button class="btn sm" id="loadMotion" title="モーション.glbを追加読込">＋</button>
+    <button class="btn" id="play" style="flex:0 0 92px">再生</button>
+  </div>
+</div>
+
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/GLTFLoader.js"></script>
+<script src="js/idb.js"></script>
+<script>
+(function(){
+const cvs=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true,alpha:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.outputEncoding=THREE.sRGBEncoding;
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(35,innerWidth/innerHeight,0.01,100);
+let camDist=2.6; cam.position.set(0,0,camDist);
+const root=new THREE.Group(); scene.add(root);
+// --- トゥーンシェード用ライト（world固定: モデル回転で陰影が自然に動く） ---
+const hemiLight=new THREE.HemisphereLight(0xffffff,0x23262b,0.45);
+scene.add(hemiLight);
+const keyLight=new THREE.DirectionalLight(0xffffff,1.15);
+keyLight.position.set(1.4,2.4,2.8);
+scene.add(keyLight);
+const fillLight=new THREE.DirectionalLight(0xbcd6ff,0.32);
+fillLight.position.set(-1.6,0.6,-1.8);
+scene.add(fillLight);
+// --- トゥーン用グラデーションマップ（3段階のセル影） ---
+let toonGradCtx=null;
+function makeToonGradient(){
+  const c=document.createElement('canvas');c.width=3;c.height=1;
+  const ctx=c.getContext('2d');
+  [70,150,255].forEach((v,i)=>{ctx.fillStyle='rgb('+v+','+v+','+v+')';ctx.fillRect(i,0,1,1);});
+  const tex=new THREE.CanvasTexture(c);
+  tex.minFilter=THREE.NearestFilter;tex.magFilter=THREE.NearestFilter;tex.generateMipmaps=false;
+  toonGradCtx=ctx;
+  return tex;
+}
+const toonGradient=makeToonGradient();
+function setToonGradientStrength(pct){ // pct 0..100
+  const s=pct/100;
+  const ctx=toonGradCtx;
+  const mid=160, spread=Math.round(140*s);
+  const vals=[Math.max(0,mid-spread),mid,Math.min(255,mid+spread)];
+  vals.forEach((v,i)=>{ctx.fillStyle='rgb('+v+','+v+','+v+')';ctx.fillRect(i,0,1,1);});
+  toonGradient.needsUpdate=true;
+  invalidate();
+}
+let celOn=true, outlineOn=true;
+function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; } // pct 0..100 -> 0.0005..0.01
+// --- 輪郭線(アウトライン)メッシュ生成: 法線方向に頂点を押し出した黒い裏面メッシュ ---
+function buildOutline(mesh,thickness){
+  const geo=mesh.geometry.clone();
+  const pos=geo.attributes.position,nor=geo.attributes.normal;
+  for(let i=0;i<pos.count;i++){
+    pos.setXYZ(i,pos.getX(i)+nor.getX(i)*thickness,pos.getY(i)+nor.getY(i)*thickness,pos.getZ(i)+nor.getZ(i)*thickness);
+  }
+  pos.needsUpdate=true;
+  const mat=new THREE.MeshBasicMaterial({color:0x14171c,side:THREE.BackSide,skinning:true});
+  const out=new THREE.SkinnedMesh(geo,mat);
+  out.bind(mesh.skeleton,mesh.bindMatrix);
+  out.userData.isOutline=true;
+  return out;
+}
+let model=null, mixer=null, clips=[], action=null, playing=false;
+let skelHelper=null, showSkel=false;
+let rotY=0.4, rotX=0.04, autoSpin=false, dragging=false, lx=0, ly=0;
+let needsRender=true;                 // render-on-demand to stay light
+function invalidate(){ needsRender=true; }
+function resize(){renderer.setSize(innerWidth,innerHeight,false);cvs.style.width=innerWidth+'px';cvs.style.height=innerHeight+'px';cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();invalidate();}
+addEventListener('resize',resize); resize();
+
+// Bind-pose bounds (all vertices, ignores skinning). Simple, deterministic, same on every device.
+function bindBounds(obj){
+  obj.updateMatrixWorld(true);
+  const mn=new THREE.Vector3(Infinity,Infinity,Infinity);
+  const mx=new THREE.Vector3(-Infinity,-Infinity,-Infinity);
+  const v=new THREE.Vector3(); let any=false;
+  obj.traverse(o=>{
+    if(o.isMesh && o.geometry?.attributes?.position){
+      const p=o.geometry.attributes.position;
+      // use world matrix WITHOUT skinning (bind pose)
+      for(let i=0;i<p.count;i++){ v.fromBufferAttribute(p,i).applyMatrix4(o.matrixWorld); mn.min(v); mx.max(v); any=true; }
+    }
+  });
+  if(!any){mn.set(-1,-1,-1);mx.set(1,1,1);}
+  return new THREE.Box3(mn,mx);
+}
+let fitDist=2.6;
+function frameModel(obj){
+  obj.position.set(0,0,0); root.position.set(0,0,0); obj.updateMatrixWorld(true);
+  const box=bindBounds(obj);
+  const c=box.getCenter(new THREE.Vector3());
+  obj.position.sub(c);                          // center bind-pose bbox at origin (once)
+  const size=box.getSize(new THREE.Vector3());
+  // 画面アスペクトを考慮し、全身(縦横)が収まる距離を計算
+  const fovV=cam.fov*Math.PI/180;
+  const fovH=2*Math.atan(Math.tan(fovV/2)*cam.aspect);
+  const distV=(size.y*0.5)/Math.tan(fovV/2);
+  const distH=(size.x*0.5)/Math.tan(fovH/2);
+  fitDist=Math.max(distV,distH,size.z*0.5)*1.15;
+  camDist=fitDist;
+  rotY=0; rotX=0;                               // 正面・水平
+  cam.position.set(0,0,camDist); cam.lookAt(0,0,0);
+  invalidate();
+}
+function clearModel(){ if(model){root.remove(model);model=null;} mixer=null;clips=[];action=null;playing=false; clearSkelViz(); }
+function clearSkelViz(){ if(skelHelper){ scene.remove(skelHelper); skelHelper=null; } }
+function buildSkelViz(m){
+  clearSkelViz();
+  let sm=null;
+  m.traverse(o=>{ if(o.isSkinnedMesh&&o.skeleton) sm=o; });
+  if(!sm) return;
+  skelHelper=new THREE.SkeletonHelper(m);
+  skelHelper.material.color=new THREE.Color(0xffe14d);
+  skelHelper.material.depthTest=false;
+  skelHelper.visible=showSkel;
+  scene.add(skelHelper);
+  const sphGeo=new THREE.SphereGeometry(0.018,10,8);
+  const sphMat=new THREE.MeshBasicMaterial({color:0xff2d55,depthTest:false});
+  sm.skeleton.bones.forEach(b=>{
+    const s=new THREE.Mesh(sphGeo,sphMat);
+    s.visible=showSkel; s.userData.jointViz=true;
+    b.add(s);
+  });
+}
+function setSkel(on){
+  showSkel=on;
+  document.getElementById('skel').classList.toggle('on',on);
+  if(skelHelper)skelHelper.visible=on;
+  if(model)model.traverse(o=>{ if(o.userData&&o.userData.jointViz)o.visible=on; });
+  invalidate();
+}
+
+// モーション専用glb(メッシュを持たずanimationsのみ)を、ロード済みモデルに
+// ボーン名で紐付けて追加する。three.jsのAnimationMixer/PropertyBindingはトラックを
+// ノード名で解決するため、モデルとモーションが別ファイルでも同じボーン名を使っている
+// 限りそのまま適用できる(bake_motion.pyが吐くmotion_*.glbはpipeline_lib/skeleton.pyの
+// BONES名をそのまま使っているため、model.glbのボーン名と常に一致する)。
+function addMotionClips(newClips,autoplay){
+  if(autoplay===undefined)autoplay=true;
+  if(!model){ document.getElementById('err').textContent='先にモデル(.glb)を読み込んでください'; return; }
+  if(!newClips || !newClips.length){ document.getElementById('err').textContent='このファイルにはモーションが含まれていません'; return; }
+  if(!mixer) mixer=new THREE.AnimationMixer(model);
+  const sel=document.getElementById('animSel');
+  const firstNew=clips.length;
+  newClips.forEach(cl=>{
+    const idx=clips.length; clips.push(cl);
+    const o=document.createElement('option');o.value=idx;o.textContent=cl.name||('motion '+(idx+1));sel.appendChild(o);
+  });
+  document.getElementById('animRow').style.display='flex';
+  document.getElementById('err').textContent='';
+  // ★ 手動で「＋」から読み込んだ時は追加したクリップをすぐ自動再生してプレビューする
+  // (autoplay=true、従来の挙動)。起動時の自動読込(tryAutoLoad)では複数の
+  // motion_*.glbを次々addMotionClipsするため自動再生すると最後に届いたものが
+  // 勝手に再生され続けてしまう——初期状態は常に静止(モーション未設定)のまま
+  // にしたいので、その経路ではautoplay=falseを渡し、ここではsetClipを呼ばない
+  // (プルダウンには追加されるが、ユーザーが選択して「再生」を押すまでは動かない)。
+  if(autoplay)setClip(firstNew,true);
+}
+let lastModelBuf=null;   // ダウンロードボタン用: 直近に読み込んだ「モデル本体」のGLBバイト列
+function loadGLB(buf,onLoaded,autoplayMotion){
+  new THREE.GLTFLoader().parse(buf,'',function(gltf){
+    let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
+    if(!hasMesh){ addMotionClips(gltf.animations||[],autoplayMotion); if(onLoaded)onLoaded(); return; }
+    lastModelBuf=buf;
+    clearModel();
+    model=gltf.scene; root.add(model);
+    model.traverse(o=>{ if(o.isMesh&&o.material){
+      const old=o.material;
+      const flatMat=new THREE.MeshBasicMaterial({map:old.map||null,transparent:!!old.transparent,
+        alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
+      if(flatMat.map)flatMat.map.encoding=THREE.sRGBEncoding;
+      const toonMat=new THREE.MeshToonMaterial({map:old.map||null,gradientMap:toonGradient,
+        transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
+      if(toonMat.map)toonMat.map.encoding=THREE.sRGBEncoding;
+      o.userData.flatMat=flatMat;o.userData.toonMat=toonMat;
+      o.material=celOn?toonMat:flatMat;
+      if(o.isSkinnedMesh){
+        const outline=buildOutline(o,outlineThickness(parseInt(document.getElementById('outlineStrength').value)));
+        outline.visible=outlineOn;
+        model.add(outline);
+        o.userData.outline=outline;
+      }
+    }});
+    document.getElementById('drop').classList.add('hide');
+    document.getElementById('bar').classList.add('show');
+    buildSkelViz(model);
+    // model.glb自体は通常アニメを持たない(2026-07-02〜、モデル/モーション分割出力)。
+    // 旧来の「1ファイルにモデル+アニメ埋め込み」glbとの後方互換のため、埋め込みが
+    // あればそのまま使う。モーションは基本的にモーション専用glbを別途「＋」で追加する。
+    clips=gltf.animations||[];
+    const sel=document.getElementById('animSel');sel.innerHTML='';
+    document.getElementById('animRow').style.display='flex';
+    if(clips.length){
+      mixer=new THREE.AnimationMixer(model);
+      clips.forEach((cl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=cl.name||('motion '+(i+1));sel.appendChild(o);});
+      setClip(0,false);   // load but paused (initial stopped state)
+    }
+    document.getElementById('err').textContent='';
+    // center AFTER matrices/skeleton are initialized (next frames), device-independent
+    requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
+    invalidate();
+    if(onLoaded)onLoaded();
+  }, e=>{ document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e); });
+}
+function setClip(i,autoplay){
+  if(!mixer||!clips[i])return;
+  if(action)action.stop();
+  action=mixer.clipAction(clips[i]);action.reset();
+  playing=!!autoplay; action.paused=!playing; action.play();
+  const p=document.getElementById('play');
+  p.textContent=playing?'一時停止':'再生'; p.classList.toggle('on',playing);
+  invalidate();
+}
+
+// file
+const fileEl=document.getElementById('file');
+document.getElementById('pick').onclick=()=>fileEl.click();
+document.getElementById('load2').onclick=()=>fileEl.click();
+document.getElementById('loadMotion').onclick=()=>fileEl.click();
+fileEl.onchange=e=>{const f=e.target.files[0];if(f)read(f);};
+function read(f){const r=new FileReader();r.onload=()=>loadGLB(r.result);r.readAsArrayBuffer(f);}
+['dragover','drop'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+document.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f&&/\.(glb|gltf)$/i.test(f.name))read(f);});
+
+// 起動時オートロード: character_3d.htmlと同じ場所に model.glb / motion_<name>.glb が
+// コミットされていれば(GitHub Pages等でホストしている場合)自動で読み込む。
+// 無ければ404で静かに諦め、従来通りファイル選択/ドラッグ&ドロップの画面のまま
+// (file://で直接開いた場合はブラウザがローカルファイルのfetchをブロックすることが
+// あるが、その場合も同様に諦めて手動選択にフォールバックするだけで実害はない)。
+// ★初期状態は常に静止(モーション未設定): モーションは選択プルダウンに追加する
+// だけで自動再生はしない(autoplayMotion=false)。手動で「＋」ボタンから読み込んだ
+// 場合はすぐプレビュー再生したいのでそちらは従来通り自動再生のまま。
+const MOTION_NAMES=['idle','wave','moshimoshi','dance','idol','run'];
+// character_3d.htmlと同じ場所に置かれたmotion_<name>.glb(メッシュを持たず
+// ボーン階層+アニメーションのみ)を全種fetchし、既に読み込み済みのモデルへ
+// ボーン名で紐付けて追加する。tryAutoLoad(サンプルmodel.glb)・生成済みGLB
+// (IndexedDB経由)のどちらの読み込み後でも同じものを使う。
+function loadMotionClips(){
+  MOTION_NAMES.forEach(n=>{
+    fetch('motion_'+n+'.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
+      .then(mbuf=>loadGLB(mbuf,undefined,false)).catch(()=>{});
+  });
+}
+function tryAutoLoad(){
+  fetch('model.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); }).then(buf=>{
+    loadGLB(buf,loadMotionClips);
+  }).catch(()=>{
+    // サンプルmodel.glbが無い(コミットされていない等)場合は通常モードの
+    // アップロード画面にフォールバックする。
+    document.getElementById('modeChoice').classList.add('hide');
+    document.getElementById('drop').classList.remove('hide');
+  });
+}
+document.getElementById('modeSampleBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  tryAutoLoad();
+};
+document.getElementById('modeNormalBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  document.getElementById('drop').classList.remove('hide');
+};
+// 3DtoolJS: ランドマークツールの「モデル生成」ボタンからIndexedDB経由で渡された
+// 生成済みGLBがあれば最優先で読み込む(モード選択画面は出さない。読み込んだら
+// 消費して1回限りにし、次回の通常起動では改めてモード選択を出す)。
+(async function(){
+  try{
+    const buf = window.P3D && await P3D.loadGeneratedModel();
+    if(buf){
+      await P3D.clearGeneratedModel();
+      loadGLB(buf,loadMotionClips);
+      return;
+    }
+  }catch(e){ console.warn('generated model load failed', e); }
+  document.getElementById('modeChoice').classList.remove('hide');
+})();
+
+// interaction (pointer)
+// pointer tracking (supports 1-finger rotate + 2-finger pinch zoom)
+const ptrs=new Map(); let pinchDist=0;
+function dist2(){ const v=[...ptrs.values()]; const dx=v[0].x-v[1].x, dy=v[0].y-v[1].y; return Math.hypot(dx,dy); }
+cvs.addEventListener('pointerdown',e=>{ try{cvs.setPointerCapture(e.pointerId);}catch(_){}
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){dragging=true;lx=e.clientX;ly=e.clientY;}
+  else if(ptrs.size===2){dragging=false;pinchDist=dist2();}
+});
+cvs.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size>=2){
+    const d=dist2();
+    if(pinchDist>0){ camDist*=pinchDist/d; camDist=Math.max(fitDist*0.3,Math.min(fitDist*4,camDist)); cam.position.z=camDist; invalidate(); }
+    pinchDist=d;
+  } else if(dragging){
+    rotY+=(e.clientX-lx)*0.01; rotX+=(e.clientY-ly)*0.01; rotX=Math.max(-1.2,Math.min(1.2,rotX));
+    lx=e.clientX;ly=e.clientY; invalidate();
+  }
+});
+function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2)pinchDist=0; if(ptrs.size===0)dragging=false;
+  else if(ptrs.size===1){const v=[...ptrs.values()][0];dragging=true;lx=v.x;ly=v.y;} }
+cvs.addEventListener('pointerup',endPtr);
+cvs.addEventListener('pointercancel',endPtr);
+cvs.addEventListener('wheel',e=>{e.preventDefault();camDist*=(1+Math.sign(e.deltaY)*0.08);
+  camDist=Math.max(fitDist*0.3,Math.min(fitDist*4,camDist));cam.position.z=camDist;invalidate();},{passive:false});
+
+function setSpin(on){autoSpin=on;document.getElementById('spin').classList.toggle('on',on);invalidate();}
+document.getElementById('spin').onclick=()=>setSpin(!autoSpin);
+document.getElementById('skel').onclick=()=>setSkel(!showSkel);
+function setCel(on){
+  celOn=on;
+  document.getElementById('cel').classList.toggle('on',on);
+  if(model)model.traverse(o=>{
+    if(o.userData&&o.userData.flatMat){o.material=on?o.userData.toonMat:o.userData.flatMat;}
+  });
+  invalidate();
+}
+document.getElementById('cel').onclick=()=>setCel(!celOn);
+document.getElementById('celStrength').oninput=function(){ setToonGradientStrength(parseInt(this.value)); };
+setToonGradientStrength(parseInt(document.getElementById('celStrength').value));
+
+function rebuildOutlines(thickness){
+  if(!model)return;
+  model.traverse(o=>{
+    if(o.isSkinnedMesh&&o.userData.outline){
+      model.remove(o.userData.outline);
+      const newOut=buildOutline(o,thickness);
+      newOut.visible=outlineOn;
+      model.add(newOut);
+      o.userData.outline=newOut;
+    }
+  });
+  invalidate();
+}
+function setOutline(on){
+  outlineOn=on;
+  document.getElementById('outline').classList.toggle('on',on);
+  if(model)model.traverse(o=>{ if(o.userData&&o.userData.outline){o.userData.outline.visible=on;} });
+  invalidate();
+}
+document.getElementById('outline').onclick=()=>setOutline(!outlineOn);
+document.getElementById('outlineStrength').oninput=function(){ rebuildOutlines(outlineThickness(parseInt(this.value))); };
+
+let bgWhiteOn=false;
+function setBgWhite(on){
+  bgWhiteOn=on;
+  document.getElementById('bgWhite').classList.toggle('on',on);
+  scene.background=on?new THREE.Color(0xffffff):null;
+  invalidate();
+}
+document.getElementById('bgWhite').onclick=()=>setBgWhite(!bgWhiteOn);
+document.getElementById('download').onclick=()=>{
+  if(!lastModelBuf){ document.getElementById('err').textContent='ダウンロードできるモデルがありません'; return; }
+  const blob=new Blob([lastModelBuf],{type:'model/gltf-binary'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+};
+document.getElementById('backToLandmark').onclick=()=>{ location.href='landmark_tool.html'; };
+document.getElementById('reset').onclick=()=>{rotY=0.4;rotX=0.04;camDist=fitDist;cam.position.z=camDist;root.position.set(0,0,0);setSpin(false);};
+const PAN=0.12;  // pan step (camera position shift)
+document.getElementById('camUp').onclick=()=>{root.position.y+=PAN;invalidate();};
+document.getElementById('camDn').onclick=()=>{root.position.y-=PAN;invalidate();};
+document.getElementById('camL').onclick=()=>{root.position.x-=PAN;invalidate();};
+document.getElementById('camR').onclick=()=>{root.position.x+=PAN;invalidate();};
+document.getElementById('vFront').onclick=()=>{rotY=0;rotX=0.04;setSpin(false);};
+document.getElementById('vSide').onclick=()=>{rotY=Math.PI/2;rotX=0.04;setSpin(false);};
+document.getElementById('vBack').onclick=()=>{rotY=Math.PI;rotX=0.04;setSpin(false);};
+document.getElementById('animSel').onchange=function(){setClip(parseInt(this.value),playing);};
+document.getElementById('play').onclick=function(){ if(!action)return; playing=!playing;action.paused=!playing;
+  this.textContent=playing?'一時停止':'再生'; this.classList.toggle('on',playing); invalidate(); };
+
+const clock=new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const dt=clock.getDelta();
+  if(autoSpin){rotY+=0.6*dt;invalidate();}
+  if(mixer&&playing){mixer.update(dt);invalidate();}
+  if(needsRender){
+    root.rotation.set(rotX,rotY,0);
+    renderer.render(scene,cam);
+    needsRender=false;
+  }
+}
+tick();
+})();
+</script>
+</body></html>
