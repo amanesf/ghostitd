@@ -88,14 +88,14 @@
     <button class="btn" id="spin">自動回転</button>
     <button class="btn" id="reset">リセット</button>
     <button class="btn" id="skel">関節</button>
-    <button class="btn" id="bgWhite">背景白</button>
+    <button class="btn on" id="bgWhite">背景白</button>
     <button class="btn" id="load2">別のglb</button>
     <button class="btn" id="download">ダウンロード</button>
   </div>
   <div class="row">
-    <button class="btn on" id="cel" style="flex:0 0 80px">セル影</button>
+    <button class="btn" id="cel" style="flex:0 0 80px">セル影</button>
     <div class="slideWrap"><input type="range" id="celStrength" min="0" max="100" value="70"></div>
-    <button class="btn on" id="outline" style="flex:0 0 80px">輪郭線</button>
+    <button class="btn" id="outline" style="flex:0 0 80px">輪郭線</button>
     <div class="slideWrap"><input type="range" id="outlineStrength" min="0" max="100" value="40"></div>
   </div>
   <div class="row" id="animRow" style="display:none">
@@ -116,6 +116,7 @@ const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true,alpha:true,pow
 renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
 renderer.outputEncoding=THREE.sRGBEncoding;
 const scene=new THREE.Scene();
+scene.background=new THREE.Color(0xffffff);
 const cam=new THREE.PerspectiveCamera(35,innerWidth/innerHeight,0.01,100);
 let camDist=2.6; cam.position.set(0,0,camDist);
 const root=new THREE.Group(); scene.add(root);
@@ -149,7 +150,7 @@ function setToonGradientStrength(pct){ // pct 0..100
   toonGradient.needsUpdate=true;
   invalidate();
 }
-let celOn=true, outlineOn=true;
+let celOn=false, outlineOn=false;
 function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; } // pct 0..100 -> 0.0005..0.01
 // --- 輪郭線(アウトライン)メッシュ生成: 法線方向に頂点を押し出した黒い裏面メッシュ ---
 function buildOutline(mesh,thickness){
@@ -444,7 +445,7 @@ function setOutline(on){
 document.getElementById('outline').onclick=()=>setOutline(!outlineOn);
 document.getElementById('outlineStrength').oninput=function(){ rebuildOutlines(outlineThickness(parseInt(this.value))); };
 
-let bgWhiteOn=false;
+let bgWhiteOn=true;
 function setBgWhite(on){
   bgWhiteOn=on;
   document.getElementById('bgWhite').classList.toggle('on',on);
