@@ -258,6 +258,16 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
   var J=new Uint16Array(n*4), W=new Float32Array(n*4);
   var idxmap = subset.map(function(b){ return P3D.BIDX[b]; });
   var dists=new Float64Array(m);
+  // 首/頭の座標が分かる場合のみ、鎖骨などへの誤割り当てを補正する(下記参照)。
+  // 閾値はキャラのスケールに比例させる: Y_GATE=首の高さ、DIST_THRESH=頭〜腰の距離。
+  var neckSubIdx = subset.indexOf('neck'), headSubIdx = subset.indexOf('head');
+  var yGate=null, distThresh=null;
+  if(neckSubIdx>=0 && headSubIdx>=0 && pivots.hips){
+    yGate = pivots.neck[1];
+    var hp=pivots.hips, hd=pivots.head;
+    var dhx=hd[0]-hp[0], dhy=hd[1]-hp[1], dhz=hd[2]-hp[2];
+    distThresh = Math.sqrt(dhx*dhx+dhy*dhy+dhz*dhz);
+  }
   for(var v=0; v<n; v++){
     var vx=V[v*3], vy=V[v*3+1], vz=V[v*3+2];
     for(var i2=0;i2<m;i2++){
@@ -295,8 +305,20 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     // その骨100%の剛体ウェイトに丸める。
     var domIdx=0; for(var dci=1;dci<4;dci++){ if(W[v*4+dci]>W[v*4+domIdx])domIdx=dci; }
     var domBone=P3D.BONES[J[v*4+domIdx]];
+    var rigidBone=null;
     if(domBone==='neck'||domBone==='head'){
-      var domJ=J[v*4+domIdx];
+      rigidBone=domBone;
+    }else if(yGate!==null && vy>yGate && Math.min(dists[neckSubIdx],dists[headSubIdx])<distThresh){
+      // 逆に、首/頭が優勢にならなかった頂点でも、顔・頬・耳のように首の高さより
+      // 上にあって首/頭のすぐ近く(体格に比例した範囲内)にあるものは、
+      // 実際には顔の一部なのに鎖骨/二の腕の端点の方がわずかに近いという理由だけで
+      // 誤って腕側に割り当てられてしまうことがある(頬が肩や肘にくっついて
+      // 見える不具合の原因)。首の高さより上・かつ首/頭にごく近い頂点は
+      // 首/頭のうち近い方へ強制的に寄せる。
+      rigidBone = dists[neckSubIdx]<dists[headSubIdx] ? 'neck' : 'head';
+    }
+    if(rigidBone){
+      var domJ = rigidBone==='neck' ? idxmap[neckSubIdx] : idxmap[headSubIdx];
       J[v*4]=domJ;J[v*4+1]=domJ;J[v*4+2]=domJ;J[v*4+3]=domJ;
       W[v*4]=1;W[v*4+1]=0;W[v*4+2]=0;W[v*4+3]=0;
     }
