@@ -894,6 +894,10 @@
   "alpha_dilate": 9,
   "band_h": 220,
   "band_overlap": 40,
-  "kb_per_face": 200
+  "kb_per_face": 200,
+  "back_offset_x": 12,
+  "back_offset_y": 0,
+  "side_offset_x": 0,
+  "side_offset_y": 0
  }
 }
