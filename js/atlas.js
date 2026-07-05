@@ -23,8 +23,12 @@ function loadSeamRatios(seamAngles){
 P3D.loadSeamRatios = loadSeamRatios;
 
 // アクセサリー個別の境目角度(seamAngles中の"acc:"+名前キー)をMapにする。
-// 名前が付いていないアクセサリーはボーン側の角度にフォールバックする
-// (loadSeamRatios同様、既定tan45°=1)。
+// アクセサリーは常にこのMapの値だけを使う(未設定なら既定tan45°=1)。
+// スキニング先ボーン(head/hipsなど)の角度は絶対に継承しない
+// (★2026-07-05: 以前はMapに無ければボーン側の角度にフォールバックしていたが、
+// 「側面画像を使う」のON/OFFをアクセサリー個別に設定していない限りボーン側の
+// 設定を無条件に引き継いでしまい、髪やスカートがボーン側の設定(側面無効)に
+// 引きずられて側面画像が使われない不具合の原因になっていた)。
 function loadAccessorySeamRatios(seamAngles){
   var map=new Map();
   if(!seamAngles) return map;
@@ -238,12 +242,17 @@ function stageAtlasBake(opts){
   var sideS=new Float64Array(nV), frontS=new Float64Array(nV);
   var noSide=new Uint8Array(nV); // 1=このパーツは側面画像を使わない(境目タブのチェックで指定)
   for(var sv=0; sv<nV; sv++){
-    var ratioV = (accOwner[sv] && accSeamRatios.has(accOwner[sv]))
-      ? accSeamRatios.get(accOwner[sv]) : seamRatios[J[sv*4]];
+    // ★2026-07-05: アクセサリー頂点(accOwnerが付いている)はスキニング先ボーンの
+    // 境目設定を継承しない。アクセサリー個別のMapに値が無ければ既定値
+    // (tan45°=1、側面を使う)を使う(ボーン側がどんな設定でも無関係)。
+    var ratioV = accOwner[sv]
+      ? (accSeamRatios.has(accOwner[sv]) ? accSeamRatios.get(accOwner[sv]) : 1.0)
+      : seamRatios[J[sv*4]];
     sideS[sv]=Math.abs(allN[sv*3]) - ratioV*Math.abs(allN[sv*3+2]);
     frontS[sv]=allN[sv*3+2];
-    noSide[sv] = (accOwner[sv] && accSeamNoSide.has(accOwner[sv]))
-      ? 1 : seamNoSideArr[J[sv*4]];
+    noSide[sv] = accOwner[sv]
+      ? (accSeamNoSide.has(accOwner[sv]) ? 1 : 0)
+      : seamNoSideArr[J[sv*4]];
   }
   function smoothField(S, iters){
     var cur=Float64Array.from(S), tmp=new Float64Array(nV);
