@@ -238,8 +238,9 @@ P3D.computePivots = computePivots;
 // ウェイトを決める(nearest-bone-segment方式)。
 // V: Float32Array(N*3), pivots:{bone:[x,y,z]}, boneSubset: 対象ボーン名配列, k: 近傍数
 // 戻り値: {J:Uint16Array(N*4), W:Float32Array(N*4)}
-function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
+function nearestBoneSegmentSkin(V, pivots, boneSubset, k, rigidSoftWidth){
   k = k || 4;
+  rigidSoftWidth = rigidSoftWidth || 0;
   var subset = boneSubset.filter(function(b){ return pivots[b]; });
   var m=subset.length;
   k=Math.min(k,m);
@@ -336,6 +337,16 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
       joints.push({center:cl, r2:shR*shR, mask:shMask});
     });
   }
+  // 手足の各セグメント本体(太もも/すね/二の腕/前腕)が優勢な頂点は、複数ボーンで
+  // ブレンドすると「しなる」ように見えるため単一ボーンの剛体ウェイトに近づける。
+  // rigidSoftWidth=0(既定)なら従来通りRIGID_DOM_CENTERでの即切り替え(硬い境目)。
+  // 0より大きくすると、優勢度が[RIGID_LOW, RIGID_HIGH]の間で「通常のブレンド」と
+  // 「完全剛体」を線形補間し、剛体になり切るまでの移行をなだらかにする(関節から
+  // どれくらいの距離で完全剛体になるかを調整するイメージ)。
+  var RIGID_DOM_CENTER = 0.55;
+  var RIGID_LOW = Math.max(0, RIGID_DOM_CENTER - rigidSoftWidth/2);
+  var RIGID_HIGH = Math.min(1, RIGID_DOM_CENTER + rigidSoftWidth/2);
+  var RIGID_SHAFT_BONES = {thigh_L:1,thigh_R:1,shin_L:1,shin_R:1,upperarm_L:1,upperarm_R:1,forearm_L:1,forearm_R:1};
   for(var v=0; v<n; v++){
     var vx=V[v*3], vy=V[v*3+1], vz=V[v*3+2];
     for(var i2=0;i2<m;i2++){
@@ -392,14 +403,6 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     // 一部がその骨に引っ張られてちぎれたように見えるため、髪(アクセサリー)を
     // 頭に完全固定しているのと同じ考え方で、首/頭が最大ウェイトの頂点は
     // その骨100%の剛体ウェイトに丸める。
-    // 同じ理由で、手足の各セグメント本体(太もも/すね/二の腕/前腕)が優勢な頂点も
-    // 複数ボーンでブレンドすると「しなる」ように見える(曲げ角度が関節だけでなく
-    // 肉の途中にも分散してしまうため)。上のリマップで既に正しい近位ボーンに
-    // なっているので、ここでは優勢度が高い(=関節の境目からもう十分離れている)
-    // 頂点だけを単一ボーンの剛体ウェイトに丸める(境目自体は裂け目を避けるため
-    // ブレンドのまま残す)。
-    var RIGID_DOM_THRESH = 0.55;
-    var RIGID_SHAFT_BONES = {thigh_L:1,thigh_R:1,shin_L:1,shin_R:1,upperarm_L:1,upperarm_R:1,forearm_L:1,forearm_R:1};
     var domIdx=0; for(var dci=1;dci<4;dci++){ if(W[v*4+dci]>W[v*4+domIdx])domIdx=dci; }
     var domBone=P3D.BONES[J[v*4+domIdx]];
     var rigidJ=null;
@@ -411,15 +414,30 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
       // 一部なのに鎖骨/二の腕の端点の方がわずかに近いという理由だけで誤って
       // 腕側に割り当てられてしまうことがある(頬が肩や肘にくっついて見える
       // 不具合の原因)。首の高さより上・かつ首/頭にごく近い頂点は首/頭のうち
-      // 近い方へ強制的に寄せる。上のRIGID_SHAFT_BONES判定より先に行うことで、
+      // 近い方へ強制的に寄せる。下のRIGID_SHAFT_BONES判定より先に行うことで、
       // 顎など肩ボーンの優勢度がたまたま高い頂点が誤って腕側に剛体化されるのを防ぐ。
       rigidJ = dists[neckSubIdx]<dists[headSubIdx] ? idxmap[neckSubIdx] : idxmap[headSubIdx];
-    }else if(RIGID_SHAFT_BONES[domBone] && W[v*4+domIdx]>=RIGID_DOM_THRESH){
-      rigidJ=J[v*4+domIdx];
     }
     if(rigidJ!==null){
       J[v*4]=rigidJ;J[v*4+1]=rigidJ;J[v*4+2]=rigidJ;J[v*4+3]=rigidJ;
       W[v*4]=1;W[v*4+1]=0;W[v*4+2]=0;W[v*4+3]=0;
+    }else if(RIGID_SHAFT_BONES[domBone] && W[v*4+domIdx]>RIGID_LOW){
+      // 同じ理由で、手足の各セグメント本体(太もも/すね/二の腕/前腕)が優勢な頂点も
+      // 複数ボーンでブレンドすると「しなる」ように見える(曲げ角度が関節だけでなく
+      // 肉の途中にも分散してしまうため)。上のリマップで既に正しい近位ボーンに
+      // なっているので、ここでは優勢度に応じて通常のブレンドと完全剛体を線形補間
+      // する(rigidSoftWidthが0なら従来通りRIGID_DOM_CENTERでの即切り替え)。
+      var rigidT = (RIGID_HIGH>RIGID_LOW) ? Math.min(1,(W[v*4+domIdx]-RIGID_LOW)/(RIGID_HIGH-RIGID_LOW)) : 1;
+      if(rigidT>=1){
+        var rj=J[v*4+domIdx];
+        J[v*4]=rj;J[v*4+1]=rj;J[v*4+2]=rj;J[v*4+3]=rj;
+        W[v*4]=1;W[v*4+1]=0;W[v*4+2]=0;W[v*4+3]=0;
+      }else if(rigidT>0){
+        for(var lc=0;lc<4;lc++){
+          var targetW = (lc===domIdx) ? 1 : 0;
+          W[v*4+lc] = W[v*4+lc]*(1-rigidT) + targetW*rigidT;
+        }
+      }
     }
   }
   return {J:J, W:W};

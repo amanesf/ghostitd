@@ -367,6 +367,7 @@ const DEFAULT_GEN_PARAMS={
   kb_per_face:200,
   back_offset_x:0, back_offset_y:0,
   side_offset_x:0, side_offset_y:0,
+  rigid_soft_width:0,
 };
 // group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
 // (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
@@ -427,6 +428,8 @@ const PARAM_META=[
   desc:"側面写真の奥行き(前後)方向の基準ズレを補正する。正の値で奥行きの参照位置を右へ、負の値で左へずらす。"},
  {group:"背面/側面ズレ補正", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
   desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"スキニング(関節の硬さ)", key:"rigid_soft_width", label:"股関節/肩/肘/膝の剛体化の柔らかさ", type:"number", min:0, max:0.8, step:0.05, unit:"",
+  desc:"太もも/二の腕等は本来しならず剛体に近い方が自然だが、関節の境目をいきなり切り替えると裂けて見えることがある。0だと従来通り境目で即座に完全剛体へ切り替わる(硬い境目)。上げるほど、関節に近いところから完全剛体になるまでの移行がなだらかになる(柔らかい/しなりが残る範囲が広がる代わりに境目の裂けが目立ちにくくなる)。"},
 ];
 let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
 function renderParamsPanel(){

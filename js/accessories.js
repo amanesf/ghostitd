@@ -152,7 +152,7 @@ function stageAccessories(opts){
       var bone = bones[0] || 'head';
       skin = P3D.rigidSkin(V, bone);
     }else{
-      skin = P3D.nearestBoneSegmentSkin(V, opts.pivots, bones.length?bones:P3D.BONES, 4);
+      skin = P3D.nearestBoneSegmentSkin(V, opts.pivots, bones.length?bones:P3D.BONES, 4, gp.rigid_soft_width);
     }
     allV.push(V); allN.push(Nv);
     for(var i=0;i<F.length;i++) allF.push(F[i]+voff);
