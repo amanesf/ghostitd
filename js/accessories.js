@@ -54,8 +54,8 @@ P3D.localAlpha = localAlpha;
 function frontPointsToModel(pts, CX, SCALE, YBOT){
   return pts.map(function(p){ return [(p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
 }
-function backPointsToModel(pts, CXBack, SCALE, YBOT){
-  return pts.map(function(p){ return [(CXBack-p[0])/SCALE, (YBOT-p[1])/SCALE]; });
+function backPointsToModel(pts, CXBack, SCALEBack, YBOTBack){
+  return pts.map(function(p){ return [(CXBack-p[0])/SCALEBack, (YBOTBack-p[1])/SCALEBack]; });
 }
 function sidePointsToModel(pts, SIDE_REF, SCALE, SYTOP, SYBOT){
   return pts.map(function(p){ return [(p[0]-SIDE_REF)/SCALE, 1.0-(p[1]-SYTOP)/(SYBOT-SYTOP)]; });
@@ -87,6 +87,8 @@ function stageAccessories(opts){
   // 背面領域の座標変換には呼び出し側(pipeline.js)が背面シルエット自身から
   // 求めたCXBackを使う(無ければ前面ミラー(W-CX)にフォールバック)。
   var CXBack = (opts.CXBack!==undefined && opts.CXBack!==null) ? opts.CXBack : (W-CX);
+  var SCALEBack = (opts.SCALEBack!==undefined && opts.SCALEBack!==null) ? opts.SCALEBack : SCALE;
+  var YBOTBack = (opts.YBOTBack!==undefined && opts.YBOTBack!==null) ? opts.YBOTBack : YBOT;
   var SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
   var accs = opts.accs || [];
   if(!accs.length) return null;
@@ -105,7 +107,7 @@ function stageAccessories(opts){
       frontPolygon = frontPointsToModel(fr.points, CX, SCALE, YBOT);
       var bb=bboxOf(frontPolygon); mxMin=bb[0];mxMax=bb[1];myMin=bb[2];myMax=bb[3];
     }else if(bk && bk.points && bk.points.length){
-      backPolygon = backPointsToModel(bk.points, CXBack, SCALE, YBOT);
+      backPolygon = backPointsToModel(bk.points, CXBack, SCALEBack, YBOTBack);
       var bb2=bboxOf(backPolygon); mxMin=bb2[0];mxMax=bb2[1];myMin=bb2[2];myMax=bb2[3];
     }else{
       console.log("  accessories: skip", name, "(front/back範囲なし)");
@@ -120,7 +122,7 @@ function stageAccessories(opts){
 
     var faAcc = localAlpha(opts.frontRgba, W, H, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
                            gp.white_thr, gp.band_h, gp.band_overlap);
-    var baAcc = localAlpha(opts.backRgba, W, H, CXBack-mxMax*SCALE, YBOT-myMax*SCALE, CXBack-mxMin*SCALE, YBOT-myMin*SCALE,
+    var baAcc = localAlpha(opts.backRgba, W, H, CXBack-mxMax*SCALEBack, YBOTBack-myMax*SCALEBack, CXBack-mxMin*SCALEBack, YBOTBack-myMin*SCALEBack,
                            gp.white_thr, gp.band_h, gp.band_overlap);
     var sx0=SIDE_REF+mzMin*SCALE, sx1=SIDE_REF+mzMax*SCALE;
     var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP), sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP);
@@ -131,7 +133,7 @@ function stageAccessories(opts){
       faCont: gp.subpixel ? opts.frontCont : null,
       baCont: gp.subpixel ? opts.backCont : null,
       saCont: gp.subpixel ? opts.sideCont : null,
-      SCALE:SCALE, CX:CX, CXBack:CXBack, YBOT:YBOT, SYTOP:SYTOP, SYBOT:SYBOT, SIDE_REF:SIDE_REF,
+      SCALE:SCALE, CX:CX, CXBack:CXBack, SCALEBack:SCALEBack, YBOT:YBOT, YBOTBack:YBOTBack, SYTOP:SYTOP, SYBOT:SYBOT, SIDE_REF:SIDE_REF,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
       vox: gp.acc_vox, psqHull: gp.psq_hull, trackGap: gp.track_gap, trackWin: gp.track_win,
       smoothIters: gp.acc_smooth_iters,
