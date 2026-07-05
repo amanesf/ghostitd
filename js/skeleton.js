@@ -368,11 +368,22 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     // 一部がその骨に引っ張られてちぎれたように見えるため、髪(アクセサリー)を
     // 頭に完全固定しているのと同じ考え方で、首/頭が最大ウェイトの頂点は
     // その骨100%の剛体ウェイトに丸める。
+    // 同じ理由で、太もも本体(shin_L/R)・二の腕本体(forearm_L/R)が優勢な頂点も
+    // 複数ボーンでブレンドすると「しなる」ように見える(曲げ角度が関節だけでなく
+    // 肉の途中にも分散してしまうため)。この2部位はブレンドではなく単一ボーンの
+    // 剛体回転にした方が自然に見えるため、同様に丸める。ただし股関節/肩の
+    // 付け根そのもの(まだ優勢度が低い=hips側ともかなり混ざっている頂点)まで
+    // 無条件に丸めると、そこだけ隣(hips/torso側)との間に裂け目が見えてしまう
+    // ため、既にある程度優勢(RIGID_DOM_THRESH以上)な頂点だけを丸め、関節の
+    // 境目はブレンドのまま滑らかに繋ぐ。
+    var RIGID_DOM_THRESH = 0.55;
     var domIdx=0; for(var dci=1;dci<4;dci++){ if(W[v*4+dci]>W[v*4+domIdx])domIdx=dci; }
     var domBone=P3D.BONES[J[v*4+domIdx]];
-    var rigidBone=null;
+    var rigidJ=null;
     if(domBone==='neck'||domBone==='head'){
-      rigidBone=domBone;
+      rigidJ=J[v*4+domIdx];
+    }else if((domBone==='shin_L'||domBone==='shin_R'||domBone==='forearm_L'||domBone==='forearm_R') && W[v*4+domIdx]>=RIGID_DOM_THRESH){
+      rigidJ=J[v*4+domIdx];
     }else if(yGate!==null && vy>yGate && Math.min(dists[neckSubIdx],dists[headSubIdx])<distThresh){
       // 逆に、首/頭が優勢にならなかった頂点でも、顔・頬・耳のように首の高さより
       // 上にあって首/頭のすぐ近く(体格に比例した範囲内)にあるものは、
@@ -380,11 +391,10 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
       // 誤って腕側に割り当てられてしまうことがある(頬が肩や肘にくっついて
       // 見える不具合の原因)。首の高さより上・かつ首/頭にごく近い頂点は
       // 首/頭のうち近い方へ強制的に寄せる。
-      rigidBone = dists[neckSubIdx]<dists[headSubIdx] ? 'neck' : 'head';
+      rigidJ = dists[neckSubIdx]<dists[headSubIdx] ? idxmap[neckSubIdx] : idxmap[headSubIdx];
     }
-    if(rigidBone){
-      var domJ = rigidBone==='neck' ? idxmap[neckSubIdx] : idxmap[headSubIdx];
-      J[v*4]=domJ;J[v*4+1]=domJ;J[v*4+2]=domJ;J[v*4+3]=domJ;
+    if(rigidJ!==null){
+      J[v*4]=rigidJ;J[v*4+1]=rigidJ;J[v*4+2]=rigidJ;J[v*4+3]=rigidJ;
       W[v*4]=1;W[v*4+1]=0;W[v*4+2]=0;W[v*4+3]=0;
     }
   }
