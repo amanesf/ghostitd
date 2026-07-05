@@ -156,19 +156,14 @@ async function runPipeline(state, onProgress){
   var core = P3D.stageCore(alphaFull.side, sizes.side.w, sizes.side.h, prof.YTOP, prof.YBOT);
   var SCALE = prof.YBOT-prof.YTOP;
   // ★2026-07-05: 背面画像は前面画像と別に撮影/作画されるため、シルエットの水平
-  // 中心(CX)だけでなく縦横の拡大率(SCALE=身長のpx数)も前面と厳密に一致すると
-  // は限らない(実測で共に数%規模のズレが起きうる)。CXだけ補正してSCALEは
-  // 前面のものを流用すると、体の中心に近い部分(誤差は小さい)ではズレが
-  // 目立たないが、腕や裾など中心から離れた部分ほど誤差が拡大して見える
-  // (誤差 ≈ 中心からの距離 × SCALEの食い違い)。背面シルエット自身から
-  // CX/YTOP/YBOT(=SCALE)を独立に求め、背面の投影/彫り出しにはこちらを使う。
+  // 中心が前面のCXと厳密に一致するとは限らない(実測で数%規模のズレが起きうる)。
+  // 一致すると仮定して前面のCXをミラーしてしまうと、背面テクスチャ全体が
+  // 一定量だけ左右にズレて見える(継ぎ目のズレではなく体全体のズレになる)。
+  // 背面シルエット自身から同じ方法でCXを求め、背面の投影/彫り出しにはこちらを使う。
   var backProfOnly = P3D.frontProfileOnly(alphaFull.back, sizes.back.w, sizes.back.h);
   var CX_BACK = backProfOnly.CX;
-  var YBOT_BACK = backProfOnly.YBOT;
-  var SCALE_BACK = backProfOnly.YBOT - backProfOnly.YTOP;
   console.log("  profile: CX",prof.CX,"YTOP",prof.YTOP,"YBOT",prof.YBOT,"SIDE_REF",core.SIDE_REF,
-    "/ CX_BACK",CX_BACK,"YBOT_BACK",YBOT_BACK,"SCALE_BACK",SCALE_BACK,
-    "(front SCALE",SCALE,")");
+    "/ CX_BACK",CX_BACK,"(mirror-assumed would be",sizes.front.w-prof.CX,")");
   await tick();
 
   // ---------- landmarks/skeleton ----------
@@ -204,8 +199,7 @@ async function runPipeline(state, onProgress){
     frontAlpha:frontAlpha, backAlpha:backAlpha, sideAlpha:sideAlpha,
     faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
     frontCont:frontCont, backCont:backCont, sideCont:sideCont,
-    SCALE:SCALE, CX:prof.CX, CXBack:CX_BACK, SCALEBack:SCALE_BACK, YBOT:prof.YBOT, YBOTBack:YBOT_BACK,
-    SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
+    SCALE:SCALE, CX:prof.CX, CXBack:CX_BACK, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
     pivots:pivots, gp:gp,
   });
   await tick();
@@ -218,8 +212,7 @@ async function runPipeline(state, onProgress){
       accs: state.accessories,
       frontRgba: rgbaFull.front, backRgba: rgbaFull.back, sideRgba: rgbaFull.side,
       W: sizes.front.w, H: sizes.front.h,
-      SCALE:SCALE, CX:prof.CX, CXBack:CX_BACK, SCALEBack:SCALE_BACK, YBOT:prof.YBOT, YBOTBack:YBOT_BACK,
-      SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
+      SCALE:SCALE, CX:prof.CX, CXBack:CX_BACK, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
       frontCont:frontCont, backCont:backCont, sideCont:sideCont,
       pivots:pivots, gp:gp,
     });
@@ -234,8 +227,7 @@ async function runPipeline(state, onProgress){
   // より先にstageAtlasBakeを呼ぶ(以前はbuildAtlasCanvasが先だった)。
   report("atlas_bake(テクスチャベイク)");
   var bake = P3D.stageAtlasBake({
-    W:sizes.front.w, H:sizes.front.h, SCALE:SCALE, CX:prof.CX, CXBack:CX_BACK, SCALEBack:SCALE_BACK,
-    YBOT:prof.YBOT, YBOTBack:YBOT_BACK,
+    W:sizes.front.w, H:sizes.front.h, SCALE:SCALE, CX:prof.CX, CXBack:CX_BACK, YBOT:prof.YBOT,
     SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
     bodyV:body.V, bodyN:body.N, bodyF:body.F, bodyJ:body.J, bodyW:body.W,
     accV: acc?acc.V:null, accN: acc?acc.N:null, accF: acc?acc.F:null,

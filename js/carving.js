@@ -355,13 +355,6 @@ function carveRegion(opts){
   // 背面シルエット自身から求めたCXBackを渡してきた場合はそれを使い、無ければ
   // 従来通り前面基準のミラー(faW-CX)にフォールバックする。
   var CXBack = (opts.CXBack!==undefined && opts.CXBack!==null) ? opts.CXBack : (faW-CX);
-  // ★2026-07-05: CXだけでなくSCALE(身長のpx数)も前面/背面で食い違いうる。
-  // 前面のSCALE/YBOTを背面にも流用すると、体の中心に近い場所では誤差が
-  // 小さくて目立たないが、腕や裾のように中心から離れるほど誤差(mesh_x×
-  // SCALEの食い違い)が拡大して見える。呼び出し側が背面シルエット自身から
-  // 求めたSCALEBack/YBOTBackを渡してきた場合はそれを使う。
-  var SCALEBack = (opts.SCALEBack!==undefined && opts.SCALEBack!==null) ? opts.SCALEBack : SCALE;
-  var YBOTBack = (opts.YBOTBack!==undefined && opts.YBOTBack!==null) ? opts.YBOTBack : YBOT;
   var mxB=opts.mxBounds, myB=opts.myBounds, mzB=opts.mzBounds;
   var vox=opts.vox, psqHull=opts.psqHull, trackGap=opts.trackGap, trackWin=opts.trackWin;
   var smoothIters=opts.smoothIters||0;
@@ -378,10 +371,9 @@ function carveRegion(opts){
 
   function rowOf1d(arr, w, y){ return arr.subarray(y*w, y*w+w); }
 
-  var fy=new Int32Array(ny), byBack=new Int32Array(ny), spy=new Int32Array(ny);
+  var fy=new Int32Array(ny), spy=new Int32Array(ny);
   for(var iy0=0;iy0<ny;iy0++){
     fy[iy0]=Math.min(Math.max(Math.round(YBOT-my[iy0]*SCALE),0),faH-1);
-    byBack[iy0]=Math.min(Math.max(Math.round(YBOTBack-my[iy0]*SCALEBack),0),faH-1);
     var v_=1.0-my[iy0];
     spy[iy0]=Math.min(Math.max(Math.round(SYTOP+v_*(SYBOT-SYTOP)),0),saH-1);
   }
@@ -392,11 +384,11 @@ function carveRegion(opts){
   // ---- 1) 行ごとの幅セグメント(front/back)、行トラッキング+中央値フィルタ ----
   var tracks=[]; // {rows:[],cx:[],hw:[],lastIy,lastCx}
   for(var iy=0; iy<ny; iy++){
-    var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, byBack[iy]);
+    var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, fy[iy]);
     var frPx = faCont ? C.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : C.findRuns(faRow);
-    var brPx = baCont ? C.findRunsSubpixel(baRow, rowOf1d(baCont,faW,byBack[iy]), whiteThr) : C.findRuns(baRow);
+    var brPx = baCont ? C.findRunsSubpixel(baRow, rowOf1d(baCont,faW,fy[iy]), whiteThr) : C.findRuns(baRow);
     var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
-    var br=brPx.map(function(pq){ return [(CXBack-pq[1])/SCALEBack, (CXBack-pq[0])/SCALEBack]; });
+    var br=brPx.map(function(pq){ return [(CXBack-pq[1])/SCALE, (CXBack-pq[0])/SCALE]; });
     var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
     // ★2026-07-04: アクセサリー(ポリゴン指定あり)では、front/backの絵柄の
     // 描かれ方が行単位で食い違う(片方だけ描線が途切れる等)と交差が空になり
