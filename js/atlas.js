@@ -97,9 +97,12 @@ P3D.buildAtlasCanvas = buildAtlasCanvas;
  *     "acc:"+名前キーでアクセサリー個別指定も可)
  *   seamSmoothIters: 境界線平滑化の反復回数(既定8、0で平滑化なし=法線そのままの
  *     ギザギザ境界、大きくするほど境界線が滑らかな曲線になる)
- *   colorGradWidth: 色のディザ(擬似)グラデーション幅(既定0=無効)。0より大きいと
- *     境目付近の帯の中でfront/side面をノイズ混在させ、離れて見ると色がなめらかに
- *     混ざって見えるようにする(GLB単一UVでは本物の色ブレンドはできないため)
+ *   colorGradWidth: 色グラデーション(境界ぼかし)の幅(既定0=無効)。0より大きいと
+ *     境目付近の帯の中で、実際にfront/side(および正面/背面)の写真ピクセルを
+ *     角度ベースの重みで数値的に混ぜ合わせ、front/back/sideキャンバスへ直接
+ *     焼き込む(ディザ/ノイズではない本物の色ブレンド)。
+ *   frontCanvas,backCanvas,sideCanvas: bleed済みの生キャンバス(colorGradWidth>0の
+ *     ときだけ使用。ピクセルを直接書き換える)
  * }
  * 戻り値: {restV,norm,UV,J,W,F} (mesh_bake.npz相当)
  */
@@ -112,6 +115,58 @@ function concatTyped(Ctor, a, b){
   var out=new Ctor(a.length+b.length);
   out.set(a,0); out.set(b,a.length);
   return out;
+}
+
+// ---- 継ぎ目の実カラーブレンド(colorGradWidth>0のときだけ使う) ----
+
+// バイリニアで(x,y)の色をサンプルする(x,yは小数可、範囲外はクランプ)。
+function samplePixelBilinear(imgData, x, y){
+  var w=imgData.width, h=imgData.height, data=imgData.data;
+  x = Math.max(0, Math.min(w-1.001, x));
+  y = Math.max(0, Math.min(h-1.001, y));
+  var x0=Math.floor(x), y0=Math.floor(y);
+  var x1=Math.min(w-1,x0+1), y1=Math.min(h-1,y0+1);
+  var fx=x-x0, fy=y-y0;
+  var out=[0,0,0];
+  for(var c=0;c<3;c++){
+    var i00=(y0*w+x0)*4+c, i10=(y0*w+x1)*4+c, i01=(y1*w+x0)*4+c, i11=(y1*w+x1)*4+c;
+    var top=data[i00]+(data[i10]-data[i00])*fx;
+    var bot=data[i01]+(data[i11]-data[i01])*fx;
+    out[c]=top+(bot-top)*fy;
+  }
+  return out;
+}
+
+// 三角形(primaryData空間のp0,p1,p2)をラスタライズし、各ピクセルで重心座標により
+// (a)頂点ごとのブレンド重みw0,w1,w2を補間、(b)otherData空間でのサンプル位置
+// (o0,o1,o2を補間)を求め、primaryDataの色にotherDataの色を重み分だけ混ぜて
+// primaryDataへ書き戻す(ノイズは使わない、実数値の加重平均)。
+function blendTriangleColors(primaryData, p0,p1,p2, w0,w1,w2, otherData, o0,o1,o2){
+  var minX=Math.max(0,Math.floor(Math.min(p0[0],p1[0],p2[0])));
+  var maxX=Math.min(primaryData.width-1,Math.ceil(Math.max(p0[0],p1[0],p2[0])));
+  var minY=Math.max(0,Math.floor(Math.min(p0[1],p1[1],p2[1])));
+  var maxY=Math.min(primaryData.height-1,Math.ceil(Math.max(p0[1],p1[1],p2[1])));
+  if(maxX<minX || maxY<minY) return;
+  var denom=(p1[1]-p2[1])*(p0[0]-p2[0])+(p2[0]-p1[0])*(p0[1]-p2[1]);
+  if(Math.abs(denom)<1e-9) return;
+  var data=primaryData.data, pw=primaryData.width;
+  for(var y=minY;y<=maxY;y++){
+    for(var x=minX;x<=maxX;x++){
+      var l0=((p1[1]-p2[1])*(x+0.5-p2[0])+(p2[0]-p1[0])*(y+0.5-p2[1]))/denom;
+      var l1=((p2[1]-p0[1])*(x+0.5-p2[0])+(p0[0]-p2[0])*(y+0.5-p2[1]))/denom;
+      var l2=1-l0-l1;
+      if(l0<-0.02||l1<-0.02||l2<-0.02) continue; // 三角形の外
+      var weight=l0*w0+l1*w1+l2*w2;
+      if(weight<=0.002) continue; // 混ぜる必要がないほど小さい
+      var ox=l0*o0[0]+l1*o1[0]+l2*o2[0];
+      var oy=l0*o0[1]+l1*o1[1]+l2*o2[1];
+      var oc=samplePixelBilinear(otherData, ox, oy);
+      var idx=(y*pw+x)*4;
+      data[idx]  =data[idx]  *(1-weight)+oc[0]*weight;
+      data[idx+1]=data[idx+1]*(1-weight)+oc[1]*weight;
+      data[idx+2]=data[idx+2]*(1-weight)+oc[2]*weight;
+    }
+  }
 }
 
 function stageAtlasBake(opts){
@@ -152,16 +207,11 @@ function stageAtlasBake(opts){
   var accSeamNoSide = loadAccessorySeamNoSide(opts.seamNoSide);
   var seamSmoothIters = (opts.seamSmoothIters!==undefined && opts.seamSmoothIters!==null)
     ? Math.max(0, Math.min(30, Number(opts.seamSmoothIters))) : 8;
-  // 色のグラデーション幅(既定0=無効、従来通りの単一UVでのハード切替)。
-  // GLBは単一UVのため本物の色ブレンドはできないので、境目付近の帯の中で
-  // front/side(および正面/背面)の面をノイズパターンで細かく混在させ、
-  // 離れて見ると色がなめらかに混ざって見えるディザ(擬似)グラデーションにする。
+  // 色グラデーション(境界ぼかし)の幅(既定0=無効)。0より大きいと、境目付近の
+  // 帯の中でfront/side(および正面/背面)の実ピクセル色を角度ベースの重みで
+  // 数値的に混ぜてfront/back/sideキャンバスへ焼き込む(下のblendOnブロック)。
   var colorGradWidth = (opts.colorGradWidth!==undefined && opts.colorGradWidth!==null)
     ? Math.max(0, Number(opts.colorGradWidth)) : 0;
-  function hashNoise(x,y,z){
-    var s=Math.sin(x*127.1+y*311.7+z*74.7)*43758.5453123;
-    return s-Math.floor(s);
-  }
 
   var pxAll=new Float64Array(nV), pyAll=new Float64Array(nV);
   var spxAll=new Float64Array(nV), spyAll=new Float64Array(nV);
@@ -212,6 +262,31 @@ function stageAtlasBake(opts){
   sideS=smoothField(sideS, seamSmoothIters);
   frontS=smoothField(frontS, seamSmoothIters);
 
+  // 継ぎ目の実カラーブレンド用に、front/back/sideキャンバスのImageDataを一度だけ
+  // 取得しておく(colorGradWidth>0のときのみ)。back画像は生キャンバスの時点では
+  // mesh xに対して鏡像(buildAtlasCanvasが合成時に反転させる前提)なので、
+  // サンプリング側でも同じ反転を再現する。
+  var blendOn = !!(colorGradWidth>0 && opts.frontCanvas && opts.backCanvas && opts.sideCanvas);
+  var frontImgData=null, backImgData=null, sideImgData=null;
+  if(blendOn){
+    frontImgData = opts.frontCanvas.getContext('2d').getImageData(0,0,opts.frontCanvas.width,opts.frontCanvas.height);
+    backImgData = opts.backCanvas.getContext('2d').getImageData(0,0,opts.backCanvas.width,opts.backCanvas.height);
+    sideImgData = opts.sideCanvas.getContext('2d').getImageData(0,0,opts.sideCanvas.width,opts.sideCanvas.height);
+  }
+  function regionData(region){
+    return region==='front' ? frontImgData : (region==='back' ? backImgData : sideImgData);
+  }
+  function regionPoint(region, vi){
+    if(region==='front') return [pxAll[vi], pyAll[vi]];
+    if(region==='back') return [(W-1)-pxAll[vi], pyAll[vi]];
+    return [spxAll[vi], spyAll[vi]];
+  }
+  // 頂点viの、primary側からother側へのブレンド重み(継ぎ目ちょうどで0.5、
+  // colorGradWidth分離れると0になる)。fieldはsideS/frontSどちらかの平滑化済み配列。
+  function seamWeight(field, vi){
+    return 0.5*Math.max(0, Math.min(1, 1-Math.abs(field[vi])/colorGradWidth));
+  }
+
   var finPos=[], finNorm=[], finUv=[], finFace=[], finOrigVi=[];
   var key2idx=new Map();
   function getIndex(vi,u,vv){
@@ -246,20 +321,38 @@ function stageAtlasBake(opts){
     var frontAvg=(frontS[ff[0]]+frontS[ff[1]]+frontS[ff[2]])/3;
     var faceNoSide = noSide[ff[0]] || noSide[ff[1]] || noSide[ff[2]];
     var faceNoFront = noFront[ff[0]] || noFront[ff[1]] || noFront[ff[2]];
-    var useSide, front;
-    if(colorGradWidth<=0){
-      useSide = !faceNoSide && sideAvg>0;
-      front = !faceNoFront && frontAvg>=0;
-    }else{
-      // 境目付近の帯(colorGradWidth)の中だけ、面の重心座標由来の安定した
-      // 疑似乱数でfront/side(正面/背面)をノイズ混在させる。帯の外は従来通り
-      // ハード切替(色そのもののブレンドではなく、離れて見ると混ざって見える
-      // ディザ表現)。
-      var cxF=(ax+bx+cx)/3, cyF=(ay+by+cy)/3, czF=(az+bz+cz)/3;
-      var pSide=0.5+0.5*Math.max(-1,Math.min(1, sideAvg/colorGradWidth));
-      useSide = !faceNoSide && (hashNoise(cxF,cyF,czF) < pSide);
-      var pFront=0.5+0.5*Math.max(-1,Math.min(1, frontAvg/colorGradWidth));
-      front = !faceNoFront && (hashNoise(cxF+1000.0,cyF,czF) < pFront);
+    // 面がどの写真を使うかは常にハード判定(ディザはしない)。継ぎ目のなめらかさは
+    // 下のblendOnブロックで実際の色を混ぜることで出す。
+    var useSide = !faceNoSide && sideAvg>0;
+    var front = !faceNoFront && frontAvg>=0;
+    if(blendOn){
+      var primaryRegionNonSide = front ? 'front' : 'back';
+      // 側面 <-> 正面/背面 の継ぎ目
+      if(!faceNoSide && Math.abs(sideAvg)<colorGradWidth){
+        var sidePrimary = useSide ? 'side' : primaryRegionNonSide;
+        var sideOther = useSide ? primaryRegionNonSide : 'side';
+        var pd=regionData(sidePrimary), od=regionData(sideOther);
+        if(pd && od){
+          var sp0=regionPoint(sidePrimary,ff[0]), sp1=regionPoint(sidePrimary,ff[1]), sp2=regionPoint(sidePrimary,ff[2]);
+          var so0=regionPoint(sideOther,ff[0]), so1=regionPoint(sideOther,ff[1]), so2=regionPoint(sideOther,ff[2]);
+          blendTriangleColors(pd, sp0,sp1,sp2,
+            seamWeight(sideS,ff[0]), seamWeight(sideS,ff[1]), seamWeight(sideS,ff[2]),
+            od, so0,so1,so2);
+        }
+      }
+      // 正面 <-> 背面 の継ぎ目(側面を使う面は対象外)
+      if(!useSide && !faceNoFront && Math.abs(frontAvg)<colorGradWidth){
+        var fbPrimary = front ? 'front' : 'back';
+        var fbOther = front ? 'back' : 'front';
+        var pd2=regionData(fbPrimary), od2=regionData(fbOther);
+        if(pd2 && od2){
+          var fp0=regionPoint(fbPrimary,ff[0]), fp1=regionPoint(fbPrimary,ff[1]), fp2=regionPoint(fbPrimary,ff[2]);
+          var fo0=regionPoint(fbOther,ff[0]), fo1=regionPoint(fbOther,ff[1]), fo2=regionPoint(fbOther,ff[2]);
+          blendTriangleColors(pd2, fp0,fp1,fp2,
+            seamWeight(frontS,ff[0]), seamWeight(frontS,ff[1]), seamWeight(frontS,ff[2]),
+            od2, fo0,fo1,fo2);
+        }
+      }
     }
     var tri=[];
     for(var k=0;k<3;k++){
@@ -282,6 +375,13 @@ function stageAtlasBake(opts){
   for(var i3=0;i3<finOrigVi.length;i3++){
     var ovi=finOrigVi[i3];
     for(var c=0;c<4;c++){ finJ[i3*4+c]=J[ovi*4+c]; finW[i3*4+c]=Wt[ovi*4+c]; }
+  }
+  // blendTriangleColorsで書き換えたImageDataを、元のキャンバスへ書き戻す
+  // (buildAtlasCanvasがこの後この生キャンバスからアトラスを合成する)。
+  if(blendOn){
+    opts.frontCanvas.getContext('2d').putImageData(frontImgData,0,0);
+    opts.backCanvas.getContext('2d').putImageData(backImgData,0,0);
+    opts.sideCanvas.getContext('2d').putImageData(sideImgData,0,0);
   }
   console.log("  atlas_bake: UV generated, verts", finPos.length/3, "tris", finFace.length/3, "side面", nSideFaces);
 

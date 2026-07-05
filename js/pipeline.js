@@ -214,8 +214,10 @@ async function runPipeline(state, onProgress){
   await tick();
 
   // ---------- atlas_bake ----------
+  // ★colorGradWidth>0のときstageAtlasBakeがbledCanvas.front/back/sideのピクセルを
+  // 直接書き換えて継ぎ目をブレンドするため、その結果を拾えるようbuildAtlasCanvas
+  // より先にstageAtlasBakeを呼ぶ(以前はbuildAtlasCanvasが先だった)。
   report("atlas_bake(テクスチャベイク)");
-  var atlasCanvas = P3D.buildAtlasCanvas(bledCanvas.front, bledCanvas.back, bledCanvas.side);
   var bake = P3D.stageAtlasBake({
     W:sizes.front.w, H:sizes.front.h, SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT,
     SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
@@ -227,7 +229,9 @@ async function runPipeline(state, onProgress){
     seamNoSide: state.seamNoSide,
     seamSmoothIters: state.seamSmoothIters,
     colorGradWidth: state.colorGradWidth,
+    frontCanvas: bledCanvas.front, backCanvas: bledCanvas.back, sideCanvas: bledCanvas.side,
   });
+  var atlasCanvas = P3D.buildAtlasCanvas(bledCanvas.front, bledCanvas.back, bledCanvas.side);
   await tick();
 
   // ---------- model_glb ----------

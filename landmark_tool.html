@@ -197,11 +197,11 @@
         <input type="number" id="colorGradVal" min="0" max="1" step="0.02" value="0" style="width:56px">
       </div>
       <p style="font-size:10.5px;color:var(--mut);margin:0 0 10px">
-        境目の帯の中でfront/side(および正面/背面)の面をノイズ状に混在させ、
-        離れて見ると色がなめらかに混ざって見えるようにします(既定0=無効/従来通りの
-        ハード切替)。GLBは1頂点1UVのため本物の色ブレンドはできず、疑似的な
-        ディザ(まだら混在)表現です。近くで見ると粒状に見えます。値を大きくするほど
-        混在する帯が広くなります。</p>
+        境目の帯の中で、front/side(および正面/背面)の実際の写真ピクセルの色を
+        角度に応じた比率で数値的に混ぜ合わせ、テクスチャに直接焼き込みます
+        (既定0=無効/従来通りのハード切替)。ノイズによるディザ(まだら混在)ではなく
+        本物の色ブレンドなので、近くで見ても粒状にはなりません。値を大きくするほど
+        混ざる帯が広くなります(ブレンドの強さの目安)。</p>
       <div class="acitem" style="margin-bottom:8px">
         <span class="nm">全パーツ一括</span>
         <input type="number" id="seamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°
