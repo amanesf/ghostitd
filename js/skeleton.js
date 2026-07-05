@@ -259,14 +259,17 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
   var idxmap = subset.map(function(b){ return P3D.BIDX[b]; });
   var dists=new Float64Array(m);
   // 首/頭の座標が分かる場合のみ、鎖骨などへの誤割り当てを補正する(下記参照)。
-  // 閾値はキャラのスケールに比例させる: Y_GATE=首の高さ、DIST_THRESH=頭〜腰の距離。
+  // 閾値はキャラのスケールに比例させる。
+  // yGate: 頭の高さから少し下(首寄り)だが、Tポーズの腕(肩の高さ=首の高さ付近)
+  // より明確に高い位置にして、腕を誤って巻き込まないようにする。
+  // distThresh: 頭〜腰の高さ差の7割。首/頭ラインからこの距離以内かつyGateより
+  // 上にある頂点だけを対象にするので、腕の付け根付近まで届かない範囲に収まる。
   var neckSubIdx = subset.indexOf('neck'), headSubIdx = subset.indexOf('head');
   var yGate=null, distThresh=null;
   if(neckSubIdx>=0 && headSubIdx>=0 && pivots.hips){
-    yGate = pivots.neck[1];
-    var hp=pivots.hips, hd=pivots.head;
-    var dhx=hd[0]-hp[0], dhy=hd[1]-hp[1], dhz=hd[2]-hp[2];
-    distThresh = Math.sqrt(dhx*dhx+dhy*dhy+dhz*dhz);
+    var neckY=pivots.neck[1], headY=pivots.head[1], hipsY=pivots.hips[1];
+    yGate = headY - 0.4*(headY-neckY);
+    distThresh = 0.7*(headY-hipsY);
   }
   for(var v=0; v<n; v++){
     var vx=V[v*3], vy=V[v*3+1], vz=V[v*3+2];
