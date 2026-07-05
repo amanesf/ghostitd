@@ -292,26 +292,38 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     return mask;
   }
   function dist3(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]); }
+  // 首/頭は、うつむき気味のポーズだと顎が鎖骨・肩の近くまで来て股関節/肩の
+  // ゲートに巻き込まれることがある。首/頭は既に専用のリジッド補正(後述)を
+  // 持っているので、そちらが機能できるよう常に候補から外さない。
+  function withNeckHead(mask){
+    if(!mask) return mask;
+    if(neckSubIdx>=0) mask[neckSubIdx]=1;
+    if(headSubIdx>=0) mask[headSubIdx]=1;
+    return mask;
+  }
   var joints=[]; // {center:[x,y,z], r2:Number, mask:Uint8Array}
-  if(pivots.hips && pivots.torso && pivots.thigh_L && pivots.thigh_R){
-    var hipMask = zoneMaskFor(['hips','torso','thigh_L','thigh_R','shin_L','shin_R']);
+  if(pivots.hips && pivots.torso && pivots.thigh_L && pivots.thigh_R && pivots.shin_L && pivots.shin_R){
+    var hipMask = withNeckHead(zoneMaskFor(['hips','torso','thigh_L','thigh_R','shin_L','shin_R']));
     if(hipMask){
-      var hipWidth = dist3(pivots.thigh_L, pivots.thigh_R);
-      var hipR = Math.max(0.65*hipWidth, 1e-4);
+      // 半径は太もも本体の長さ(hips→shin_L/R、実際の股関節〜膝の長さ)に比例させる。
+      // 股幅基準だと数cm相当まで縮んでしまい、太もも上部のほとんどが対象外になる。
+      var thighLen = 0.5*(dist3(pivots.hips,pivots.shin_L) + dist3(pivots.hips,pivots.shin_R));
+      var hipR = Math.max(0.35*thighLen, 1e-4);
       joints.push({center:pivots.hips, r2:hipR*hipR, mask:hipMask});
     }
   }
   if(pivots.chest){
     ['L','R'].forEach(function(side){
-      var cl=pivots['clavicle_'+side], up=pivots['upperarm_'+side];
-      if(!(cl && up)) return;
-      var shMask = zoneMaskFor(['chest','clavicle_'+side,'upperarm_'+side,'forearm_'+side]);
+      var cl=pivots['clavicle_'+side], up=pivots['upperarm_'+side], fa=pivots['forearm_'+side];
+      if(!(cl && up && fa)) return;
+      var shMask = withNeckHead(zoneMaskFor(['chest','clavicle_'+side,'upperarm_'+side,'forearm_'+side]));
       if(!shMask) return;
-      var shR = Math.max(0.5*dist3(pivots.chest, cl), 1e-4);
+      // 半径は二の腕本体の長さ(clavicle_→forearm_、実際の肩〜肘の長さ)に比例させる。
+      var upperArmLen = dist3(cl, fa);
+      var shR = Math.max(0.4*upperArmLen, 1e-4);
       joints.push({center:cl, r2:shR*shR, mask:shMask});
     });
   }
-
   for(var v=0; v<n; v++){
     var vx=V[v*3], vy=V[v*3+1], vz=V[v*3+2];
     for(var i2=0;i2<m;i2++){
