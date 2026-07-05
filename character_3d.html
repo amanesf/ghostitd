@@ -14,6 +14,10 @@
   #backToLandmark{position:fixed;top:8px;right:10px;z-index:7;height:34px;padding:0 14px;border-radius:10px;
     border:1px solid var(--line);background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
   #backToLandmark:active{background:rgba(82,224,196,.15)}
+  #barToggle{display:none;position:fixed;top:50px;right:10px;z-index:7;height:34px;padding:0 14px;border-radius:10px;
+    border:1px solid var(--line);background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
+  #barToggle.visible{display:block}
+  #barToggle:active{background:rgba(82,224,196,.15)}
 
   /* center drop card */
   .drop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,86vw);padding:28px;
@@ -53,6 +57,7 @@
 <canvas id="c"></canvas>
 <div class="title">ゴーストビューア</div>
 <button id="backToLandmark" title="ゴーストジェネレータに戻る">← ジェネレータ</button>
+<button id="barToggle" title="操作パネルの表示/非表示">操作パネル ▾</button>
 <div id="err"></div>
 
 <div class="drop hide" id="modeChoice">
@@ -293,6 +298,7 @@ function loadGLB(buf,onLoaded,autoplayMotion){
     }});
     document.getElementById('drop').classList.add('hide');
     document.getElementById('bar').classList.add('show');
+    document.getElementById('barToggle').classList.add('visible');
     buildSkelViz(model);
     // model.glb自体は通常アニメを持たない(2026-07-02〜、モデル/モーション分割出力)。
     // 旧来の「1ファイルにモデル+アニメ埋め込み」glbとの後方互換のため、埋め込みが
@@ -483,6 +489,10 @@ document.getElementById('download').onclick=()=>{
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 };
 document.getElementById('backToLandmark').onclick=()=>{ location.href='landmark_tool.html'; };
+document.getElementById('barToggle').onclick=()=>{
+  const bar=document.getElementById('bar'), open=bar.classList.toggle('show');
+  document.getElementById('barToggle').textContent=open?'操作パネル ▾':'操作パネル ▴';
+};
 document.getElementById('reset').onclick=()=>{rotY=0.4;rotX=0.04;camDist=fitDist;cam.position.z=camDist;root.position.set(0,0,0);setSpin(false);};
 const PAN=0.12;  // pan step (camera position shift)
 document.getElementById('camUp').onclick=()=>{root.position.y+=PAN;invalidate();};
