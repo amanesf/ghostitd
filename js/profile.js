@@ -43,68 +43,6 @@ function frontProfileOnly(frontAlpha, fw, fh){
 P3D.frontProfileOnly = frontProfileOnly;
 P3D.boolBounds = boolBounds;
 
-// ★2026-07-05: 背面画像には(前面と違って)除外マスクが用意されていないことが多く、
-// boolBounds()の生の最上端行は、後れ毛やアホ毛のような細い1本の突起にそのまま
-// 引っ張られてしまう(前面はユーザーが除外マスクでこの突起を手動で除いている
-// ことが多いため、生のboolBoundsで比べると前面/背面で「同じもの」を指していない
-// = 基準位置がズレる)。細い突起は無視し、頭の実際の幅に近い太さになった行を
-// 頭頂として採用することで、前面のYTOPと同じ基準(細い後れ毛の先端ではなく
-// 頭の輪郭そのもの)に揃える。
-// alpha: Uint8Array(w*h), minWidthPx: この幅未満のrunは無視する
-// 戻り値: 条件を満たす最初の行のy(見つからなければ-1)
-function topRowByWidth(alpha, w, h, minWidthPx){
-  for(var y=0;y<h;y++){
-    var runs = P3D.findRuns(alpha.subarray(y*w,y*w+w), 1);
-    var maxW = 0;
-    for(var i=0;i<runs.length;i++){ var rw=runs[i][1]-runs[i][0]; if(rw>maxW) maxW=rw; }
-    if(maxW>=minWidthPx) return y;
-  }
-  return -1;
-}
-P3D.topRowByWidth = topRowByWidth;
-
-// 背面用のプロファイル。CXはfrontProfileOnlyと同じ方法(胸あたりの最大幅の中心)
-// で求めるが、YTOPは上記の「前面のYTOP行における幅」を太さの基準にして測り直す
-// (前面と同じ基準位置に揃える)。YBOTは生のboolBoundsのままでよい(実測で前面
-// との差は1px程度とご検証済みで、後れ毛のような細い突起の影響を受けにくい)。
-function backProfileMatched(backAlpha, bw, bh, frontAlpha, fw, frontYTOP, frontYBOT){
-  var fbb = boolBounds(backAlpha, bw, bh);
-  var rawTop = fbb[0], YBOT = fbb[1];
-  // ★2026-07-05(訂正): frontYTOPちょうどの行は、除外マスクの境界のすぐ内側
-  // (=マスクがちょうど途切れ始めた行)であることが多く、その行自体がまだ
-  // 細い/薄いままなことがある(実測: 幅がわずか十数pxしかなく、しきい値が
-  // 小さすぎて背面側もほぼ生の最上端(後れ毛の先端)のままになってしまった)。
-  // frontYTOPから少し(身長の5%程度)下がった、頭の輪郭が安定している行の幅を
-  // 基準にする。
-  var refY = Math.min(Math.round(frontYTOP + 0.05*(frontYBOT-frontYTOP)), frontYBOT-1);
-  var frontWidthAtRef = 0;
-  var frontRuns = P3D.findRuns(frontAlpha.subarray(refY*fw, refY*fw+fw), 1);
-  for(var i=0;i<frontRuns.length;i++){
-    var rw=frontRuns[i][1]-frontRuns[i][0]; if(rw>frontWidthAtRef) frontWidthAtRef=rw;
-  }
-  // 前面の基準行の太さの6割を「頭とみなす」しきい値にする(前面/背面で頭の
-  // 傾き・輪郭が完全には一致しないため、多少の余裕を持たせる)。
-  var minWidthPx = Math.max(20, frontWidthAtRef*0.6);
-  var matchedTop = topRowByWidth(backAlpha, bw, bh, minWidthPx);
-  var YTOP = (matchedTop>=0) ? matchedTop : rawTop;
-  var tc=[];
-  var fLin=P3D.linspace(0.32,0.50,15);
-  for(var i2=0;i2<fLin.length;i2++){
-    var f=fLin[i2];
-    var y=Math.round(YTOP+f*(YBOT-YTOP));
-    var row=backAlpha.subarray(y*bw,y*bw+bw);
-    var r=P3D.findRuns(row,1);
-    if(r.length){
-      var big=r[0];
-      for(var k=1;k<r.length;k++){ if(r[k][1]-r[k][0] > big[1]-big[0]) big=r[k]; }
-      tc.push((big[0]+big[1])/2);
-    }
-  }
-  var CX = Math.round(P3D.median(tc));
-  return {YTOP:YTOP, YBOT:YBOT, CX:CX, rawTop:rawTop, minWidthPx:minWidthPx};
-}
-P3D.backProfileMatched = backProfileMatched;
-
 /**
  * frontAlpha: Uint8Array(fw*fh) front_cut相当(1=前景)
  * sideAlpha: Uint8Array(sw*sh) side_cut相当(1=前景)
