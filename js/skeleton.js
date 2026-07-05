@@ -272,12 +272,18 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     distThresh = 0.7*(headY-hipsY);
   }
 
-  // ---- 股関節/肩まわりの誤割り当て防止: 高さ帯ごとに候補ボーンを絞り込む ----
-  // hips/torso/thigh_L/thigh_R、chest/clavicle/upperarmはピボット同士が空間的に
-  // 近接するため、距離だけのk近傍だと無関係な部位(反対側の脚、腕、首など)まで
-  // 紛れ込み、関節を曲げたときに離れた部位まで連動してしまう(ゴム状に伸びる)
-  // 原因になる。該当の高さ帯にある頂点は、通常のk近傍距離計算に入る前に候補を
-  // その部位グループだけへ絞る(帯の外の頂点は従来通り全ボーンが候補のまま)。
+  // ---- 股関節/肩まわりの誤割り当て防止: 実際の関節点からの3D距離で候補ボーンを
+  // 絞り込む(高さ(vy)だけで判定すると、Tポーズ(腕を真横に伸ばした姿勢)では
+  // 前腕/手首/手までもが肩とほぼ同じ高さに来てしまい、走行などのモーションで
+  // 手だけ置き去りにされて帯状に伸びる不具合を招く。高さではなく関節点そのもの
+  // への3D距離を使えば、Tポーズで腕が横に長く伸びていても手・前腕は関節点から
+  // 十分離れているため誤って巻き込まれない)。
+  // 注意: このコードのボーン名は「先端側のピボット」に対応する(親→自分の
+  // 区間を表す)ため、thigh_L(親hips)は股関節スタブに過ぎず、実際の太もも本体
+  // (股関節→膝の回転)を担うのはshin_L。同様にupperarm_L(親clavicle_L)は
+  // 肩のスタブで、実際の二の腕本体(肩→肘の回転)を担うのはforearm_L。
+  // 候補から漏らすと、本当は動くはずの太もも/二の腕の肉がスタブ骨に固定されて
+  // 突っ張る/伸びる不具合になるため、これらも候補に含める。
   function zoneMaskFor(names){
     var idxs = names.map(function(b){ return subset.indexOf(b); });
     if(idxs.some(function(i){ return i<0; })) return null;
@@ -285,25 +291,25 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     idxs.forEach(function(i){ mask[i]=1; });
     return mask;
   }
-  var hipZoneMask=null, hipYMin=0, hipYMax=0;
-  if(pivots.hips && pivots.torso){
-    hipZoneMask = zoneMaskFor(['hips','torso','thigh_L','thigh_R']);
-    if(hipZoneMask){
-      var hipsY2=pivots.hips[1], torsoY2=pivots.torso[1];
-      var shinYs=[pivots.shin_L,pivots.shin_R].filter(Boolean).map(function(p){ return p[1]; });
-      var thighSpan = shinYs.length ? (hipsY2-Math.min.apply(null,shinYs)) : Math.abs(torsoY2-hipsY2);
-      hipYMin = hipsY2 - 0.35*thighSpan;
-      hipYMax = torsoY2 + 0.25*(torsoY2-hipsY2);
+  function dist3(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]); }
+  var joints=[]; // {center:[x,y,z], r2:Number, mask:Uint8Array}
+  if(pivots.hips && pivots.torso && pivots.thigh_L && pivots.thigh_R){
+    var hipMask = zoneMaskFor(['hips','torso','thigh_L','thigh_R','shin_L','shin_R']);
+    if(hipMask){
+      var hipWidth = dist3(pivots.thigh_L, pivots.thigh_R);
+      var hipR = Math.max(0.65*hipWidth, 1e-4);
+      joints.push({center:pivots.hips, r2:hipR*hipR, mask:hipMask});
     }
   }
-  var shoulderZoneMask=null, shYMin=0, shYMax=0;
-  if(pivots.chest && pivots.torso && pivots.neck){
-    shoulderZoneMask = zoneMaskFor(['chest','clavicle_L','clavicle_R','upperarm_L','upperarm_R']);
-    if(shoulderZoneMask){
-      var chestY2=pivots.chest[1], torsoY3=pivots.torso[1], neckY2=pivots.neck[1];
-      shYMin = chestY2 - 0.3*(chestY2-torsoY3);
-      shYMax = neckY2 - 0.1*(neckY2-chestY2);
-    }
+  if(pivots.chest){
+    ['L','R'].forEach(function(side){
+      var cl=pivots['clavicle_'+side], up=pivots['upperarm_'+side];
+      if(!(cl && up)) return;
+      var shMask = zoneMaskFor(['chest','clavicle_'+side,'upperarm_'+side,'forearm_'+side]);
+      if(!shMask) return;
+      var shR = Math.max(0.5*dist3(pivots.chest, cl), 1e-4);
+      joints.push({center:cl, r2:shR*shR, mask:shMask});
+    });
   }
 
   for(var v=0; v<n; v++){
@@ -322,10 +328,14 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
       }
       dists[i2]=d;
     }
-    if(hipZoneMask && vy>=hipYMin && vy<=hipYMax){
-      for(var zi=0; zi<m; zi++){ if(!hipZoneMask[zi]) dists[zi]=Infinity; }
-    }else if(shoulderZoneMask && vy>=shYMin && vy<=shYMax){
-      for(var zj=0; zj<m; zj++){ if(!shoulderZoneMask[zj]) dists[zj]=Infinity; }
+    for(var jz=0; jz<joints.length; jz++){
+      var jc=joints[jz].center;
+      var jdx=vx-jc[0], jdy=vy-jc[1], jdz=vz-jc[2];
+      if(jdx*jdx+jdy*jdy+jdz*jdz <= joints[jz].r2){
+        var jmask=joints[jz].mask;
+        for(var zi=0; zi<m; zi++){ if(!jmask[zi]) dists[zi]=Infinity; }
+        break;
+      }
     }
     // k近傍(距離昇順)をO(m log m)で求める(m<=23なので十分高速)
     var order=Array.from({length:m}, function(_,i){return i;});
