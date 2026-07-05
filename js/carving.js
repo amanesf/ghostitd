@@ -382,7 +382,11 @@ function carveRegion(opts){
     var frPx = faCont ? C.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : C.findRuns(faRow);
     var brPx = baCont ? C.findRunsSubpixel(baRow, rowOf1d(baCont,faW,fy[iy]), whiteThr) : C.findRuns(baRow);
     var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
-    var br=brPx.map(function(pq){ return [(faW-pq[1]-CX)/SCALE, (faW-pq[0]-CX)/SCALE]; });
+    // ★2026-07-05: 実測(front.png/back.pngのTポーズ腕の左右対称軸を直接比較)で、
+    // back.pngはfront.pngの鏡像ではなく同じ列基準で描かれていることを確認した。
+    // 以前は左右反転(faW-pq-CX)して変換していたため、体全体がわずかに
+    // (実測12px前後)ズレる原因になっていた。frと同じ式で変換する。
+    var br=brPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
     var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
     // ★2026-07-04: アクセサリー(ポリゴン指定あり)では、front/backの絵柄の
     // 描かれ方が行単位で食い違う(片方だけ描線が途切れる等)と交差が空になり

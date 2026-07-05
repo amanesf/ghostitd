@@ -54,8 +54,11 @@ P3D.localAlpha = localAlpha;
 function frontPointsToModel(pts, CX, SCALE, YBOT){
   return pts.map(function(p){ return [(p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
 }
+// ★2026-07-05: 実測でback.pngはfront.pngの鏡像ではなく同じ列基準と確認したため、
+// frontPointsToModelと同じ式を使う(Wは不要になったが呼び出し側との互換のため
+// 引数は残す)。
 function backPointsToModel(pts, CX, SCALE, YBOT, W){
-  return pts.map(function(p){ return [(W-p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
+  return pts.map(function(p){ return [(p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
 }
 function sidePointsToModel(pts, SIDE_REF, SCALE, SYTOP, SYBOT){
   return pts.map(function(p){ return [(p[0]-SIDE_REF)/SCALE, 1.0-(p[1]-SYTOP)/(SYBOT-SYTOP)]; });
@@ -116,7 +119,7 @@ function stageAccessories(opts){
 
     var faAcc = localAlpha(opts.frontRgba, W, H, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
                            gp.white_thr, gp.band_h, gp.band_overlap);
-    var baAcc = localAlpha(opts.backRgba, W, H, W-(mxMax*SCALE+CX), YBOT-myMax*SCALE, W-(mxMin*SCALE+CX), YBOT-myMin*SCALE,
+    var baAcc = localAlpha(opts.backRgba, W, H, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
                            gp.white_thr, gp.band_h, gp.band_overlap);
     var sx0=SIDE_REF+mzMin*SCALE, sx1=SIDE_REF+mzMax*SCALE;
     var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP), sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP);
