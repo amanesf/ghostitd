@@ -288,6 +288,18 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
       W[v*4+c2]=ws[c2]/wsum;
     }
     for(var c3=k;c3<4;c3++){ J[v*4+c3]=idxmap[order[0]]; W[v*4+c3]=0; }
+    // 首/頭が優勢な頂点は、鎖骨など空間的に近いだけで骨格上は無関係な骨まで
+    // k近傍に混ざり込みやすい(肩と首の付け根が近いため)。腕を振ると首や頭の
+    // 一部がその骨に引っ張られてちぎれたように見えるため、髪(アクセサリー)を
+    // 頭に完全固定しているのと同じ考え方で、首/頭が最大ウェイトの頂点は
+    // その骨100%の剛体ウェイトに丸める。
+    var domIdx=0; for(var dci=1;dci<4;dci++){ if(W[v*4+dci]>W[v*4+domIdx])domIdx=dci; }
+    var domBone=P3D.BONES[J[v*4+domIdx]];
+    if(domBone==='neck'||domBone==='head'){
+      var domJ=J[v*4+domIdx];
+      J[v*4]=domJ;J[v*4+1]=domJ;J[v*4+2]=domJ;J[v*4+3]=domJ;
+      W[v*4]=1;W[v*4+1]=0;W[v*4+2]=0;W[v*4+3]=0;
+    }
   }
   return {J:J, W:W};
 }
