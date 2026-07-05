@@ -86,6 +86,7 @@
     border:1px solid var(--line);border-radius:9px;padding:7px 9px}
   .acitem .nm{flex:1;color:var(--txt)}
   .acitem .tag{color:var(--mut);font-size:10.5px}
+  .acitem .ed{color:var(--mint);cursor:pointer;font-size:11px;padding:2px 6px}
   .acitem .rm{color:#ff6b6b;cursor:pointer;font-size:11px;padding:2px 6px}
   .acitem input.acNameEdit{flex:1;min-width:0;background:rgba(255,255,255,.06);
     border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:5px 7px;font-size:12px}
@@ -319,7 +320,7 @@ const BONES=["hips","torso","chest","neck","head",
 let imgs={front:null,side:null,back:null};
 let curView="front";
 function curImg(){return imgs[curView];}
-let accessories=[], pendingAcc=null;
+let accessories=[], pendingAcc=null, pendingAccEditIdx=null, pendingAccEditOriginal=null;
 const SEAM_DEFAULT_DEG=45;
 const BONE_JP={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
   clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
@@ -1115,7 +1116,7 @@ function renderAcForm(){
     '<div class="row">'+drawBtns+'</div>'+
     selBtns+
     '<div class="row">'+
-    '<button class="btn mint" id="acConfirm"'+(canAdd?"":" disabled")+'>この内容で追加する</button>'+
+    '<button class="btn mint" id="acConfirm"'+(canAdd?"":" disabled")+'>'+(pendingAccEditIdx!==null?"この内容で保存する":"この内容で追加する")+'</button>'+
     '<button class="btn" id="acCancel">キャンセル</button>'+
     '</div></div>';
   $("acName").oninput=e=>{pendingAcc.name=e.target.value;};
@@ -1163,12 +1164,19 @@ function renderAcForm(){
   });
   $("acConfirm").onclick=()=>{
     if(!(pendingAcc.regions.front||pendingAcc.regions.back)){setMsg("正面か背面の少なくとも一方に範囲が必要です。");return;}
-    accessories.push(pendingAcc);pendingAcc=null;
+    const wasEdit=pendingAccEditIdx!==null;
+    if(wasEdit){accessories.splice(pendingAccEditIdx,0,pendingAcc);}
+    else{accessories.push(pendingAcc);}
+    pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
     curView="front";syncViewBtns();sel=null;
     renderAcList();renderAcForm();syncChips();draw();
-    setMsg("アクセサリーを追加しました。");
+    setMsg(wasEdit?"アクセサリーを更新しました。":"アクセサリーを追加しました。");
   };
-  $("acCancel").onclick=()=>{pendingAcc=null;sel=null;renderAcForm();syncChips();draw();};
+  $("acCancel").onclick=()=>{
+    if(pendingAccEditIdx!==null){accessories.splice(pendingAccEditIdx,0,pendingAccEditOriginal);}
+    pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
+    sel=null;renderAcList();renderAcForm();syncChips();draw();
+  };
 }
 function renderAcList(){
   const el=$("acList");
@@ -1176,6 +1184,7 @@ function renderAcList(){
     '<div class="acitem"><input type="text" class="acNameEdit" data-i="'+i+'" '+
     'value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)">'+
     '<span class="tag">'+a.mode+'/'+(a.bones.join(",")||"未設定")+'</span>'+
+    '<span class="ed" data-i="'+i+'">変更</span>'+
     '<span class="rm" data-i="'+i+'">削除</span></div>'
   ).join("");
   [].forEach.call(el.querySelectorAll(".acNameEdit"),inp=>{
@@ -1187,6 +1196,20 @@ function renderAcList(){
         seamAngles[newKey]=seamAngles[oldKey];delete seamAngles[oldKey];
       }
       renderSeamList();
+    };
+  });
+  [].forEach.call(el.querySelectorAll(".ed"),s=>{
+    s.onclick=()=>{
+      const i=+s.dataset.i;
+      pendingAccEditIdx=i;
+      pendingAccEditOriginal=accessories[i];
+      pendingAcc=JSON.parse(JSON.stringify(accessories[i]));
+      accessories.splice(i,1);
+      curView=pendingAcc.regions.front?"front":(pendingAcc.regions.side?"side":"back");
+      syncViewBtns();
+      sel=pendingAcc.regions[curView]?"pend:"+curView+":0":null;
+      renderAcList();renderAcForm();syncChips();draw();
+      setMsg("アクセサリーを編集中です。各点を調整して保存してください。");
     };
   });
   [].forEach.call(el.querySelectorAll(".rm"),s=>{s.onclick=()=>{accessories.splice(+s.dataset.i,1);renderAcList();renderSeamList();draw();};});
@@ -1409,6 +1432,7 @@ $("colorGradVal").oninput=()=>{
 };
 $("acAddBtn").onclick=()=>{
   if(!points){setMsg("先に正面画像を読み込んでください。");return;}
+  if(pendingAccEditIdx!==null){accessories.splice(pendingAccEditIdx,0,pendingAccEditOriginal);pendingAccEditIdx=null;pendingAccEditOriginal=null;renderAcList();}
   pendingAcc={name:"",mode:"rigid",bones:[],regions:{},pointCount:8};
   renderAcForm();
 };

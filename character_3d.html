@@ -105,7 +105,10 @@
   </div>
   <div class="row">
     <button class="btn on" id="vivid" style="flex:0 0 80px">アニメ調</button>
-    <div class="slideWrap"><input type="range" id="vividStrength" min="0" max="100" value="70"></div>
+    <span class="lbl">彩度</span>
+    <div class="slideWrap"><input type="range" id="vividSat" min="0" max="100" value="70"></div>
+    <span class="lbl">濃淡</span>
+    <div class="slideWrap"><input type="range" id="vividCon" min="0" max="100" value="70"></div>
   </div>
   <div class="row" id="animRow" style="display:none">
     <span class="lbl">モーション</span>
@@ -469,8 +472,9 @@ document.getElementById('bgWhite').onclick=()=>setBgWhite(!bgWhiteOn);
 // 影響しない)。invalidate()は不要(ブラウザがCSSレイヤーを自動で再合成する)。
 let vividOn=true;
 function applyVivid(){
-  const s=parseInt(document.getElementById('vividStrength').value);
-  const sat=1+(s/100)*1.2, con=1+(s/100)*0.5;
+  const sSat=parseInt(document.getElementById('vividSat').value);
+  const sCon=parseInt(document.getElementById('vividCon').value);
+  const sat=1+(sSat/100)*1.2, con=1+(sCon/100)*0.5;
   cvs.style.filter=vividOn?`saturate(${sat.toFixed(2)}) contrast(${con.toFixed(2)})`:'none';
 }
 function setVivid(on){
@@ -479,7 +483,8 @@ function setVivid(on){
   applyVivid();
 }
 document.getElementById('vivid').onclick=()=>setVivid(!vividOn);
-document.getElementById('vividStrength').oninput=applyVivid;
+document.getElementById('vividSat').oninput=applyVivid;
+document.getElementById('vividCon').oninput=applyVivid;
 applyVivid();
 document.getElementById('download').onclick=()=>{
   if(!lastModelBuf){ document.getElementById('err').textContent='ダウンロードできるモデルがありません'; return; }
