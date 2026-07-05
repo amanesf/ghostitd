@@ -221,8 +221,17 @@ function stageAtlasBake(opts){
   var spxAll=new Float64Array(nV), spyAll=new Float64Array(nV);
   for(var v=0; v<nV; v++){
     var x=allV[v*3], y=allV[v*3+1], z=allV[v*3+2];
-    pxAll[v]=x*SCALE+CX;
-    pyAll[v]=YBOT-y*SCALE;
+    // ★2026-07-05: side用のspxAll/spyAllは元々[0,W-1]/[0,H-1]にクランプして
+    // いたが、front/back用のpxAll/pyAllにはクランプが無かった。平滑化/
+    // マーチングキューブス/間引きで輪郭ぎりぎりの頂点(頭頂のアホ毛、
+    // アクセサリーの先端等)が元写真のシルエット範囲をわずかに超えると、
+    // GLBのテクスチャサンプラーはwrapS/wrapT=REPEAT(model_export.js)のため
+    // UVが0または1を超えた分だけアトラスの別領域(側面や反対側の正面/背面)に
+    // 回り込み、全く無関係な色を貼ってしまっていた(境目付近の虹色の縞の原因)。
+    // side同様に画像範囲へクランプし、縁を超えた頂点は縁のピクセルを
+    // 引き伸ばして使うようにする。
+    pxAll[v]=Math.min(Math.max(x*SCALE+CX,0),W-1);
+    pyAll[v]=Math.min(Math.max(YBOT-y*SCALE,0),H-1);
     spxAll[v]=Math.min(Math.max(SIDE_REF+z*SCALE,0),W-1);
     spyAll[v]=Math.min(Math.max(SYTOP+(1.0-y)*(SYBOT-SYTOP),0),H-1);
   }
