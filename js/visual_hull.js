@@ -75,7 +75,7 @@ function stageVisualHull(opts){
   var Nv=fw.N; F=fw.F;
   console.log("  visual_hull: verts", V.length/3, "faces", F.length/3);
 
-  var skin = P3D.nearestBoneSegmentSkin(V, opts.pivots, P3D.BONES, 4);
+  var skin = P3D.nearestBoneSegmentSkin(V, opts.pivots, P3D.BONES, 4, gp.rigid_soft_width);
   console.log("  visual_hull: skinning weights assigned (nearest-bone-segment)");
 
   return {V:V, N:Nv, F:F, J:skin.J, W:skin.W};
