@@ -54,8 +54,9 @@ P3D.localAlpha = localAlpha;
 function frontPointsToModel(pts, CX, SCALE, YBOT){
   return pts.map(function(p){ return [(p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
 }
-function backPointsToModel(pts, CX, SCALE, YBOT, W){
-  return pts.map(function(p){ return [(W-p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
+function backPointsToModel(pts, CX, SCALE, YBOT, W, backOffsetX, backOffsetY){
+  backOffsetX=backOffsetX||0; backOffsetY=backOffsetY||0;
+  return pts.map(function(p){ return [(W-p[0]-CX+backOffsetX)/SCALE, (YBOT-p[1]+backOffsetY)/SCALE]; });
 }
 function sidePointsToModel(pts, SIDE_REF, SCALE, SYTOP, SYBOT){
   return pts.map(function(p){ return [(p[0]-SIDE_REF)/SCALE, 1.0-(p[1]-SYTOP)/(SYBOT-SYTOP)]; });
@@ -84,6 +85,8 @@ function stageAccessories(opts){
   var gp = opts.gp;
   var W=opts.W, H=opts.H, SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT;
   var SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
+  var backOffsetX=gp.back_offset_x||0, backOffsetY=gp.back_offset_y||0;
+  var sideOffsetX=gp.side_offset_x||0, sideOffsetY=gp.side_offset_y||0;
   var accs = opts.accs || [];
   if(!accs.length) return null;
 
@@ -101,7 +104,7 @@ function stageAccessories(opts){
       frontPolygon = frontPointsToModel(fr.points, CX, SCALE, YBOT);
       var bb=bboxOf(frontPolygon); mxMin=bb[0];mxMax=bb[1];myMin=bb[2];myMax=bb[3];
     }else if(bk && bk.points && bk.points.length){
-      backPolygon = backPointsToModel(bk.points, CX, SCALE, YBOT, W);
+      backPolygon = backPointsToModel(bk.points, CX, SCALE, YBOT, W, backOffsetX, backOffsetY);
       var bb2=bboxOf(backPolygon); mxMin=bb2[0];mxMax=bb2[1];myMin=bb2[2];myMax=bb2[3];
     }else{
       console.log("  accessories: skip", name, "(front/back範囲なし)");
@@ -116,10 +119,10 @@ function stageAccessories(opts){
 
     var faAcc = localAlpha(opts.frontRgba, W, H, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
                            gp.white_thr, gp.band_h, gp.band_overlap);
-    var baAcc = localAlpha(opts.backRgba, W, H, W-(mxMax*SCALE+CX), YBOT-myMax*SCALE, W-(mxMin*SCALE+CX), YBOT-myMin*SCALE,
+    var baAcc = localAlpha(opts.backRgba, W, H, W-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, W-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
                            gp.white_thr, gp.band_h, gp.band_overlap);
-    var sx0=SIDE_REF+mzMin*SCALE, sx1=SIDE_REF+mzMax*SCALE;
-    var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP), sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP);
+    var sx0=SIDE_REF+mzMin*SCALE+sideOffsetX, sx1=SIDE_REF+mzMax*SCALE+sideOffsetX;
+    var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP)+sideOffsetY, sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP)+sideOffsetY;
     var saAcc = localAlpha(opts.sideRgba, W, H, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
 
     var result = P3D.carveRegion({
@@ -128,6 +131,7 @@ function stageAccessories(opts){
       baCont: gp.subpixel ? opts.backCont : null,
       saCont: gp.subpixel ? opts.sideCont : null,
       SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:SYTOP, SYBOT:SYBOT, SIDE_REF:SIDE_REF,
+      backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:sideOffsetX, sideOffsetY:sideOffsetY,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
       vox: gp.acc_vox, psqHull: gp.psq_hull, trackGap: gp.track_gap, trackWin: gp.track_win,
       smoothIters: gp.acc_smooth_iters,

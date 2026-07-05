@@ -221,6 +221,8 @@ async function runPipeline(state, onProgress){
   var bake = P3D.stageAtlasBake({
     W:sizes.front.w, H:sizes.front.h, SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT,
     SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
+    backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
+    sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
     bodyV:body.V, bodyN:body.N, bodyF:body.F, bodyJ:body.J, bodyW:body.W,
     accV: acc?acc.V:null, accN: acc?acc.N:null, accF: acc?acc.F:null,
     accJ: acc?acc.J:null, accW: acc?acc.W:null, accNF: acc?acc.NF:null,

@@ -29,6 +29,14 @@ var DEFAULT_GEN_PARAMS = {
   white_thr: 240, alpha_dilate: 9,
   band_h: 220, band_overlap: 40,
   kb_per_face: 200,
+  // ★2026-07-05: 背面/側面写真はそれぞれ別に撮影/作画されるため、前面基準の
+  // CX/SCALE/YBOTをそのまま流用(鏡像)する彫り出し/テクスチャ変換に、
+  // 素材ごとの微妙なズレが残ることがある。自動推定(シルエット計測)は
+  // 後れ毛等のノイズを拾って余計に暴れることが分かったため、シルエット
+  // 解析による自動補正はせず、ユーザーが実際の見た目を見ながら手で追い込める
+  // 単純な定数pxオフセットとして用意する(既定0=補正なし)。
+  back_offset_x: 0, back_offset_y: 0,
+  side_offset_x: 0, side_offset_y: 0,
 };
 P3D.DEFAULT_GEN_PARAMS = DEFAULT_GEN_PARAMS;
 

@@ -53,6 +53,8 @@ function stageVisualHull(opts){
     baCont: gp.subpixel ? opts.backCont : null,
     saCont: gp.subpixel ? opts.sideCont : null,
     SCALE: opts.SCALE, CX: opts.CX, YBOT: opts.YBOT, SYTOP: opts.SYTOP, SYBOT: opts.SYBOT, SIDE_REF: opts.SIDE_REF,
+    backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
+    sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
     mxBounds: mxBounds, myBounds: myBounds, mzBounds: mzBounds,
     vox: BODY_VOX, psqHull: gp.psq_hull, trackGap: gp.track_gap, trackWin: gp.track_win,
     smoothIters: gp.body_smooth_iters,

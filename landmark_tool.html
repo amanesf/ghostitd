@@ -365,6 +365,8 @@ const DEFAULT_GEN_PARAMS={
   white_thr:240, alpha_dilate:9,
   band_h:220, band_overlap:40,
   kb_per_face:200,
+  back_offset_x:0, back_offset_y:0,
+  side_offset_x:0, side_offset_y:0,
 };
 // group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
 // (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
@@ -417,6 +419,14 @@ const PARAM_META=[
   desc:"帯の境界付近での判定の不連続を防ぐための重なり幅。band_hより十分小さい値にする。"},
  {group:"テクスチャ", key:"kb_per_face", label:"アトラス1面あたりの目標容量上限", type:"number", min:50, max:1000, step:10, unit:"KB",
   desc:"増やすと画質(JPEG品質)が上がるがglbファイルが重くなる。減らすと軽くなるが圧縮劣化が目立ちやすくなる。front/back/sideの3面それぞれこの上限を目安にJPEG品質を自動調整する。"},
+ {group:"背面/側面ズレ補正", key:"back_offset_x", label:"背面画像 左右ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"背面写真は前面写真とは別に撮影/作画されるため、前面基準の彫り出し/貼り付けにpx単位のズレが残ることがある。正の値で背面の彫り出し/テクスチャ参照位置を右へ、負の値で左へずらす。実際のビューアで見た目を確認しながら調整する。"},
+ {group:"背面/側面ズレ補正", key:"back_offset_y", label:"背面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はback_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"背面/側面ズレ補正", key:"side_offset_x", label:"側面画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"側面写真の奥行き(前後)方向の基準ズレを補正する。正の値で奥行きの参照位置を右へ、負の値で左へずらす。"},
+ {group:"背面/側面ズレ補正", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
 ];
 let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
 function renderParamsPanel(){

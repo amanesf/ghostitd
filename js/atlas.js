@@ -176,6 +176,13 @@ function blendTriangleColors(primaryData, p0,p1,p2, w0,w1,w2, otherData, o0,o1,o
 function stageAtlasBake(opts){
   var W=opts.W, H=opts.H, SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT;
   var SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
+  // ★2026-07-05: 背面/側面写真は前面基準の鏡像/流用で変換しているため、素材
+  // ごとの微妙なズレが残ることがある。ユーザーが見た目で追い込める単純な
+  // 定数pxオフセット(既定0)。carving.js/accessories.jsと同じ規約で、
+  // pxAllのbackOffsetXは彫り出し(carving.js)側の(faW-pq-CX+backOffsetX)と
+  // 揃うようgu側にも反映する。
+  var backOffsetX=opts.backOffsetX||0, backOffsetY=opts.backOffsetY||0;
+  var sideOffsetX=opts.sideOffsetX||0, sideOffsetY=opts.sideOffsetY||0;
   var ATW=3*W, ATH=H;
 
   var nBodyV=opts.bodyV.length/3;
@@ -232,8 +239,8 @@ function stageAtlasBake(opts){
     // 引き伸ばして使うようにする。
     pxAll[v]=Math.min(Math.max(x*SCALE+CX,0),W-1);
     pyAll[v]=Math.min(Math.max(YBOT-y*SCALE,0),H-1);
-    spxAll[v]=Math.min(Math.max(SIDE_REF+z*SCALE,0),W-1);
-    spyAll[v]=Math.min(Math.max(SYTOP+(1.0-y)*(SYBOT-SYTOP),0),H-1);
+    spxAll[v]=Math.min(Math.max(SIDE_REF+z*SCALE+sideOffsetX,0),W-1);
+    spyAll[v]=Math.min(Math.max(SYTOP+(1.0-y)*(SYBOT-SYTOP)+sideOffsetY,0),H-1);
   }
 
   // ★2026-07-04: 投影(front/back/side)の切り替えを面単位の法線で即決すると、
@@ -296,7 +303,7 @@ function stageAtlasBake(opts){
   }
   function regionPoint(region, vi){
     if(region==='front') return [pxAll[vi], pyAll[vi]];
-    if(region==='back') return [(W-1)-pxAll[vi], pyAll[vi]];
+    if(region==='back') return [(W-1)-pxAll[vi]+backOffsetX, pyAll[vi]+backOffsetY];
     return [spxAll[vi], spyAll[vi]];
   }
   // 頂点viの、primary側からother側へのブレンド重み(継ぎ目ちょうどで0.5、
@@ -380,8 +387,8 @@ function stageAtlasBake(opts){
         gu=(2*W+spxAll[vi])/ATW;
         gv=spyAll[vi]/ATH;
       }else{
-        gu=(front ? pxAll[vi] : W+pxAll[vi])/ATW;
-        gv=pyAll[vi]/ATH;
+        gu=(front ? pxAll[vi] : (W+pxAll[vi]-backOffsetX))/ATW;
+        gv=(front ? pyAll[vi] : (pyAll[vi]+backOffsetY))/ATH;
       }
       tri.push(getIndex(vi,gu,gv));
     }

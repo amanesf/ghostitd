@@ -356,6 +356,12 @@ function carveRegion(opts){
   var armLines=opts.armLines||null, armMaxHw=opts.armMaxHw||0.07;
   var handLines=opts.handLines||null, handDepthHw=opts.handDepthHw||0.02, handMaxHw=opts.handMaxHw||0.06;
   var whiteThr=opts.whiteThr!==undefined?opts.whiteThr:250;
+  // ★2026-07-05: 背面/側面写真は前面基準のCX/SCALE/YBOT等を鏡像/流用して
+  // 変換しているため、素材ごとの微妙なズレが残ることがある。自動推定は
+  // 後れ毛等のノイズを拾って暴れるため、ユーザーが見た目で追い込める単純な
+  // 定数pxオフセットとして受け取る(既定0=補正なし)。
+  var backOffsetX=opts.backOffsetX||0, backOffsetY=opts.backOffsetY||0;
+  var sideOffsetX=opts.sideOffsetX||0, sideOffsetY=opts.sideOffsetY||0;
 
   var mxMin=mxB[0],mxMax=mxB[1], myMin=myB[0],myMax=myB[1], mzMin=mzB[0],mzMax=mzB[1];
   var nx=Math.max(Math.round((mxMax-mxMin)/vox),4);
@@ -365,11 +371,12 @@ function carveRegion(opts){
 
   function rowOf1d(arr, w, y){ return arr.subarray(y*w, y*w+w); }
 
-  var fy=new Int32Array(ny), spy=new Int32Array(ny);
+  var fy=new Int32Array(ny), byBack=new Int32Array(ny), spy=new Int32Array(ny);
   for(var iy0=0;iy0<ny;iy0++){
     fy[iy0]=Math.min(Math.max(Math.round(YBOT-my[iy0]*SCALE),0),faH-1);
+    byBack[iy0]=Math.min(Math.max(Math.round(YBOT-my[iy0]*SCALE+backOffsetY),0),faH-1);
     var v_=1.0-my[iy0];
-    spy[iy0]=Math.min(Math.max(Math.round(SYTOP+v_*(SYBOT-SYTOP)),0),saH-1);
+    spy[iy0]=Math.min(Math.max(Math.round(SYTOP+v_*(SYBOT-SYTOP)+sideOffsetY),0),saH-1);
   }
   var mxLim=[[mx[0],mx[nx-1]]];
   var mzLim=[[mz[0],mz[nz-1]]];
@@ -378,11 +385,11 @@ function carveRegion(opts){
   // ---- 1) 行ごとの幅セグメント(front/back)、行トラッキング+中央値フィルタ ----
   var tracks=[]; // {rows:[],cx:[],hw:[],lastIy,lastCx}
   for(var iy=0; iy<ny; iy++){
-    var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, fy[iy]);
+    var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, byBack[iy]);
     var frPx = faCont ? C.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : C.findRuns(faRow);
-    var brPx = baCont ? C.findRunsSubpixel(baRow, rowOf1d(baCont,faW,fy[iy]), whiteThr) : C.findRuns(baRow);
+    var brPx = baCont ? C.findRunsSubpixel(baRow, rowOf1d(baCont,faW,byBack[iy]), whiteThr) : C.findRuns(baRow);
     var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
-    var br=brPx.map(function(pq){ return [(faW-pq[1]-CX)/SCALE, (faW-pq[0]-CX)/SCALE]; });
+    var br=brPx.map(function(pq){ return [(faW-pq[1]-CX+backOffsetX)/SCALE, (faW-pq[0]-CX+backOffsetX)/SCALE]; });
     var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
     // ★2026-07-04: アクセサリー(ポリゴン指定あり)では、front/backの絵柄の
     // 描かれ方が行単位で食い違う(片方だけ描線が途切れる等)と交差が空になり
@@ -434,7 +441,7 @@ function carveRegion(opts){
   for(var iy2=0; iy2<ny; iy2++){
     var saRow=rowOf1d(sa, saW, spy[iy2]);
     var saPx = saCont ? C.findRunsSubpixel(saRow, rowOf1d(saCont,saW,spy[iy2]), whiteThr) : C.findRuns(saRow);
-    var zrunsMz = saPx.map(function(pq){ return [(pq[0]-SIDE_REF)/SCALE, (pq[1]-SIDE_REF)/SCALE]; });
+    var zrunsMz = saPx.map(function(pq){ return [(pq[0]-SIDE_REF-sideOffsetX)/SCALE, (pq[1]-SIDE_REF-sideOffsetX)/SCALE]; });
     zrunsMz = intersectIntervals(zrunsMz, mzLim);
     if(sidePolygon){
       // ★2026-07-04: アクセサリーの側面ポリゴンが指定されている行では、side画像
