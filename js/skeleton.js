@@ -258,6 +258,18 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
   var J=new Uint16Array(n*4), W=new Float32Array(n*4);
   var idxmap = subset.map(function(b){ return P3D.BIDX[b]; });
   var dists=new Float64Array(m);
+  // このコードのボーン名は「先端側のピボット」に対応する(親→自分の区間を表す)ため、
+  // 距離だけのk近傍だと、その区間の肉が常に「1つ遠位のボーン」(太もも→shin_L
+  // [実際は膝が回転軸]、二の腕→forearm_L[実際は肘]、前腕→wrist_L[実際は手首]、
+  // すね→foot_L[実際は足首])に最優勢に割り当たってしまう。export時のノード階層
+  // (model_export.js)ではこれらは遠位側の関節に位置するため、そのまま使うと
+  // 遠位の関節の回転につられてセグメント全体が振られてしまう(肘が肩寄りに
+  // 見える等の不具合)。近位の関節(股関節/肩/肘/膝)から正しく回転するよう、
+  // これらのボーンへの割り当てを丸ごと親ボーンへ付け替える(ブレンド中の一部
+  // ウェイトも含めて全て)。
+  var PARENT_REMAP_BONES = {shin_L:1,shin_R:1,forearm_L:1,forearm_R:1,wrist_L:1,wrist_R:1,foot_L:1,foot_R:1};
+  var parentIdxOf = new Int32Array(P3D.BONES.length).fill(-1);
+  P3D.BONES.forEach(function(b,bi){ if(PARENT_REMAP_BONES[b]) parentIdxOf[bi]=P3D.BIDX[P3D.BHIER[b]]; });
   // 首/頭の座標が分かる場合のみ、鎖骨などへの誤割り当てを補正する(下記参照)。
   // 閾値はキャラのスケールに比例させる。
   // yGate: 頭の高さから少し下(首寄り)だが、Tポーズの腕(肩の高さ=首の高さ付近)
@@ -270,6 +282,59 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     var neckY=pivots.neck[1], headY=pivots.head[1], hipsY=pivots.hips[1];
     yGate = headY - 0.4*(headY-neckY);
     distThresh = 0.7*(headY-hipsY);
+  }
+
+  // ---- 股関節/肩まわりの誤割り当て防止: 実際の関節点からの3D距離で候補ボーンを
+  // 絞り込む(高さ(vy)だけで判定すると、Tポーズ(腕を真横に伸ばした姿勢)では
+  // 前腕/手首/手までもが肩とほぼ同じ高さに来てしまい、走行などのモーションで
+  // 手だけ置き去りにされて帯状に伸びる不具合を招く。高さではなく関節点そのもの
+  // への3D距離を使えば、Tポーズで腕が横に長く伸びていても手・前腕は関節点から
+  // 十分離れているため誤って巻き込まれない)。
+  // 注意: このコードのボーン名は「先端側のピボット」に対応する(親→自分の
+  // 区間を表す)ため、thigh_L(親hips)は股関節スタブに過ぎず、実際の太もも本体
+  // (股関節→膝の回転)を担うのはshin_L。同様にupperarm_L(親clavicle_L)は
+  // 肩のスタブで、実際の二の腕本体(肩→肘の回転)を担うのはforearm_L。
+  // 候補から漏らすと、本当は動くはずの太もも/二の腕の肉がスタブ骨に固定されて
+  // 突っ張る/伸びる不具合になるため、これらも候補に含める。
+  function zoneMaskFor(names){
+    var idxs = names.map(function(b){ return subset.indexOf(b); });
+    if(idxs.some(function(i){ return i<0; })) return null;
+    var mask=new Uint8Array(m);
+    idxs.forEach(function(i){ mask[i]=1; });
+    return mask;
+  }
+  function dist3(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]); }
+  // 首/頭は、うつむき気味のポーズだと顎が鎖骨・肩の近くまで来て股関節/肩の
+  // ゲートに巻き込まれることがある。首/頭は既に専用のリジッド補正(後述)を
+  // 持っているので、そちらが機能できるよう常に候補から外さない。
+  function withNeckHead(mask){
+    if(!mask) return mask;
+    if(neckSubIdx>=0) mask[neckSubIdx]=1;
+    if(headSubIdx>=0) mask[headSubIdx]=1;
+    return mask;
+  }
+  var joints=[]; // {center:[x,y,z], r2:Number, mask:Uint8Array}
+  if(pivots.hips && pivots.torso && pivots.thigh_L && pivots.thigh_R && pivots.shin_L && pivots.shin_R){
+    var hipMask = withNeckHead(zoneMaskFor(['hips','torso','thigh_L','thigh_R','shin_L','shin_R']));
+    if(hipMask){
+      // 半径は太もも本体の長さ(hips→shin_L/R、実際の股関節〜膝の長さ)に比例させる。
+      // 股幅基準だと数cm相当まで縮んでしまい、太もも上部のほとんどが対象外になる。
+      var thighLen = 0.5*(dist3(pivots.hips,pivots.shin_L) + dist3(pivots.hips,pivots.shin_R));
+      var hipR = Math.max(0.35*thighLen, 1e-4);
+      joints.push({center:pivots.hips, r2:hipR*hipR, mask:hipMask});
+    }
+  }
+  if(pivots.chest){
+    ['L','R'].forEach(function(side){
+      var cl=pivots['clavicle_'+side], up=pivots['upperarm_'+side], fa=pivots['forearm_'+side];
+      if(!(cl && up && fa)) return;
+      var shMask = withNeckHead(zoneMaskFor(['chest','clavicle_'+side,'upperarm_'+side,'forearm_'+side]));
+      if(!shMask) return;
+      // 半径は二の腕本体の長さ(clavicle_→forearm_、実際の肩〜肘の長さ)に比例させる。
+      var upperArmLen = dist3(cl, fa);
+      var shR = Math.max(0.4*upperArmLen, 1e-4);
+      joints.push({center:cl, r2:shR*shR, mask:shMask});
+    });
   }
   for(var v=0; v<n; v++){
     var vx=V[v*3], vy=V[v*3+1], vz=V[v*3+2];
@@ -287,6 +352,15 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
       }
       dists[i2]=d;
     }
+    for(var jz=0; jz<joints.length; jz++){
+      var jc=joints[jz].center;
+      var jdx=vx-jc[0], jdy=vy-jc[1], jdz=vz-jc[2];
+      if(jdx*jdx+jdy*jdy+jdz*jdz <= joints[jz].r2){
+        var jmask=joints[jz].mask;
+        for(var zi=0; zi<m; zi++){ if(!jmask[zi]) dists[zi]=Infinity; }
+        break;
+      }
+    }
     // k近傍(距離昇順)をO(m log m)で求める(m<=23なので十分高速)
     var order=Array.from({length:m}, function(_,i){return i;});
     order.sort(function(a,b){ return dists[a]-dists[b]; });
@@ -301,28 +375,50 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
       W[v*4+c2]=ws[c2]/wsum;
     }
     for(var c3=k;c3<4;c3++){ J[v*4+c3]=idxmap[order[0]]; W[v*4+c3]=0; }
+    // 前述のPARENT_REMAP_BONESにより、ブレンド中の一部ウェイトも含めて全4枠を
+    // 正しい近位ボーンへ付け替える(同じボーンに複数枠が重複したら合算して詰め直す)。
+    for(var rc=0; rc<4; rc++){
+      var pIdx=parentIdxOf[J[v*4+rc]];
+      if(pIdx>=0) J[v*4+rc]=pIdx;
+    }
+    for(var mc=0; mc<4; mc++){
+      if(W[v*4+mc]===0) continue;
+      for(var mc2=mc+1; mc2<4; mc2++){
+        if(W[v*4+mc2]>0 && J[v*4+mc2]===J[v*4+mc]){ W[v*4+mc]+=W[v*4+mc2]; W[v*4+mc2]=0; }
+      }
+    }
     // 首/頭が優勢な頂点は、鎖骨など空間的に近いだけで骨格上は無関係な骨まで
     // k近傍に混ざり込みやすい(肩と首の付け根が近いため)。腕を振ると首や頭の
     // 一部がその骨に引っ張られてちぎれたように見えるため、髪(アクセサリー)を
     // 頭に完全固定しているのと同じ考え方で、首/頭が最大ウェイトの頂点は
     // その骨100%の剛体ウェイトに丸める。
+    // 同じ理由で、手足の各セグメント本体(太もも/すね/二の腕/前腕)が優勢な頂点も
+    // 複数ボーンでブレンドすると「しなる」ように見える(曲げ角度が関節だけでなく
+    // 肉の途中にも分散してしまうため)。上のリマップで既に正しい近位ボーンに
+    // なっているので、ここでは優勢度が高い(=関節の境目からもう十分離れている)
+    // 頂点だけを単一ボーンの剛体ウェイトに丸める(境目自体は裂け目を避けるため
+    // ブレンドのまま残す)。
+    var RIGID_DOM_THRESH = 0.55;
+    var RIGID_SHAFT_BONES = {thigh_L:1,thigh_R:1,shin_L:1,shin_R:1,upperarm_L:1,upperarm_R:1,forearm_L:1,forearm_R:1};
     var domIdx=0; for(var dci=1;dci<4;dci++){ if(W[v*4+dci]>W[v*4+domIdx])domIdx=dci; }
     var domBone=P3D.BONES[J[v*4+domIdx]];
-    var rigidBone=null;
+    var rigidJ=null;
     if(domBone==='neck'||domBone==='head'){
-      rigidBone=domBone;
+      rigidJ=J[v*4+domIdx];
     }else if(yGate!==null && vy>yGate && Math.min(dists[neckSubIdx],dists[headSubIdx])<distThresh){
-      // 逆に、首/頭が優勢にならなかった頂点でも、顔・頬・耳のように首の高さより
-      // 上にあって首/頭のすぐ近く(体格に比例した範囲内)にあるものは、
-      // 実際には顔の一部なのに鎖骨/二の腕の端点の方がわずかに近いという理由だけで
-      // 誤って腕側に割り当てられてしまうことがある(頬が肩や肘にくっついて
-      // 見える不具合の原因)。首の高さより上・かつ首/頭にごく近い頂点は
-      // 首/頭のうち近い方へ強制的に寄せる。
-      rigidBone = dists[neckSubIdx]<dists[headSubIdx] ? 'neck' : 'head';
+      // 首/頭が優勢にならなかった頂点でも、顔・頬・耳のように首の高さより上に
+      // あって首/頭のすぐ近く(体格に比例した範囲内)にあるものは、実際には顔の
+      // 一部なのに鎖骨/二の腕の端点の方がわずかに近いという理由だけで誤って
+      // 腕側に割り当てられてしまうことがある(頬が肩や肘にくっついて見える
+      // 不具合の原因)。首の高さより上・かつ首/頭にごく近い頂点は首/頭のうち
+      // 近い方へ強制的に寄せる。上のRIGID_SHAFT_BONES判定より先に行うことで、
+      // 顎など肩ボーンの優勢度がたまたま高い頂点が誤って腕側に剛体化されるのを防ぐ。
+      rigidJ = dists[neckSubIdx]<dists[headSubIdx] ? idxmap[neckSubIdx] : idxmap[headSubIdx];
+    }else if(RIGID_SHAFT_BONES[domBone] && W[v*4+domIdx]>=RIGID_DOM_THRESH){
+      rigidJ=J[v*4+domIdx];
     }
-    if(rigidBone){
-      var domJ = rigidBone==='neck' ? idxmap[neckSubIdx] : idxmap[headSubIdx];
-      J[v*4]=domJ;J[v*4+1]=domJ;J[v*4+2]=domJ;J[v*4+3]=domJ;
+    if(rigidJ!==null){
+      J[v*4]=rigidJ;J[v*4+1]=rigidJ;J[v*4+2]=rigidJ;J[v*4+3]=rigidJ;
       W[v*4]=1;W[v*4+1]=0;W[v*4+2]=0;W[v*4+3]=0;
     }
   }
