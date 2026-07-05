@@ -257,11 +257,21 @@ function bleedEdges(rgba, w, h, alpha, alphaDilate){
   alphaDilate = (alphaDilate===undefined) ? 9 : alphaDilate;
   var n=w*h;
   var nearestIdx=new Int32Array(n).fill(-1);
+  var dist=new Int32Array(n).fill(-1);
   var visited=new Uint8Array(n);
   var queue=[]; var qh=0;
-  for(var i=0;i<n;i++){ if(alpha[i]){ nearestIdx[i]=i; visited[i]=1; queue.push(i); } }
+  for(var i=0;i<n;i++){ if(alpha[i]){ nearestIdx[i]=i; dist[i]=0; visited[i]=1; queue.push(i); } }
+  // ★2026-07-05: 以前はキャンバス全域まで最近傍色を無制限に伝播していたため、
+  // Tポーズの袖・脚等にある細かい帯模様(リストバンド等)の色が背景の遠くまで
+  // 直線的なボロノイ境界として伸び、輪郭からわずかにはみ出た頂点(髪の房・
+  // アクセサリーの縁など、実シルエットよりわずかに広いUVを持つ面)がその
+  // ボロノイ模様を拾って縞々に見える不具合の原因になっていた。にじみは
+  // 縁からBLEED_MAX_DISTだけに制限し、それより遠くは(白いはずの)元の背景
+  // ピクセルへ戻す。
+  var BLEED_MAX_DIST = Math.max(alphaDilate*4, 40);
   while(qh<queue.length){
     var idx=queue[qh++];
+    if(dist[idx]>=BLEED_MAX_DIST) continue;
     var src=nearestIdx[idx];
     var x=idx%w, y=(idx/w)|0;
     var nbrs=[];
@@ -269,12 +279,13 @@ function bleedEdges(rgba, w, h, alpha, alphaDilate){
     if(y>0)nbrs.push(idx-w); if(y<h-1)nbrs.push(idx+w);
     for(var k=0;k<nbrs.length;k++){
       var ni=nbrs[k];
-      if(!visited[ni]){ visited[ni]=1; nearestIdx[ni]=src; queue.push(ni); }
+      if(!visited[ni]){ visited[ni]=1; nearestIdx[ni]=src; dist[ni]=dist[idx]+1; queue.push(ni); }
     }
   }
   var outRgba=new Uint8ClampedArray(n*4);
   for(var i2=0;i2<n;i2++){
-    var src2=nearestIdx[i2]>=0?nearestIdx[i2]:i2;
+    var farOrUnreached = (nearestIdx[i2]<0) || (dist[i2]>BLEED_MAX_DIST);
+    var src2 = farOrUnreached ? i2 : nearestIdx[i2];
     var so=src2*4, o=i2*4;
     outRgba[o]=rgba[so]; outRgba[o+1]=rgba[so+1]; outRgba[o+2]=rgba[so+2]; outRgba[o+3]=255;
   }
