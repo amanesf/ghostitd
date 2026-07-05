@@ -127,6 +127,11 @@ const cvs=document.getElementById('c');
 const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true,alpha:true,powerPreference:'high-performance'});
 renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
 renderer.outputEncoding=THREE.sRGBEncoding;
+// ACESフィルミックトーンマッピング: 明るい部分が白飛びしにくくなる(セル影用の
+// toonMatにのみ効かせる。flatMat/outlineはtoneMapped=falseにして生の色を保つ)。
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.0;
+const maxAniso=renderer.capabilities.getMaxAnisotropy();
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xffffff);
 const cam=new THREE.PerspectiveCamera(35,innerWidth/innerHeight,0.01,100);
@@ -135,12 +140,17 @@ const root=new THREE.Group(); scene.add(root);
 // --- トゥーンシェード用ライト（world固定: モデル回転で陰影が自然に動く） ---
 const hemiLight=new THREE.HemisphereLight(0xffffff,0x23262b,0.45);
 scene.add(hemiLight);
-const keyLight=new THREE.DirectionalLight(0xffffff,1.15);
+const keyLight=new THREE.DirectionalLight(0xffffff,1.0);
 keyLight.position.set(1.4,2.4,2.8);
 scene.add(keyLight);
 const fillLight=new THREE.DirectionalLight(0xbcd6ff,0.32);
 fillLight.position.set(-1.6,0.6,-1.8);
 scene.add(fillLight);
+// リムライト(逆光): キャラの背後・上から当て、髪や肩の輪郭を光らせて立体感を出す。
+// 画面全体を明るくするのではなく輪郭だけに効くため、暗部はそのまま暗く保てる。
+const rimLight=new THREE.DirectionalLight(0xcfe8ff,0.85);
+rimLight.position.set(-0.3,3.0,-3.0);
+scene.add(rimLight);
 // --- トゥーン用グラデーションマップ（3段階のセル影） ---
 let toonGradCtx=null;
 function makeToonGradient(){
@@ -153,18 +163,27 @@ function makeToonGradient(){
   return tex;
 }
 const toonGradient=makeToonGradient();
+// 影(暗部)は明るさをしっかり落としつつ青紫がかった色にし、明部(照らされた面)は
+// 常に255へ張り付かせず少し余白を残す(白飛び防止、ACESトーンマッピングと合わせて
+// 「セル影をONにすると明るくなりすぎる」のを防ぐ)。
 function setToonGradientStrength(pct){ // pct 0..100
-  const s=pct/100;
+  const s=Math.max(0,Math.min(1,pct/100));
   const ctx=toonGradCtx;
-  const mid=160, spread=Math.round(140*s);
-  const vals=[Math.max(0,mid-spread),mid,Math.min(255,mid+spread)];
-  vals.forEach((v,i)=>{ctx.fillStyle='rgb('+v+','+v+','+v+')';ctx.fillRect(i,0,1,1);});
+  const darkV=Math.round(115-85*s);   // s=0:115(浅い影) → s=1:30(くっきり暗い影)
+  const litV=Math.round(225+20*s);    // s=0:225 → s=1:245(常に白飛びしない余白を残す)
+  const dark=[Math.max(0,darkV-14),Math.max(0,darkV-8),Math.min(255,darkV+26)]; // 青紫ティント
+  const mid=[158,155,165];
+  const lit=[litV,litV,Math.min(255,litV+4)];
+  [dark,mid,lit].forEach((rgb,i)=>{ctx.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';ctx.fillRect(i,0,1,1);});
   toonGradient.needsUpdate=true;
   invalidate();
 }
 let celOn=false, outlineOn=false;
 function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; } // pct 0..100 -> 0.0005..0.01
-// --- 輪郭線(アウトライン)メッシュ生成: 法線方向に頂点を押し出した黒い裏面メッシュ ---
+// --- 輪郭線(アウトライン)メッシュ生成: 法線方向に頂点を押し出した裏面メッシュ ---
+// 単色の黒ではなく、元のテクスチャ(map)をそのまま使い暗い色を掛け合わせることで、
+// 髪は暗い髪色、肌は暗い肌色、服は暗い服色…と場所ごとに自然に濃い色の線になる
+// (単一の黒縁取りだと全パーツで浮いて見えるため)。
 function buildOutline(mesh,thickness){
   const geo=mesh.geometry.clone();
   const pos=geo.attributes.position,nor=geo.attributes.normal;
@@ -172,7 +191,8 @@ function buildOutline(mesh,thickness){
     pos.setXYZ(i,pos.getX(i)+nor.getX(i)*thickness,pos.getY(i)+nor.getY(i)*thickness,pos.getZ(i)+nor.getZ(i)*thickness);
   }
   pos.needsUpdate=true;
-  const mat=new THREE.MeshBasicMaterial({color:0x14171c,side:THREE.BackSide,skinning:true});
+  const mat=new THREE.MeshBasicMaterial({map:mesh.material.map||null,color:0x2a2830,
+    side:THREE.BackSide,skinning:true,toneMapped:false});
   const out=new THREE.SkinnedMesh(geo,mat);
   out.bind(mesh.skeleton,mesh.bindMatrix);
   out.userData.isOutline=true;
@@ -203,6 +223,25 @@ function bindBounds(obj){
   return new THREE.Box3(mn,mx);
 }
 let fitDist=2.6;
+// 接地影(疑似コンタクトシャドウ): 正確な影計算の代わりに、足元に柔らかい円形の
+// 暗い減衰デカールを1枚敷くだけで「地面に立っている感」を安く出す。
+let groundDecal=null;
+function buildGroundDecal(){
+  const c=document.createElement('canvas');c.width=128;c.height=128;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(64,64,0,64,64,64);
+  g.addColorStop(0,'rgba(0,0,0,0.32)');
+  g.addColorStop(0.7,'rgba(0,0,0,0.14)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,128,128);
+  const tex=new THREE.CanvasTexture(c);
+  const geo=new THREE.CircleGeometry(1,32);
+  geo.rotateX(-Math.PI/2);
+  const mat=new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false,toneMapped:false});
+  const mesh=new THREE.Mesh(geo,mat);
+  root.add(mesh);
+  return mesh;
+}
 function frameModel(obj){
   obj.position.set(0,0,0); root.position.set(0,0,0); obj.updateMatrixWorld(true);
   const box=bindBounds(obj);
@@ -218,6 +257,10 @@ function frameModel(obj){
   camDist=fitDist;
   rotY=0; rotX=0;                               // 正面・水平
   cam.position.set(0,0,camDist); cam.lookAt(0,0,0);
+  if(!groundDecal)groundDecal=buildGroundDecal();
+  const gr=Math.max(size.x,size.z)*0.6;
+  groundDecal.scale.set(gr,gr,1);
+  groundDecal.position.set(0,-size.y/2+0.002,0);
   invalidate();
 }
 function clearModel(){ if(model){root.remove(model);model=null;} mixer=null;clips=[];action=null;playing=false; clearSkelViz(); }
@@ -284,12 +327,14 @@ function loadGLB(buf,onLoaded,autoplayMotion){
     model=gltf.scene; root.add(model);
     model.traverse(o=>{ if(o.isMesh&&o.material){
       const old=o.material;
+      // flatMat(セル影OFF時)は「素のテクスチャをそのまま表示する」役割なので
+      // toneMapped=falseにしてACESトーンマッピングの影響を受けないようにする。
       const flatMat=new THREE.MeshBasicMaterial({map:old.map||null,transparent:!!old.transparent,
-        alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
-      if(flatMat.map)flatMat.map.encoding=THREE.sRGBEncoding;
+        alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,toneMapped:false});
+      if(flatMat.map){flatMat.map.encoding=THREE.sRGBEncoding;flatMat.map.anisotropy=maxAniso;}
       const toonMat=new THREE.MeshToonMaterial({map:old.map||null,gradientMap:toonGradient,
         transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
-      if(toonMat.map)toonMat.map.encoding=THREE.sRGBEncoding;
+      if(toonMat.map){toonMat.map.encoding=THREE.sRGBEncoding;toonMat.map.anisotropy=maxAniso;}
       o.userData.flatMat=flatMat;o.userData.toonMat=toonMat;
       o.material=celOn?toonMat:flatMat;
       if(o.isSkinnedMesh){
