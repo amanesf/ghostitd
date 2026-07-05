@@ -349,6 +349,12 @@ function carveRegion(opts){
   var faW=opts.faW, faH=opts.faH, saW=opts.saW, saH=opts.saH;
   var faCont=opts.faCont, baCont=opts.baCont, saCont=opts.saCont;
   var SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT, SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
+  // ★2026-07-05: 背面画像は前面画像とは別に撮影/作画されているため、シルエットの
+  // 水平中心が前面のCXと正確に一致するとは限らない(実測でも数%ズレることがある)。
+  // 一致する前提で(faW-CX)を使うと、背面全体が一定量ズレて見える。呼び出し側が
+  // 背面シルエット自身から求めたCXBackを渡してきた場合はそれを使い、無ければ
+  // 従来通り前面基準のミラー(faW-CX)にフォールバックする。
+  var CXBack = (opts.CXBack!==undefined && opts.CXBack!==null) ? opts.CXBack : (faW-CX);
   var mxB=opts.mxBounds, myB=opts.myBounds, mzB=opts.mzBounds;
   var vox=opts.vox, psqHull=opts.psqHull, trackGap=opts.trackGap, trackWin=opts.trackWin;
   var smoothIters=opts.smoothIters||0;
@@ -382,7 +388,7 @@ function carveRegion(opts){
     var frPx = faCont ? C.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : C.findRuns(faRow);
     var brPx = baCont ? C.findRunsSubpixel(baRow, rowOf1d(baCont,faW,fy[iy]), whiteThr) : C.findRuns(baRow);
     var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
-    var br=brPx.map(function(pq){ return [(faW-pq[1]-CX)/SCALE, (faW-pq[0]-CX)/SCALE]; });
+    var br=brPx.map(function(pq){ return [(CXBack-pq[1])/SCALE, (CXBack-pq[0])/SCALE]; });
     var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
     // ★2026-07-04: アクセサリー(ポリゴン指定あり)では、front/backの絵柄の
     // 描かれ方が行単位で食い違う(片方だけ描線が途切れる等)と交差が空になり

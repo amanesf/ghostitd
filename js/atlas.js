@@ -176,6 +176,12 @@ function blendTriangleColors(primaryData, p0,p1,p2, w0,w1,w2, otherData, o0,o1,o
 function stageAtlasBake(opts){
   var W=opts.W, H=opts.H, SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT;
   var SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
+  // ★2026-07-05: 背面画像は前面画像とシルエット中心が一致するとは限らない
+  // (実測で数%規模のズレが起きうる)。一致する前提で前面のCXをミラーして
+  // 背面のUVを求めると、背面テクスチャ全体が一定量ズレて見える。呼び出し側
+  // (pipeline.js)が背面シルエット自身から求めたCXBackを渡してきた場合は
+  // それを使い、無ければ従来通り前面ミラー(W-CX)にフォールバックする。
+  var CXBack = (opts.CXBack!==undefined && opts.CXBack!==null) ? opts.CXBack : (W-CX);
   var ATW=3*W, ATH=H;
 
   var nBodyV=opts.bodyV.length/3;
@@ -218,6 +224,7 @@ function stageAtlasBake(opts){
     ? Math.max(0, Number(opts.colorGradWidth)) : 0;
 
   var pxAll=new Float64Array(nV), pyAll=new Float64Array(nV);
+  var pxBackAll=new Float64Array(nV);
   var spxAll=new Float64Array(nV), spyAll=new Float64Array(nV);
   for(var v=0; v<nV; v++){
     var x=allV[v*3], y=allV[v*3+1], z=allV[v*3+2];
@@ -232,6 +239,10 @@ function stageAtlasBake(opts){
     // 引き伸ばして使うようにする。
     pxAll[v]=Math.min(Math.max(x*SCALE+CX,0),W-1);
     pyAll[v]=Math.min(Math.max(YBOT-y*SCALE,0),H-1);
+    // 背面キャンバスの生ピクセル列(CXBack基準、carving.jsの背面変換と同じ式の逆)。
+    // CXBackが前面ミラー(W-CX)と異なる場合、pxAllをそのままW-pxAllで使うのとは
+    // 結果が変わる(体全体の一定シフトを補正する)。
+    pxBackAll[v]=Math.min(Math.max(CXBack-x*SCALE,0),W-1);
     spxAll[v]=Math.min(Math.max(SIDE_REF+z*SCALE,0),W-1);
     spyAll[v]=Math.min(Math.max(SYTOP+(1.0-y)*(SYBOT-SYTOP),0),H-1);
   }
@@ -296,7 +307,7 @@ function stageAtlasBake(opts){
   }
   function regionPoint(region, vi){
     if(region==='front') return [pxAll[vi], pyAll[vi]];
-    if(region==='back') return [(W-1)-pxAll[vi], pyAll[vi]];
+    if(region==='back') return [pxBackAll[vi], pyAll[vi]];
     return [spxAll[vi], spyAll[vi]];
   }
   // 頂点viの、primary側からother側へのブレンド重み(継ぎ目ちょうどで0.5、
@@ -380,7 +391,11 @@ function stageAtlasBake(opts){
         gu=(2*W+spxAll[vi])/ATW;
         gv=spyAll[vi]/ATH;
       }else{
-        gu=(front ? pxAll[vi] : W+pxAll[vi])/ATW;
+        // ★2026-07-05: 背面はpxAll(前面基準)をそのまま流用せず、CXBackで求めた
+        // 背面キャンバス自身のピクセル列(pxBackAll)を使う。buildAtlasCanvasは
+        // backCanvasを幅Wぶんミラーして[W,2W]領域に貼るので、生ピクセル列lxは
+        // アトラス座標2W-lxに対応する。
+        gu = front ? (pxAll[vi]/ATW) : ((2*W-pxBackAll[vi])/ATW);
         gv=pyAll[vi]/ATH;
       }
       tri.push(getIndex(vi,gu,gv));
