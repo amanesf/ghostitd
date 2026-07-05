@@ -599,20 +599,40 @@ function carveRegion(opts){
             continue; // デッドゾーン
           }
         }
+        // 腕の奥行きは縦幅由来の円形断面(zr、z=0対称)、胴体の奥行きはside画像
+        // 由来のhdFront/hdBack(zc基準の非対称)で、全く別の測り方をしている。
+        // 腕の縦幅の外側は以前「デッドゾーン」として何も彫らなかった(境目で
+        // 胴体奥行きの薄いヒレが付くのを避けるため)が、その結果、腕の輪郭が
+        // 終わった直後の行でいきなり胴体の(側面計測由来の)奥行きに切り替わり、
+        // 肩の位置で奥行きが急に増えて見えていた。デッドゾーンの代わりに、
+        // 腕自身のzrを起点として胴体のzc/hdFront/hdBackへなだらかに線形補間する
+        // ことで、肩での奥行きジャンプをなくす。
+        var zcEff=null, hdFrontEff=0, hdBackEff=0;
         if(exVal<0 && armProf && !isNaN(armProf.cy[ix])){
           var ua=Math.abs(myv-armProf.cy[ix]);
-          if(ua<armProf.ry[ix]){
+          var armRy=armProf.ry[ix];
+          if(ua<armRy){
             zr=armProf.rz[ix];
-            exVal=Math.pow(ua/armProf.ry[ix], psqHull); // 傾いた円柱の縦断面プロファイル
-          }else if(ua<armProf.ry[ix]*boundFactor){
-            continue; // デッドゾーン
+            exVal=Math.pow(ua/armRy, psqHull); // 傾いた円柱の縦断面プロファイル
+          }else{
+            var blendW=Math.max(armRy*(boundFactor-1), EPS);
+            if(ua<armRy+blendW){
+              var tBlend=(ua-armRy)/blendW; // 0=腕の際 -> 1=胴体
+              var armR=armProf.rz[ix];
+              zcEff=zc*tBlend;
+              hdFrontEff=armR+(hdFront-armR)*tBlend;
+              hdBackEff=armR+(hdBack-armR)*tBlend;
+              exVal=Math.pow(Math.abs(xv-cx2)/hw3, psqHull); // 胴体側のxy形状をそのまま使う
+            }
           }
         }
         if(exVal<0) exVal=Math.pow(Math.abs(xv-cx2)/hw3, psqHull);
         if(exVal>=2) continue;
-        // z範囲は列ごとに決める(腕/手はz原点対称、胴体はzc基準の非対称)
+        // z範囲は列ごとに決める(腕/手はz原点対称、胴体はzc基準の非対称、
+        // 肩の遷移帯はzcEff/hdFrontEff/hdBackEffで補間した中間値を使う)
         var izLoC, izHiC;
-        if(zr>=0){ izLoC=-zr*boundFactor; izHiC=zr*boundFactor; }
+        if(zcEff!==null){ izLoC=zcEff-hdBackEff*boundFactor; izHiC=zcEff+hdFrontEff*boundFactor; }
+        else if(zr>=0){ izLoC=-zr*boundFactor; izHiC=zr*boundFactor; }
         else{ izLoC=zc-hdBack*boundFactor; izHiC=zc+hdFront*boundFactor; }
         var iz0=Math.max(0, Math.floor((izLoC-mzMin)/(mzMax-mzMin)*(nz-1)));
         var iz1=Math.min(nz-1, Math.ceil((izHiC-mzMin)/(mzMax-mzMin)*(nz-1)));
@@ -621,7 +641,10 @@ function carveRegion(opts){
         for(var iz=iz0; iz<=iz1; iz++){
           var mzv=mz[iz];
           var ez;
-          if(zr>=0){
+          if(zcEff!==null){
+            var hdvB=(mzv>=zcEff)?hdFrontEff:hdBackEff;
+            ez=Math.pow(Math.abs(mzv-zcEff)/hdvB, psqHull);
+          }else if(zr>=0){
             ez=Math.pow(Math.abs(mzv)/zr, psqHull); // 腕=円形/手=押し出し(z原点対称)
           }else{
             var hdv = (mzv>=zc) ? hdFront : hdBack;
