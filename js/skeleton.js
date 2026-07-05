@@ -368,22 +368,27 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     // 一部がその骨に引っ張られてちぎれたように見えるため、髪(アクセサリー)を
     // 頭に完全固定しているのと同じ考え方で、首/頭が最大ウェイトの頂点は
     // その骨100%の剛体ウェイトに丸める。
-    // 同じ理由で、太もも本体(shin_L/R)・二の腕本体(forearm_L/R)が優勢な頂点も
+    // 同じ理由で、手足の各セグメント本体(太もも/すね/二の腕/前腕)が優勢な頂点も
     // 複数ボーンでブレンドすると「しなる」ように見える(曲げ角度が関節だけでなく
-    // 肉の途中にも分散してしまうため)。この2部位はブレンドではなく単一ボーンの
-    // 剛体回転にした方が自然に見えるため、同様に丸める。ただし股関節/肩の
-    // 付け根そのもの(まだ優勢度が低い=hips側ともかなり混ざっている頂点)まで
-    // 無条件に丸めると、そこだけ隣(hips/torso側)との間に裂け目が見えてしまう
-    // ため、既にある程度優勢(RIGID_DOM_THRESH以上)な頂点だけを丸め、関節の
-    // 境目はブレンドのまま滑らかに繋ぐ。
+    // 肉の途中にも分散してしまうため)。ブレンドではなく単一ボーンの剛体回転に
+    // した方が自然に見えるため、同様に丸める。
+    // ★注意: 距離だけで見るとその部位の肉は「自分より1つ遠位のボーン」
+    // (太もも→shin_L/R[実際には膝が回転軸]、二の腕→forearm_L/R[実際には肘]、
+    // 前腕→wrist_L/R[実際には手首]、すね→foot_L/R[実際には足首])が最優勢に
+    // なるが、export時のノード階層(model_export.js)ではそれらは遠位側の関節に
+    // 位置するため、そのボーン100%で丸めると遠位の関節の回転につられて本来の
+    // セグメント全体まで動いてしまう(「肘が肩寄りに見える」不具合の原因)。
+    // 実際に近位の関節(股関節/肩/肘/膝)から回転すべきなのは親ボーンなので、
+    // 丸める先はそちらにリダイレクトする。
     var RIGID_DOM_THRESH = 0.55;
+    var RIGID_REDIRECT_BONES = {shin_L:1,shin_R:1,forearm_L:1,forearm_R:1,wrist_L:1,wrist_R:1,foot_L:1,foot_R:1};
     var domIdx=0; for(var dci=1;dci<4;dci++){ if(W[v*4+dci]>W[v*4+domIdx])domIdx=dci; }
     var domBone=P3D.BONES[J[v*4+domIdx]];
     var rigidJ=null;
     if(domBone==='neck'||domBone==='head'){
       rigidJ=J[v*4+domIdx];
-    }else if((domBone==='shin_L'||domBone==='shin_R'||domBone==='forearm_L'||domBone==='forearm_R') && W[v*4+domIdx]>=RIGID_DOM_THRESH){
-      rigidJ=J[v*4+domIdx];
+    }else if(RIGID_REDIRECT_BONES[domBone] && W[v*4+domIdx]>=RIGID_DOM_THRESH){
+      rigidJ=P3D.BIDX[P3D.BHIER[domBone]];
     }else if(yGate!==null && vy>yGate && Math.min(dists[neckSubIdx],dists[headSubIdx])<distThresh){
       // 逆に、首/頭が優勢にならなかった頂点でも、顔・頬・耳のように首の高さより
       // 上にあって首/頭のすぐ近く(体格に比例した範囲内)にあるものは、
