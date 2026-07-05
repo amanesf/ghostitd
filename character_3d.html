@@ -98,6 +98,10 @@
     <button class="btn" id="outline" style="flex:0 0 80px">輪郭線</button>
     <div class="slideWrap"><input type="range" id="outlineStrength" min="0" max="100" value="40"></div>
   </div>
+  <div class="row">
+    <button class="btn on" id="vivid" style="flex:0 0 80px">アニメ調</button>
+    <div class="slideWrap"><input type="range" id="vividStrength" min="0" max="100" value="70"></div>
+  </div>
   <div class="row" id="animRow" style="display:none">
     <span class="lbl">モーション</span>
     <select id="animSel"></select>
@@ -453,6 +457,24 @@ function setBgWhite(on){
   invalidate();
 }
 document.getElementById('bgWhite').onclick=()=>setBgWhite(!bgWhiteOn);
+
+// アニメ調(彩度・コントラスト強調): WebGLの描画には手を加えず、canvas要素に
+// CSS filterをかけるだけの表示専用エフェクト(ダウンロードするGLBの色データには
+// 影響しない)。invalidate()は不要(ブラウザがCSSレイヤーを自動で再合成する)。
+let vividOn=true;
+function applyVivid(){
+  const s=parseInt(document.getElementById('vividStrength').value);
+  const sat=1+(s/100)*1.2, con=1+(s/100)*0.5;
+  cvs.style.filter=vividOn?`saturate(${sat.toFixed(2)}) contrast(${con.toFixed(2)})`:'none';
+}
+function setVivid(on){
+  vividOn=on;
+  document.getElementById('vivid').classList.toggle('on',on);
+  applyVivid();
+}
+document.getElementById('vivid').onclick=()=>setVivid(!vividOn);
+document.getElementById('vividStrength').oninput=applyVivid;
+applyVivid();
 document.getElementById('download').onclick=()=>{
   if(!lastModelBuf){ document.getElementById('err').textContent='ダウンロードできるモデルがありません'; return; }
   const blob=new Blob([lastModelBuf],{type:'model/gltf-binary'});
