@@ -271,6 +271,41 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
     yGate = headY - 0.4*(headY-neckY);
     distThresh = 0.7*(headY-hipsY);
   }
+
+  // ---- 股関節/肩まわりの誤割り当て防止: 高さ帯ごとに候補ボーンを絞り込む ----
+  // hips/torso/thigh_L/thigh_R、chest/clavicle/upperarmはピボット同士が空間的に
+  // 近接するため、距離だけのk近傍だと無関係な部位(反対側の脚、腕、首など)まで
+  // 紛れ込み、関節を曲げたときに離れた部位まで連動してしまう(ゴム状に伸びる)
+  // 原因になる。該当の高さ帯にある頂点は、通常のk近傍距離計算に入る前に候補を
+  // その部位グループだけへ絞る(帯の外の頂点は従来通り全ボーンが候補のまま)。
+  function zoneMaskFor(names){
+    var idxs = names.map(function(b){ return subset.indexOf(b); });
+    if(idxs.some(function(i){ return i<0; })) return null;
+    var mask=new Uint8Array(m);
+    idxs.forEach(function(i){ mask[i]=1; });
+    return mask;
+  }
+  var hipZoneMask=null, hipYMin=0, hipYMax=0;
+  if(pivots.hips && pivots.torso){
+    hipZoneMask = zoneMaskFor(['hips','torso','thigh_L','thigh_R']);
+    if(hipZoneMask){
+      var hipsY2=pivots.hips[1], torsoY2=pivots.torso[1];
+      var shinYs=[pivots.shin_L,pivots.shin_R].filter(Boolean).map(function(p){ return p[1]; });
+      var thighSpan = shinYs.length ? (hipsY2-Math.min.apply(null,shinYs)) : Math.abs(torsoY2-hipsY2);
+      hipYMin = hipsY2 - 0.35*thighSpan;
+      hipYMax = torsoY2 + 0.25*(torsoY2-hipsY2);
+    }
+  }
+  var shoulderZoneMask=null, shYMin=0, shYMax=0;
+  if(pivots.chest && pivots.torso && pivots.neck){
+    shoulderZoneMask = zoneMaskFor(['chest','clavicle_L','clavicle_R','upperarm_L','upperarm_R']);
+    if(shoulderZoneMask){
+      var chestY2=pivots.chest[1], torsoY3=pivots.torso[1], neckY2=pivots.neck[1];
+      shYMin = chestY2 - 0.3*(chestY2-torsoY3);
+      shYMax = neckY2 - 0.1*(neckY2-chestY2);
+    }
+  }
+
   for(var v=0; v<n; v++){
     var vx=V[v*3], vy=V[v*3+1], vz=V[v*3+2];
     for(var i2=0;i2<m;i2++){
@@ -286,6 +321,11 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k){
         d=Math.sqrt(dx2*dx2+dy2*dy2+dz2*dz2);
       }
       dists[i2]=d;
+    }
+    if(hipZoneMask && vy>=hipYMin && vy<=hipYMax){
+      for(var zi=0; zi<m; zi++){ if(!hipZoneMask[zi]) dists[zi]=Infinity; }
+    }else if(shoulderZoneMask && vy>=shYMin && vy<=shYMax){
+      for(var zj=0; zj<m; zj++){ if(!shoulderZoneMask[zj]) dists[zj]=Infinity; }
     }
     // k近傍(距離昇順)をO(m log m)で求める(m<=23なので十分高速)
     var order=Array.from({length:m}, function(_,i){return i;});
