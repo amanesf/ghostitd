@@ -79,12 +79,12 @@ function buildAtlasCanvas(frontCanvas, backCanvas, sideCanvas){
   atlas.width=3*W; atlas.height=H;
   var ctx=atlas.getContext('2d');
   ctx.drawImage(frontCanvas, 0, 0);
-  // ★2026-07-05: 実測(front.png/back.pngのTポーズ腕の左右対称軸をピクセルで
-  // 直接比較)で、back.pngはfront.pngを鏡像にしたものではなく、front.pngと
-  // 同じ列基準(同じ左右)で描かれていることを確認した。以前はここで左右反転
-  // していたため、体全体がわずかに(実測12px前後)ズレて見える原因になっていた。
-  // 反転せずそのまま隣に貼る。
-  ctx.drawImage(backCanvas, W, 0);
+  // back画像は左右反転して中央に貼る
+  ctx.save();
+  ctx.translate(W + backCanvas.width, 0);
+  ctx.scale(-1,1);
+  ctx.drawImage(backCanvas, 0, 0);
+  ctx.restore();
   ctx.drawImage(sideCanvas, 2*W, 0);
   return atlas;
 }
@@ -281,8 +281,9 @@ function stageAtlasBake(opts){
   frontS=smoothField(frontS, seamSmoothIters);
 
   // 継ぎ目の実カラーブレンド用に、front/back/sideキャンバスのImageDataを一度だけ
-  // 取得しておく(colorGradWidth>0のときのみ)。back画像はfront画像と同じ列基準
-  // (鏡像ではない、buildAtlasCanvas参照)なので、front同様pxAllをそのまま使う。
+  // 取得しておく(colorGradWidth>0のときのみ)。back画像は生キャンバスの時点では
+  // mesh xに対して鏡像(buildAtlasCanvasが合成時に反転させる前提)なので、
+  // サンプリング側でも同じ反転を再現する。
   var blendOn = !!(colorGradWidth>0 && opts.frontCanvas && opts.backCanvas && opts.sideCanvas);
   var frontImgData=null, backImgData=null, sideImgData=null;
   if(blendOn){
@@ -295,7 +296,7 @@ function stageAtlasBake(opts){
   }
   function regionPoint(region, vi){
     if(region==='front') return [pxAll[vi], pyAll[vi]];
-    if(region==='back') return [pxAll[vi], pyAll[vi]];
+    if(region==='back') return [(W-1)-pxAll[vi], pyAll[vi]];
     return [spxAll[vi], spyAll[vi]];
   }
   // 頂点viの、primary側からother側へのブレンド重み(継ぎ目ちょうどで0.5、
