@@ -102,7 +102,10 @@ const maxAniso=renderer.capabilities.getMaxAnisotropy();
 const FOG_COLOR=0x0a0c10;
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(FOG_COLOR);
-scene.fog=new THREE.Fog(FOG_COLOR,11,34); // 視界を15〜20m程度に制限(足元付近で急に埋もれて見えないよう緩やかに)
+// 線形Fogは「近距離は完全にクリア→ある距離から急に真っ暗」という壁のような
+// 見え方になり、単色の仮地面と組み合わせると特に「急に埋もれる」印象が強く出るため、
+// 近距離から緩やかに濃度が上がる指数二乗フォグ(霧らしい透明感のある滲み方)に変更。
+scene.fog=new THREE.FogExp2(FOG_COLOR,0.05);
 
 const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,60);
 
@@ -160,9 +163,26 @@ function buildOutline(mesh,thickness){
 }
 
 // --- 地面(Phase 1: 平坦な仮地面。神社の造形/砂利テクスチャはPhase 2) ---
+// 単色ベタ塗りだと霧が同色の背景へ溶けるだけで濃淡が全く見えず「急に埋もれる」
+// ように見えるため、フォグの滲みが視認できる程度の簡易な砂利風テクスチャを敷く。
+function makeGroundTexture(){
+  const c=document.createElement('canvas'); c.width=256; c.height=256;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#262b31'; ctx.fillRect(0,0,256,256);
+  for(let i=0;i<2200;i++){
+    const x=Math.random()*256, y=Math.random()*256, r=0.6+Math.random()*1.4;
+    const v=Math.random()<0.5? 18+Math.random()*14 : -1*(14+Math.random()*12);
+    ctx.fillStyle='rgba('+(v>0?255:0)+','+(v>0?255:0)+','+(v>0?255:0)+','+(Math.abs(v)/255)+')';
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+  }
+  const tex=new THREE.CanvasTexture(c);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(28,28);
+  tex.anisotropy=maxAniso;
+  return tex;
+}
 const groundGeo=new THREE.PlaneGeometry(100,100);
 groundGeo.rotateX(-Math.PI/2);
-const groundMat=new THREE.MeshToonMaterial({color:0x262b31,gradientMap:toonGradient});
+const groundMat=new THREE.MeshToonMaterial({map:makeGroundTexture(),gradientMap:toonGradient});
 const ground=new THREE.Mesh(groundGeo,groundMat);
 scene.add(ground);
 
