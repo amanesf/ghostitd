@@ -8,7 +8,9 @@
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
-  #c{position:fixed;inset:0;display:block;touch-action:none;width:100vw!important;height:100vh!important}
+  /* サイズはJS側(resize())がinnerWidth/innerHeightで管理。PIPカメラのビューポート計算と
+     ズレるとPIP映像が枠からはみ出て見えるため、ここでは!importantで固定しない。 */
+  #c{position:fixed;inset:0;display:block;touch-action:none}
   /* 上部HUD(タイトル/戻るボタン)はPIPカメラ映像より上に配置 */
   .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
     text-shadow:0 1px 6px rgba(0,0,0,.7)}
@@ -134,7 +136,7 @@ const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,60);
 
 // --- 自撮り/一人称のPIPカメラ(16:9固定、found footage風の演出) ---
 const PIP_W=180, PIP_H=Math.round(PIP_W*9/16), PIP_MARGIN=10, PIP_TOP=52;
-const selfieCam=new THREE.PerspectiveCamera(40,PIP_W/PIP_H,0.05,20);
+const selfieCam=new THREE.PerspectiveCamera(34,PIP_W/PIP_H,0.05,20);
 const fpsCam=new THREE.PerspectiveCamera(62,PIP_W/PIP_H,0.05,60);
 const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
 function layoutPIPs(){
@@ -507,8 +509,8 @@ function updatePipCameras(){
   // 手ボーンの生の回転をそのまま使わない懐中電灯と同じ理由で、向きはcharYaw基準の
   // 水平前方ベクトルを使い、走行アニメーション中の頭の細かな回転で揺れないようにする。
   const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
-  selfieCam.position.set(_headWP.x+fx*0.85, _headWP.y+0.03, _headWP.z+fz*0.85);
-  selfieCam.lookAt(_headWP.x, _headWP.y-0.06, _headWP.z);
+  selfieCam.position.set(_headWP.x+fx*1.2, _headWP.y+0.05, _headWP.z+fz*1.2);
+  selfieCam.lookAt(_headWP.x, _headWP.y-0.12, _headWP.z);
   fpsCam.position.set(_headWP.x+fx*0.08, _headWP.y+0.05, _headWP.z+fz*0.08);
   fpsCam.lookAt(_headWP.x+fx*5, _headWP.y+0.03, _headWP.z+fz*5);
 }
