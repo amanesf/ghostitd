@@ -130,9 +130,6 @@
   <div class="cfgRow"><label>明るさ
     <input type="range" id="cfgBrightness" min="50" max="150" value="100">
   </label></div>
-  <div class="cfgRow"><label>アウトライン太さ
-    <input type="range" id="cfgOutline" min="0" max="100" value="40">
-  </label></div>
   <div class="cfgRow"><label>PIPカメラ画質
     <select id="cfgPipQuality">
       <option value="1">高(毎フレーム更新)</option>
@@ -208,37 +205,13 @@ function layoutPIPs(){
 
 // 平行光はkeyLight1本に統合(hemiとあわせて2灯)。神社の灯籠やセンサーライト等と合わせると
 // ライト数が多く重くなるため、fill/rimは削り、その分だけ少し強めにして明るさを補う。
-const BASE_HEMI_INTENSITY=0.4, BASE_KEY_INTENSITY=0.55;
+const BASE_HEMI_INTENSITY=0.3, BASE_KEY_INTENSITY=0.42;
 const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,BASE_HEMI_INTENSITY);
 scene.add(hemiLight);
 const keyLight=new THREE.DirectionalLight(0xaac2ff,BASE_KEY_INTENSITY); // 月明かり的な弱い寒色キーライト
 keyLight.position.set(2,4,1.5);
 scene.add(keyLight);
 
-let currentOutlinePct=40; // configパネルの「アウトライン太さ」で変更可能
-function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; }
-function buildOutline(mesh,thickness){
-  const geo=mesh.geometry.clone();
-  const pos=geo.attributes.position,nor=geo.attributes.normal;
-  for(let i=0;i<pos.count;i++){
-    pos.setXYZ(i,pos.getX(i)+nor.getX(i)*thickness,pos.getY(i)+nor.getY(i)*thickness,pos.getZ(i)+nor.getZ(i)*thickness);
-  }
-  pos.needsUpdate=true;
-  const mat=new THREE.MeshBasicMaterial({map:mesh.material.map||null,color:0x2a2830,
-    side:THREE.BackSide,skinning:true,toneMapped:false});
-  const out=new THREE.SkinnedMesh(geo,mat);
-  out.bind(mesh.skeleton,mesh.bindMatrix);
-  out.userData.isOutline=true;
-  return out;
-}
-function rebuildOutlines(){
-  if(!model)return;
-  const toRemove=[]; model.traverse(o=>{ if(o.userData&&o.userData.isOutline)toRemove.push(o); });
-  toRemove.forEach(o=>o.parent&&o.parent.remove(o));
-  const targets=[]; model.traverse(o=>{ if(o.isSkinnedMesh&&!(o.userData&&o.userData.isOutline))targets.push(o); });
-  targets.forEach(o=>model.add(buildOutline(o,outlineThickness(currentOutlinePct))));
-  invalidate();
-}
 
 // --- 地面(Phase 1: 平坦な仮地面。神社の造形/砂利テクスチャはPhase 2) ---
 // 単色ベタ塗りだと霧が同色の背景へ溶けるだけで濃淡が全く見えず「急に埋もれる」
@@ -612,10 +585,6 @@ function loadCharacter(buf,onLoaded){
         toneMapped:false});
       if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
       o.material=smoothMat;
-      if(o.isSkinnedMesh){
-        const outline=buildOutline(o,outlineThickness(currentOutlinePct));
-        model.add(outline);
-      }
     }});
     handBone=model.getObjectByName('hand_R')||null;
     headBone=model.getObjectByName('head')||null;
@@ -708,7 +677,6 @@ document.getElementById('configBtn').onclick=()=>{ document.getElementById('conf
 document.getElementById('configClose').onclick=()=>{ document.getElementById('configPanel').classList.add('hide'); };
 document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
 document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
-document.getElementById('cfgOutline').oninput=e=>{ currentOutlinePct=+e.target.value; rebuildOutlines(); };
 document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; };
 document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
 
