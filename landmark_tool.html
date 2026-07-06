@@ -113,7 +113,8 @@
   .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
   .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
   .acitem{display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,.04);
-    border:1px solid var(--line);border-radius:9px;padding:7px 9px}
+    border:1px solid var(--line);border-radius:9px;padding:7px 9px;transition:background .6s ease,border-color .6s ease}
+  .acitem.flash{background:rgba(82,224,196,.22);border-color:rgba(82,224,196,.6)}
   .acitem .nm{flex:1;color:var(--txt)}
   .acitem .tag{color:var(--mut);font-size:10.5px}
   .acitem .ed{color:var(--mint);cursor:pointer;font-size:11px;padding:2px 6px}
@@ -150,15 +151,15 @@
     </div>
 
     <div id="imgArea">
-      <div class="viewbar" id="viewbar">
-        <button class="viewbtn on" data-view="front">正面</button>
-        <button class="viewbtn" data-view="side">側面</button>
-        <button class="viewbtn" data-view="back">背面</button>
-      </div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
         <button class="btn sm" id="lockToggle" style="flex:0 0 auto">🔓 点をロック</button>
       </div>
       <div id="wrap"><canvas id="cvs"></canvas></div>
+      <div class="viewbar" id="viewbar" style="margin-top:8px">
+        <button class="viewbtn on" data-view="front">正面</button>
+        <button class="viewbtn" data-view="side">側面</button>
+        <button class="viewbtn" data-view="back">背面</button>
+      </div>
       <div id="msg"></div>
       <div class="nudge">
         <div class="sel">微調整中: <b id="selName">未選択</b>（押しっぱなしで連続移動）</div>
@@ -189,6 +190,8 @@
         狂わせる部分を、正面/側面/背面それぞれで直接塗って除外できます。
         「マジックツール」はタップした点から色の近い連続領域を自動選択、
         「ブラシ」は丸で塗って除外/解除します。赤く表示されている部分が除外範囲です。</p>
+      <p style="font-size:11px;color:var(--mint);margin:0 0 10px">
+        ↑上の画像を直接タップ/なぞって除外・解除できます。</p>
       <div class="acitem" style="margin-bottom:6px">
         <span class="nm">ツール</span>
         <button class="btn sm exmode mint" id="exModeWand" data-exmode="wand" style="flex:0 0 auto">マジック</button>
@@ -199,7 +202,7 @@
         <button class="btn sm exact mint" id="exActAdd" data-exact="add" style="flex:0 0 auto">除外する</button>
         <button class="btn sm exact" id="exActRemove" data-exact="remove" style="flex:0 0 auto">解除する</button>
       </div>
-      <div class="acitem" style="margin-bottom:8px">
+      <div class="acitem" id="exSliderRow" style="margin-bottom:8px">
         <span class="nm" id="exSliderLabel">許容誤差</span>
         <input type="range" id="exSlider" min="5" max="100" value="30" style="flex:1">
       </div>
@@ -257,16 +260,21 @@
         (既定0=無効/従来通りのハード切替)。ノイズによるディザ(まだら混在)ではなく
         本物の色ブレンドなので、近くで見ても粒状にはなりません。値を大きくするほど
         混ざる帯が広くなります(ブレンドの強さの目安)。</p>
-      <div class="acitem" style="margin-bottom:8px">
-        <span class="nm">全パーツ一括</span>
-        <input type="number" id="seamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°
-        <button class="btn sm mint" id="seamBulkApply">全パーツに適用</button>
-      </div>
-      <div class="acitem" style="margin-bottom:8px">
-        <span class="nm">側面画像を使う(一括)</span>
-        <button class="btn sm mint" id="seamSideAllOn">全パーツON</button>
-        <button class="btn sm" id="seamSideAllOff">全パーツOFF</button>
-      </div>
+      <details class="accgroup">
+        <summary><span>一括設定</span><span class="accCount">2項目</span></summary>
+        <div class="accbody">
+          <div class="acitem" style="margin-bottom:8px">
+            <span class="nm">全パーツ一括</span>
+            <input type="number" id="seamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°
+            <button class="btn sm mint" id="seamBulkApply">全パーツに適用</button>
+          </div>
+          <div class="acitem">
+            <span class="nm">側面画像を使う(一括)</span>
+            <button class="btn sm mint" id="seamSideAllOn">全パーツON</button>
+            <button class="btn sm" id="seamSideAllOff">全パーツOFF</button>
+          </div>
+        </div>
+      </details>
       <div id="seamList"></div>
     </div>
 
@@ -753,20 +761,25 @@ function drawLabel(x,text,px,py,color){
    19個の解剖学的ランドマーク(front専用)・アクセサリー範囲(可変N点多角形)を、
    タップ選択/ドラッグ/十字キー微調整という同じ操作で扱えるように統一する。 */
 function getInteractivePoints(view){
+  // タブごとに「そのタブの専門」の点だけを対象にする(表示・タップ選択・ドラッグ
+  // すべて共通でこの一覧を使うため、ここで絞ればマークタブでアクセサリー点に
+  // 触れてしまう、除外タブにランドマークが写り込む等の混線を防げる)。
   const out=[];
-  if(view==="front"){
+  if(curTab==="lm" && view==="front"){
     LM.forEach(d=>{const p=points[d.k];if(!p)return;
       out.push({key:"lm:"+d.k, pos:p, set:np=>{points[d.k]=np;}, color:GCOL[d.g], label:d.jp});});
   }
-  const pushRegionPts=(regions,prefix,name)=>{
-    Object.keys(regions).forEach(v=>{if(v!==view)return;
-      const r=regions[v];
-      r.points.forEach((p,i)=>{
-        out.push({key:prefix+":"+v+":"+i, pos:p, set:np=>{r.points[i]=np;}, color:"#7aa2ff", label:name+"-"+(i+1)});
-      });});
-  };
-  if(pendingAcc)pushRegionPts(pendingAcc.regions,"pend","新規");
-  accessories.forEach((a,i)=>pushRegionPts(a.regions,"acc"+i,a.name||"?"));
+  if(curTab==="ac"){
+    const pushRegionPts=(regions,prefix,name)=>{
+      Object.keys(regions).forEach(v=>{if(v!==view)return;
+        const r=regions[v];
+        r.points.forEach((p,i)=>{
+          out.push({key:prefix+":"+v+":"+i, pos:p, set:np=>{r.points[i]=np;}, color:"#7aa2ff", label:name+"-"+(i+1)});
+        });});
+    };
+    if(pendingAcc)pushRegionPts(pendingAcc.regions,"pend","新規");
+    accessories.forEach((a,i)=>pushRegionPts(a.regions,"acc"+i,a.name||"?"));
+  }
   return out;
 }
 function drawRegionOutlines(x,sc){
@@ -825,8 +838,10 @@ function draw(){
   const x=cvs.getContext("2d"); x.clearRect(0,0,cvs.width,cvs.height);
   const sc=base*view.z;
   x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  // 除外マスクの赤い塗りは「領域」タブでの作業対象なので、そのタブでのみ見せる
+  // (他タブで常に赤く覆われていると、そのタブ本来の要素の邪魔になるため)。
   const ec=excludeMask[curView];
-  if(ec){x.save();x.globalAlpha=0.45;
+  if(ec&&curTab==="ex"){x.save();x.globalAlpha=0.45;
     x.drawImage(ec.canvas,0,0,ec.canvas.width,ec.canvas.height, view.ox,view.oy, w*sc, h*sc);
     x.restore();}
   if(curTab==="bones"&&curView==="front"){
@@ -834,7 +849,9 @@ function draw(){
     // ボーンのみ表示する
     drawBoneOverlay(x,sc);
   }else{
-    drawRegionOutlines(x,sc);
+    // マーク/パーツ＋タブそれぞれの専門の点だけをgetInteractivePoints側で絞っている。
+    // 領域(除外)タブ・ボーンタブ(側面/背面)では何も重ねない。
+    if(curTab==="ac")drawRegionOutlines(x,sc);
     getInteractivePoints(curView).forEach(p=>{
       const px=p.pos[0]*sc+view.ox, py=p.pos[1]*sc+view.oy, on=sel===p.key;
       drawCross(x,px,py,on,p.color);
@@ -1153,6 +1170,7 @@ function syncTabs(){
     if(curTab==="bones"){
       $("bonesMsg").textContent=(curView==="front")?"":"※ボーンは正面図でのみ表示されます(上の「正面」タブに切り替えてください)";
     }
+    syncViewBtns();
     if(IMG_TABS.includes(curTab))draw();
   };
 });
@@ -1161,7 +1179,10 @@ function syncTabs(){
 function syncViewBtns(){
   document.querySelectorAll("#viewbar .viewbtn").forEach(b=>{
     b.classList.toggle("on",b.dataset.view===curView);
-    b.disabled=!imgs[b.dataset.view];
+    // ボーンタブは正面図でしか表示できないため、側面/背面は選べないことを
+    // メッセージだけでなくボタンの無効化でも明示する。
+    const boneLocked=(curTab==="bones"&&b.dataset.view!=="front");
+    b.disabled=!imgs[b.dataset.view]||boneLocked;
   });
 }
 const VIEWJP={front:"正面",side:"側面",back:"背面"};
@@ -1232,10 +1253,11 @@ function renderAcForm(){
   }
   el.innerHTML='<div class="acform">'+
     '<label>名前<input type="text" id="acName" value="'+pendingAcc.name+'" placeholder="例: ヘッドホン"></label>'+
-    '<label>取り付け方式<select id="acMode">'+
-    '<option value="rigid"'+(pendingAcc.mode==="rigid"?" selected":"")+'>rigid(1ボーン固定)</option>'+
-    '<option value="soft"'+(pendingAcc.mode==="soft"?" selected":"")+'>soft(複数ボーン追従)</option>'+
-    '</select></label>'+
+    '<label>取り付け方式</label>'+
+    '<div class="row">'+
+    '<button type="button" class="btn sm'+(pendingAcc.mode==="rigid"?" mint":"")+'" data-acmode="rigid">rigid(1ボーン固定)</button>'+
+    '<button type="button" class="btn sm'+(pendingAcc.mode==="soft"?" mint":"")+'" data-acmode="soft">soft(複数ボーン追従)</button>'+
+    '</div>'+
     '<label>取り付けボーン('+(pendingAcc.mode==="rigid"?"1つ選択":"複数選択可")+')'+
     '<div class="bonesGroups">'+bonesHtml+'</div></label>'+
     '<label>点数(3〜25、多いほど複雑な輪郭を再現できます)'+
@@ -1251,7 +1273,13 @@ function renderAcForm(){
     '<button class="btn" id="acCancel">キャンセル</button>'+
     '</div></div>';
   $("acName").oninput=e=>{pendingAcc.name=e.target.value;};
-  $("acMode").onchange=e=>{pendingAcc.mode=e.target.value;if(pendingAcc.mode==="rigid"&&pendingAcc.bones.length>1)pendingAcc.bones=pendingAcc.bones.slice(0,1);renderAcForm();};
+  [].forEach.call(document.querySelectorAll("#acForm [data-acmode]"),btn=>{
+    btn.onclick=()=>{
+      pendingAcc.mode=btn.dataset.acmode;
+      if(pendingAcc.mode==="rigid"&&pendingAcc.bones.length>1)pendingAcc.bones=pendingAcc.bones.slice(0,1);
+      renderAcForm();
+    };
+  });
   $("acPointCount").oninput=e=>{
     pendingAcc.pointCount=Math.max(3,Math.min(25,parseInt(e.target.value,10)||8));
   };
@@ -1296,18 +1324,27 @@ function renderAcForm(){
   $("acConfirm").onclick=()=>{
     if(!(pendingAcc.regions.front||pendingAcc.regions.back)){setMsg("正面か背面の少なくとも一方に範囲が必要です。");return;}
     const wasEdit=pendingAccEditIdx!==null;
+    const targetIdx=wasEdit?pendingAccEditIdx:accessories.length;
     if(wasEdit){accessories.splice(pendingAccEditIdx,0,pendingAcc);}
     else{accessories.push(pendingAcc);}
     pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
     curView="front";syncViewBtns();sel=null;
     renderAcList();renderAcForm();syncChips();draw();
     setMsg(wasEdit?"アクセサリーを更新しました。":"アクセサリーを追加しました。");
+    highlightAcListItem(targetIdx);
   };
   $("acCancel").onclick=()=>{
     if(pendingAccEditIdx!==null){accessories.splice(pendingAccEditIdx,0,pendingAccEditOriginal);}
     pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
     sel=null;renderAcList();renderAcForm();syncChips();draw();
   };
+}
+function highlightAcListItem(idx){
+  const el=$("acList").children[idx];
+  if(!el)return;
+  el.scrollIntoView({behavior:"smooth",block:"center"});
+  el.classList.add("flash");
+  setTimeout(()=>el.classList.remove("flash"),1200);
 }
 function renderAcList(){
   const el=$("acList");
@@ -1663,6 +1700,11 @@ $("exSlider").oninput=()=>{
     exMode=btn.dataset.exmode;
     [].forEach.call(document.querySelectorAll(".exmode"),b=>b.classList.toggle("mint",b===btn));
     syncExSlider();
+    // マジック⇔ブラシでスライダーの意味(許容誤差/ブラシサイズ)が入れ替わる
+    // ことに気づきやすいよう、切り替え時に一瞬色を光らせる。
+    const row=$("exSliderRow");
+    row.classList.add("flash");
+    setTimeout(()=>row.classList.remove("flash"),500);
   };
 });
 [].forEach.call(document.querySelectorAll("[data-exact]"),btn=>{
