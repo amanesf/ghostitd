@@ -130,9 +130,6 @@
   <div class="cfgRow"><label>明るさ
     <input type="range" id="cfgBrightness" min="50" max="150" value="100">
   </label></div>
-  <div class="cfgRow"><label>アウトライン太さ
-    <input type="range" id="cfgOutline" min="0" max="100" value="40">
-  </label></div>
   <div class="cfgRow"><label>PIPカメラ画質
     <select id="cfgPipQuality">
       <option value="1">高(毎フレーム更新)</option>
@@ -208,37 +205,13 @@ function layoutPIPs(){
 
 // 平行光はkeyLight1本に統合(hemiとあわせて2灯)。神社の灯籠やセンサーライト等と合わせると
 // ライト数が多く重くなるため、fill/rimは削り、その分だけ少し強めにして明るさを補う。
-const BASE_HEMI_INTENSITY=0.4, BASE_KEY_INTENSITY=0.55;
+const BASE_HEMI_INTENSITY=0.3, BASE_KEY_INTENSITY=0.42;
 const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,BASE_HEMI_INTENSITY);
 scene.add(hemiLight);
 const keyLight=new THREE.DirectionalLight(0xaac2ff,BASE_KEY_INTENSITY); // 月明かり的な弱い寒色キーライト
 keyLight.position.set(2,4,1.5);
 scene.add(keyLight);
 
-let currentOutlinePct=40; // configパネルの「アウトライン太さ」で変更可能
-function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; }
-function buildOutline(mesh,thickness){
-  const geo=mesh.geometry.clone();
-  const pos=geo.attributes.position,nor=geo.attributes.normal;
-  for(let i=0;i<pos.count;i++){
-    pos.setXYZ(i,pos.getX(i)+nor.getX(i)*thickness,pos.getY(i)+nor.getY(i)*thickness,pos.getZ(i)+nor.getZ(i)*thickness);
-  }
-  pos.needsUpdate=true;
-  const mat=new THREE.MeshBasicMaterial({map:mesh.material.map||null,color:0x2a2830,
-    side:THREE.BackSide,skinning:true,toneMapped:false});
-  const out=new THREE.SkinnedMesh(geo,mat);
-  out.bind(mesh.skeleton,mesh.bindMatrix);
-  out.userData.isOutline=true;
-  return out;
-}
-function rebuildOutlines(){
-  if(!model)return;
-  const toRemove=[]; model.traverse(o=>{ if(o.userData&&o.userData.isOutline)toRemove.push(o); });
-  toRemove.forEach(o=>o.parent&&o.parent.remove(o));
-  const targets=[]; model.traverse(o=>{ if(o.isSkinnedMesh&&!(o.userData&&o.userData.isOutline))targets.push(o); });
-  targets.forEach(o=>model.add(buildOutline(o,outlineThickness(currentOutlinePct))));
-  invalidate();
-}
 
 // --- 地面(Phase 1: 平坦な仮地面。神社の造形/砂利テクスチャはPhase 2) ---
 // 単色ベタ塗りだと霧が同色の背景へ溶けるだけで濃淡が全く見えず「急に埋もれる」
@@ -352,6 +325,9 @@ function placeTrees(){
       t.rotation.y=Math.random()*Math.PI*2;
       t.scale.multiplyScalar(s);
       shrineGroup.add(t);
+      // 東側の小広場は境界を張り出させたため木の配置範囲と歩ける範囲が重なる。
+      // 幹に当たり判定を付けておかないとカメラごと枝葉の中に埋まってしまう。
+      colliders.push({type:'circle',x,z,r:0.35*s});
     }
     FREE_MODEL_CREDITS.push({name:'Pine Tree',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/gX8WmgkeEm'});
     refreshCreditsUI();
@@ -414,7 +390,7 @@ function buildBasin(x,z){
 }
 
 let sensorLight=null, sensorLightOn=false, hallFrontZ=0;
-function buildMainHall(z){
+function buildMainHallProcedural(){
   const g=new THREE.Group();
   const platformMat=new THREE.MeshStandardMaterial({color:0x4a4540,roughness:0.9});
   const wallMat=new THREE.MeshStandardMaterial({color:0x2b2320,roughness:0.85});
@@ -426,15 +402,42 @@ function buildMainHall(z){
   walls.position.y=0.4+wallH/2; g.add(walls);
   const roof=new THREE.Mesh(new THREE.ConeGeometry(halfW*1.55,1.6,4),roofMat);
   roof.rotation.y=Math.PI/4; roof.position.y=0.4+wallH+0.8; g.add(roof);
-  // 隙間から覗く純黒の引き戸(光の影響を受けない黒=MeshBasicMaterial)。手前(-Z, 参道側)を向ける。
-  const door=new THREE.Mesh(new THREE.PlaneGeometry(0.9,1.9),
-    new THREE.MeshBasicMaterial({color:0x000000,side:THREE.DoubleSide}));
-  door.position.set(0,0.4+1.0,-halfD-0.01);
-  door.rotation.y=Math.PI;
-  g.add(door);
-  g.position.set(0,0,z);
-  shrineGroup.add(g);
+  return g;
+}
+
+function placeMainHall(z){
+  const halfW=3.4, halfD=2.6;
   colliders.push({type:'box',minX:-halfW-0.4,maxX:halfW+0.4,minZ:z-halfD-0.4,maxZ:z+halfD+0.4});
+
+  const fallback=buildMainHallProcedural();
+  fallback.position.set(0,0,z);
+  shrineGroup.add(fallback);
+  loadStaticGLB('models/shrine_hall_free.glb').then(obj=>{
+    normalizeToHeight(obj,4.4);
+    obj.position.set(0,0,z);
+    // 元モデルの素材がかなり暗く、このシーンの控えめな照明だと明度を掛け算しただけでは
+    // ほぼ真っ黒に潰れてディテールが見えないため、HSLの明度に下限を設けて底上げする
+    // (色味・彩度はそのまま活かす)。
+    const _hsl={h:0,s:0,l:0};
+    obj.traverse(o=>{ if(o.isMesh&&o.material&&o.material.color){
+      o.material.color.getHSL(_hsl);
+      o.material.color.setHSL(_hsl.h,Math.min(1,_hsl.s*1.1),Math.max(_hsl.l,0.42));
+    }});
+    shrineGroup.remove(fallback);
+    shrineGroup.add(obj);
+    FREE_MODEL_CREDITS.push({name:'Shrine(本殿)',author:'Aidan K McLaughlin',license:'CC-BY',url:'https://poly.pizza/m/a68qNnAC4m-'});
+    refreshCreditsUI();
+    invalidate();
+  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの本殿のまま */ });
+
+  // 隙間から覗く純黒の引き戸(光の影響を受けない黒=MeshBasicMaterial)。見た目のモデルに関わらず
+  // 参道側の同じ位置に重ねて置く(フリーモデルは旧プロシージャル版より小柄なので、戸も
+  // 建物に対して控えめなアクセントに見える程度のサイズに縮小する)。
+  const door=new THREE.Mesh(new THREE.PlaneGeometry(0.5,1.1),
+    new THREE.MeshBasicMaterial({color:0x000000,side:THREE.DoubleSide}));
+  door.position.set(0,1.0,z-halfD-0.01);
+  door.rotation.y=Math.PI;
+  shrineGroup.add(door);
 
   // 人感センサーライト: 普段は消灯、参道側から近づくと点灯するハロゲン風の光。
   sensorLight=new THREE.SpotLight(0xfff0d0,0,11,THREE.MathUtils.degToRad(48),0.4,1.2);
@@ -442,6 +445,58 @@ function buildMainHall(z){
   sensorLight.target.position.set(0,0,z-halfD-4.5);
   scene.add(sensorLight); scene.add(sensorLight.target);
   hallFrontZ=z-halfD-0.3;
+}
+
+function buildStatueProcedural(){
+  const g=new THREE.Group();
+  const stoneMat=new THREE.MeshStandardMaterial({color:0x4f5458,roughness:0.95});
+  const pedestal=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.4,0.4),stoneMat);
+  pedestal.position.y=0.2; g.add(pedestal);
+  const body=new THREE.Mesh(new THREE.SphereGeometry(0.32,10,8),stoneMat);
+  body.scale.set(1,1.3,0.85);
+  body.position.y=0.4+0.32*1.3*0.8; g.add(body);
+  return g;
+}
+
+function placeStatues(z){
+  const halfSpan=2.2;
+  [-1,1].forEach(side=>colliders.push({type:'circle',x:side*halfSpan,z,r:0.4}));
+  const fallbacks=[-1,1].map(side=>{
+    const f=buildStatueProcedural(); f.position.set(side*halfSpan,0,z); shrineGroup.add(f); return f;
+  });
+  loadStaticGLB('models/statue_free.glb').then(template=>{
+    normalizeToHeight(template,1.5);
+    fallbacks.forEach(f=>shrineGroup.remove(f));
+    [-1,1].forEach(side=>{
+      const t=template.clone(true);
+      t.position.set(side*halfSpan,0,z);
+      shrineGroup.add(t);
+    });
+    FREE_MODEL_CREDITS.push({name:'Statue(狛犬代替)',author:'Zsky',license:'CC-BY',url:'https://poly.pizza/m/VerAznL5lK'});
+    refreshCreditsUI();
+    invalidate();
+  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの石像のまま */ });
+}
+
+function scatterProps(url,count,minDist,maxDist,zMin,zMax,targetHeight,opts){
+  opts=opts||{};
+  loadStaticGLB(url).then(template=>{
+    normalizeToHeight(template,targetHeight);
+    for(let i=0;i<count;i++){
+      const side=Math.random()<0.5?-1:1;
+      const x=side*(minDist+Math.random()*(maxDist-minDist));
+      const z=zMin+Math.random()*(zMax-zMin);
+      const t=template.clone(true);
+      const s=(opts.scaleMin||0.8)+Math.random()*((opts.scaleMax||1.3)-(opts.scaleMin||0.8));
+      t.position.set(x,0,z);
+      t.rotation.y=Math.random()*Math.PI*2;
+      t.scale.multiplyScalar(s);
+      shrineGroup.add(t);
+      if(opts.collider)colliders.push({type:'circle',x,z,r:(opts.colliderR||0.4)*s});
+    }
+    if(opts.credit){ FREE_MODEL_CREDITS.push(opts.credit); refreshCreditsUI(); }
+    invalidate();
+  }).catch(()=>{ /* 読み込み失敗時はそのプロップなし(元々存在しなかったので実害なし) */ });
 }
 
 function buildForbiddenBoundary(z,halfW){
@@ -484,9 +539,17 @@ buildLantern(-2.4,15.5,'dark');
 buildLantern(2.4,15.5,'cold');
 buildLantern(-2.8,21,'dark');
 buildLantern(2.8,21,'lit');
+buildLantern(10.5,15,'lit'); // 東側の小広場にひっそり佇む灯籠
 buildBasin(4.4,17.5);
-buildMainHall(30);
+placeMainHall(30);
+placeStatues(27);
 buildForbiddenBoundary(44,6.5);
+
+// 岩・茂みで地面のディテールを増やす(参道の際・境内・東側の小広場に散布)
+scatterProps('models/rock_free.glb',16,6.0,13,-2,44,0.9,{collider:true,colliderR:0.45,scaleMin:0.7,scaleMax:1.6,
+  credit:{name:'Rock',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/4MUaQTcDdc'}});
+scatterProps('models/bush_free.glb',12,6.5,12.5,-1,44,1.1,{collider:false,scaleMin:0.8,scaleMax:1.4,
+  credit:{name:'Flower Bushes',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/1X06RgvSr6'}});
 
 function updateShrineEffects(dt){
   if(entranceLight){
@@ -612,10 +675,6 @@ function loadCharacter(buf,onLoaded){
         toneMapped:false});
       if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
       o.material=smoothMat;
-      if(o.isSkinnedMesh){
-        const outline=buildOutline(o,outlineThickness(currentOutlinePct));
-        model.add(outline);
-      }
     }});
     handBone=model.getObjectByName('hand_R')||null;
     headBone=model.getObjectByName('head')||null;
@@ -708,7 +767,6 @@ document.getElementById('configBtn').onclick=()=>{ document.getElementById('conf
 document.getElementById('configClose').onclick=()=>{ document.getElementById('configPanel').classList.add('hide'); };
 document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
 document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
-document.getElementById('cfgOutline').oninput=e=>{ currentOutlinePct=+e.target.value; rebuildOutlines(); };
 document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; };
 document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
 
@@ -815,9 +873,14 @@ cvs.addEventListener('wheel',e=>{
   invalidate();
 },{passive:false});
 
+// 境内(z=12〜19)だけ東側(+X)の境界を張り出させ、木立の奥に隠れた小さな広場を作る。
+function corridorBoundsAt(z){
+  if(z>=12&&z<=19)return {left:-CORRIDOR_HALF_W,right:14};
+  return {left:-CORRIDOR_HALF_W,right:CORRIDOR_HALF_W};
+}
 function resolveCollision(pos){
-  // 参道の左右(木立/しめ縄の外側という想定、Phase2ではまだ見た目は無い)と奥の境界。
-  pos.x=Math.max(-CORRIDOR_HALF_W+CHAR_R,Math.min(CORRIDOR_HALF_W-CHAR_R,pos.x));
+  const b=corridorBoundsAt(pos.z);
+  pos.x=Math.max(b.left+CHAR_R,Math.min(b.right-CHAR_R,pos.x));
   pos.z=Math.max(PATH_MIN_Z+CHAR_R,Math.min(PATH_MAX_Z-CHAR_R,pos.z));
   colliders.forEach(c=>{
     if(c.type==='circle'){
@@ -840,6 +903,7 @@ function resolveCollision(pos){
 // キャラ中心よりやや上に取り、キャラの見え方を画面下寄りにしてPIPと被らないようにする。
 const FRAME_BIAS_FRAC=0.22;
 const _camTarget=new THREE.Vector3(), _camOffset=new THREE.Vector3(), _camDesired=new THREE.Vector3();
+const _camRaycaster=new THREE.Raycaster(), _camDir=new THREE.Vector3();
 function updateCamera(dt){
   _camTarget.set(charPos.x, charPos.y+charCenterY+charHeight*FRAME_BIAS_FRAC, charPos.z);
   _camOffset.set(
@@ -848,6 +912,15 @@ function updateCamera(dt){
     Math.cos(orbitYaw)*Math.cos(orbitPitch)
   ).multiplyScalar(camDist);
   _camDesired.copy(_camTarget).add(_camOffset);
+
+  // 木や岩などの神社オブジェクトにカメラがめり込まないよう、注視点→希望位置へレイを飛ばし
+  // 手前で遮られていたらそこで止める(見た目上の"カメラが茂みの中に埋まる"問題を防ぐ)。
+  _camDir.copy(_camOffset); const desiredDist=_camDir.length(); _camDir.normalize();
+  _camRaycaster.set(_camTarget,_camDir); _camRaycaster.near=0.1; _camRaycaster.far=desiredDist;
+  const hits=_camRaycaster.intersectObject(shrineGroup,true);
+  const dist=hits.length?Math.max(0.6,hits[0].distance-0.3):desiredDist;
+  _camDesired.copy(_camTarget).addScaledVector(_camDir,dist);
+
   const t=1-Math.pow(0.0001,Math.min(dt,0.1));
   cam.position.lerp(_camDesired,t);
   cam.lookAt(_camTarget);
