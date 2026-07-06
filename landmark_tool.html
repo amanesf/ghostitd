@@ -55,6 +55,8 @@
   .modeCard.mint{border-color:rgba(82,224,196,.4)}
   .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+  .modeCard.disabled{cursor:default;opacity:.45;pointer-events:none}
+  .modeCard.disabled b{color:var(--mut)}
   .nudge{margin-top:12px;display:flex;flex-direction:column;gap:8px;align-items:center}
   .nudge .sel{font-size:12px;color:var(--mut)}
   .nudge .sel b{color:#ffe14d}
@@ -323,9 +325,13 @@
       <b>サンプルモードで開く</b>
       <span>同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。</span>
     </div>
-    <div class="modeCard" id="modeNormalBtn">
-      <b>通常モード</b>
+    <div class="modeCard" id="modeNewBtn">
+      <b>新規作成</b>
       <span>自分のキャラクター画像(正面/側面/背面)をアップロードして最初から作成します。</span>
+    </div>
+    <div class="modeCard" id="modeContinueBtn">
+      <b>前回の続き</b>
+      <span id="modeContinueDesc">前回保存した通常モードの画像・ランドマークを読み込んで再開します。</span>
     </div>
   </div>
 
@@ -614,6 +620,39 @@ let view={z:1,ox:0,oy:0};
 const $=id=>document.getElementById(id);
 const cvs=$("cvs"), wrap=$("wrap");
 function setMsg(t){ $("msg").textContent=t; }
+
+// 「新規作成」/「サンプルモードで開く」のどちらで今のセッションが始まったか。
+// generateBtn押下時、通常モード(新規作成/前回の続きどちらでも)の場合だけ
+// セッションを保存する(サンプルモードは常に同梱データからの決定的な状態
+// なので保存不要、かつ通常モードの保存と混ざらないようにするため)。
+let currentMode=null; // "sample" | "normal"
+
+// ★ビューア(character_3d.html)と行き来しても編集中のデータを失わないための
+// セッション保存(localStorage)。「モデル生成」でビューアへ移る直前に
+// buildJson()と同じ内容を保存し、モード選択画面の「前回の続き」で復元する
+// (通常モード専用。サンプルモードでは保存しない=サンプルと通常で保存先を
+// 分けることで、片方の作業がもう片方を上書きしないようにする)。
+const NORMAL_SESSION_KEY="3dtoolJS_normal_session_v1";
+function saveNormalSession(){
+  try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(buildJson())); }
+  catch(e){ console.warn("セッション保存に失敗しました:", e); }
+}
+function imageElementToBlob(imgEl,w,h){
+  return new Promise(res=>{
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    c.getContext("2d").drawImage(imgEl,0,0,w,h);
+    c.toBlob(res,"image/png");
+  });
+}
+async function saveNormalSessionImages(){
+  const blobs={};
+  for(const slot of ["front","side","back"]){
+    const im=imgs[slot];
+    if(im) blobs[slot]=await imageElementToBlob(im.el,im.w,im.h);
+  }
+  try{ await P3D.saveNormalSessionImages(blobs); }
+  catch(e){ console.warn("画像セッション保存に失敗しました:", e); }
+}
 
 /* ---------- シルエット解析（stage_profile/stage_landmarks のJS移植） ---------- */
 function buildMask(img,W,H,thr){
@@ -1568,6 +1607,10 @@ $("generateBtn").onclick=async()=>{
     };
     const glb=await P3D.runPipeline(state, (label)=>{ $("genStage").textContent=label; });
     await P3D.saveGeneratedModel(glb);
+    if(currentMode==="normal"){
+      saveNormalSession();
+      await saveNormalSessionImages();
+    }
     genOverlayHide();
     location.href="character_3d.html?source=generated";
   }catch(e){
@@ -1736,23 +1779,63 @@ renderParamsPanel();
         .then(function(d){ applyLoadedJson(d); }).catch(function(){});
     });
   }
-  function showModeChoice(){ $("modeChoice").classList.remove("hidden"); }
+  // 「前回の続き」が選べるかどうかを、保存済みJSON(localStorage)+画像本体
+  // (IndexedDB)の両方が実際に揃っているかで判定する。片方だけ残っている
+  // 状態(保存途中の失敗等)は「無い」扱いにして、中途半端な復元を避ける。
+  async function checkContinueAvailable(){
+    let raw=null;
+    try{ raw=localStorage.getItem(NORMAL_SESSION_KEY); }catch(e){}
+    let blobs=null;
+    try{ blobs=window.P3D&&P3D.loadNormalSessionImages?await P3D.loadNormalSessionImages():null; }catch(e){}
+    const ok=!!(raw && blobs && blobs.front && blobs.side && blobs.back);
+    const card=$("modeContinueBtn");
+    card.classList.toggle("disabled",!ok);
+    $("modeContinueDesc").textContent=ok
+      ?"前回保存した通常モードの画像・ランドマークを読み込んで再開します。"
+      :"前回保存した通常モードの作業がまだありません(新規作成後、モデル生成すると保存されます)。";
+    return ok;
+  }
+  function showModeChoice(){
+    checkContinueAvailable();
+    $("modeChoice").classList.remove("hidden");
+  }
   function startSampleMode(){
+    currentMode="sample";
     $("modeChoice").classList.add("hidden");
     loadSampleImages().catch(function(){
-      setMsg("サンプル画像の読込に失敗しました。通常モードで自分の画像をアップロードしてください。");
+      setMsg("サンプル画像の読込に失敗しました。新規作成で自分の画像をアップロードしてください。");
       $("uploadArea").classList.remove("hidden");
     });
   }
-  function startNormalMode(){
+  function startNewNormalMode(){
+    currentMode="normal";
     $("modeChoice").classList.add("hidden");
     $("uploadArea").classList.remove("hidden");
   }
+  async function startContinueNormalMode(){
+    if(!(await checkContinueAvailable())) return; // 念のための二重チェック(基本disabledでクリック不可)
+    currentMode="normal";
+    $("modeChoice").classList.add("hidden");
+    try{
+      const raw=localStorage.getItem(NORMAL_SESSION_KEY);
+      const blobs=await P3D.loadNormalSessionImages();
+      await Promise.all(["front","side","back"].map(function(slot){
+        return loadImageBlobIntoSlot(slot,blobs[slot]);
+      }));
+      runAnalyze();syncViewBtns();
+      applyLoadedJson(JSON.parse(raw));
+    }catch(e){
+      console.warn("前回の続きの復元に失敗しました:",e);
+      setMsg("前回の続きの復元に失敗しました。新規作成でやり直してください。");
+      $("uploadArea").classList.remove("hidden");
+    }
+  }
   $("modeSampleBtn").onclick=startSampleMode;
-  $("modeNormalBtn").onclick=startNormalMode;
+  $("modeNewBtn").onclick=startNewNormalMode;
+  $("modeContinueBtn").onclick=startContinueNormalMode;
   $("backToIndex").onclick=()=>{ location.href="index.html"; };
-  // モード選択画面は常に表示する(以前あった「保存済みセッションを検出して
-  // 自動復元しモード選択を省略する」機能は撤去し、毎回必ずここから選ぶ)。
+  // モード選択画面は常に表示する(自動復元でモード選択を省略する挙動は撤去し、
+  // 毎回必ずここから選ぶ。「前回の続き」の可否だけその都度チェックする)。
   showModeChoice();
 })();
 })();
