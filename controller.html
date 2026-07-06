@@ -636,7 +636,7 @@ cvs.addEventListener('pointermove',e=>{
     if(pinchDist>0){ camDist*=pinchDist/d; camDist=Math.max(CAM_DIST_MIN,Math.min(CAM_DIST_MAX,camDist)); invalidate(); }
     pinchDist=d;
   }else if(dragging){
-    orbitYaw+=(e.clientX-lx)*0.008;
+    orbitYaw-=(e.clientX-lx)*0.008;
     orbitPitch+=(e.clientY-ly)*0.008;
     orbitPitch=Math.max(0.05,Math.min(1.1,orbitPitch));
     lx=e.clientX; ly=e.clientY; invalidate();
