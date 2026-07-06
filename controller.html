@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴーストコントローラー</title>
+<style>
+  :root{--bg:#07080a;--panel:rgba(20,24,29,.92);--line:rgba(255,255,255,.10);--mut:#9aa3ad;--mint:#39ff9e;
+    --green:#39ff9e;--txt:#e8edf2;--mono:"SFMono-Regular",Consolas,Menlo,monospace}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #c{position:fixed;inset:0;display:block;touch-action:none;width:100vw!important;height:100vh!important}
+  .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
+    text-shadow:0 1px 6px rgba(0,0,0,.7)}
+  .title .eng{display:block;font-family:var(--mono);font-size:9px;font-weight:400;color:var(--green);
+    letter-spacing:.22em;margin-top:3px;opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+  .hint{position:fixed;top:46px;left:14px;z-index:5;font-size:10.5px;color:var(--mut);pointer-events:none;
+    text-shadow:0 1px 4px rgba(0,0,0,.8);max-width:220px;line-height:1.5}
+  #err{position:fixed;top:78px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none;max-width:260px}
+  #topNav{position:fixed;top:8px;right:10px;z-index:7;display:flex;gap:6px}
+  #topNav button{height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
+  #topNav button:active{background:rgba(57,255,158,.15)}
+
+  /* center drop card (mode choice / file picker), same pattern as character_3d.html */
+  .drop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,86vw);padding:28px;
+    text-align:center;z-index:6;background:var(--panel);border:1px solid var(--line);border-radius:16px}
+  .drop.hide{display:none}
+  .drop h2{margin:.1em 0 .3em;font-size:16px}
+  .drop p{color:var(--mut);font-size:13px;margin:.3em 0 1.1em}
+  .btn{height:42px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.05);
+    color:var(--txt);font-size:13px;cursor:pointer;padding:0 20px}
+  .btn:active{transform:scale(.97)}
+
+  .modeCard{display:block;cursor:pointer;text-align:left;border:1px solid var(--line);border-radius:14px;
+    background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
+  .modeCard:active{background:rgba(57,255,158,.10);border-color:rgba(57,255,158,.4)}
+  .modeCard.mint{border-color:rgba(57,255,158,.4)}
+  .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
+  .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+
+  /* virtual joystick (touch movement) */
+  #joyBase{position:fixed;left:24px;bottom:calc(24px + env(safe-area-inset-bottom));width:112px;height:112px;
+    border-radius:50%;background:rgba(255,255,255,.05);border:1px solid var(--line);z-index:6;
+    touch-action:none;display:none}
+  #joyBase.visible{display:block}
+  #joyKnob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;
+    background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.32);pointer-events:none}
+
+  /* flashlight toggle */
+  #flashToggle{display:none;position:fixed;right:16px;bottom:calc(24px + env(safe-area-inset-bottom));z-index:7;
+    width:54px;height:54px;border-radius:50%;border:1px solid var(--line);background:rgba(20,24,29,.85);
+    font-size:22px;cursor:pointer;color:var(--txt)}
+  #flashToggle.visible{display:block}
+  #flashToggle.on{border-color:var(--mint);box-shadow:0 0 14px rgba(57,255,158,.4)}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div class="title">ゴーストコントローラー<span class="eng">GHOST CONTROLLER</span></div>
+<div class="hint">WASD/矢印キーで移動・ドラッグで視点・ホイールでズーム<br>タッチ操作は左下のジョイスティックを使用</div>
+<div id="topNav">
+  <button id="backToIndex" title="トップページに戻る">← トップ</button>
+  <button id="backToLandmark" title="ゴーストジェネレータに戻る">← ジェネレータ</button>
+</div>
+<div id="err"></div>
+
+<div class="drop hide" id="modeChoice">
+  <h2>モードを選んでください</h2>
+  <div class="modeCard mint" id="modeSampleBtn">
+    <b>サンプルモデルで開く</b>
+    <span>同梱のサンプルmodel.glbを自動読込して、その場で歩き回れます。</span>
+  </div>
+  <div class="modeCard" id="modeNormalBtn">
+    <b>モデルを読み込む</b>
+    <span>自分の.glbファイルを選択/ドラッグ&ドロップして操作します。</span>
+  </div>
+</div>
+
+<div class="drop hide" id="drop">
+  <h2>3Dモデルを読み込む</h2>
+  <p>.glb ファイルを選択、またはドラッグ＆ドロップしてください。</p>
+  <button class="btn" id="pick">ファイルを選択</button>
+  <input type="file" id="file" accept=".glb,.gltf" style="display:none"/>
+</div>
+
+<div id="joyBase"><div id="joyKnob"></div></div>
+<button id="flashToggle" class="on" title="懐中電灯 ON/OFF">🔦</button>
+
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/GLTFLoader.js"></script>
+<script src="js/idb.js"></script>
+<script>
+(function(){
+"use strict";
+const cvs=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.outputEncoding=THREE.sRGBEncoding;
+// character_3d.htmlと同じ理由でACESは不採用(トゥーン影の彩度を潰すため)。
+renderer.toneMapping=THREE.NoToneMapping;
+const maxAniso=renderer.capabilities.getMaxAnisotropy();
+
+// 夜霧の神社マップを見据えた暗く寒色寄りの背景+霧(Phase 1では地面は仮の平面のみ)。
+const FOG_COLOR=0x0a0c10;
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(FOG_COLOR);
+scene.fog=new THREE.Fog(FOG_COLOR,7,20); // 視界を15〜20m程度に制限
+
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,60);
+
+// --- ライト(character_3d.htmlの三点照明を流用しつつ、夜間仕様に暗く・寒色寄りに) ---
+const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,0.32);
+scene.add(hemiLight);
+const keyLight=new THREE.DirectionalLight(0xaac2ff,0.42); // 月明かり的な弱い寒色キーライト
+keyLight.position.set(2,4,1.5);
+scene.add(keyLight);
+const fillLight=new THREE.DirectionalLight(0x33405a,0.14);
+fillLight.position.set(-2,1,-2);
+scene.add(fillLight);
+const rimLight=new THREE.DirectionalLight(0xbcd6ff,0.22);
+rimLight.position.set(-0.5,3,-2.2);
+scene.add(rimLight);
+
+// --- トゥーン用グラデーションマップ(character_3d.htmlと同じ3段階セル影) ---
+let toonGradCtx=null;
+function makeToonGradient(){
+  const c=document.createElement('canvas');c.width=3;c.height=1;
+  const ctx=c.getContext('2d');
+  [70,150,255].forEach((v,i)=>{ctx.fillStyle='rgb('+v+','+v+','+v+')';ctx.fillRect(i,0,1,1);});
+  const tex=new THREE.CanvasTexture(c);
+  tex.minFilter=THREE.NearestFilter;tex.magFilter=THREE.NearestFilter;tex.generateMipmaps=false;
+  toonGradCtx=ctx;
+  return tex;
+}
+const toonGradient=makeToonGradient();
+function setToonGradientStrength(pct){
+  const s=Math.max(0,Math.min(1,pct/100));
+  const ctx=toonGradCtx;
+  const darkV=Math.round(115-85*s), litV=Math.round(225+20*s);
+  const dark=[Math.round(darkV*0.92),Math.round(darkV*0.96),Math.min(255,Math.round(darkV*1.12))];
+  const mid=[Math.round(158*0.97),Math.round(158*0.99),Math.min(255,Math.round(158*1.05))];
+  const lit=[litV,litV,litV];
+  [dark,mid,lit].forEach((rgb,i)=>{ctx.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';ctx.fillRect(i,0,1,1);});
+  toonGradient.needsUpdate=true;
+}
+setToonGradientStrength(70); // character_3d.htmlのセル影スライダー既定値と同じ強さで固定
+
+function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; }
+function buildOutline(mesh,thickness){
+  const geo=mesh.geometry.clone();
+  const pos=geo.attributes.position,nor=geo.attributes.normal;
+  for(let i=0;i<pos.count;i++){
+    pos.setXYZ(i,pos.getX(i)+nor.getX(i)*thickness,pos.getY(i)+nor.getY(i)*thickness,pos.getZ(i)+nor.getZ(i)*thickness);
+  }
+  pos.needsUpdate=true;
+  const mat=new THREE.MeshBasicMaterial({map:mesh.material.map||null,color:0x2a2830,
+    side:THREE.BackSide,skinning:true,toneMapped:false});
+  const out=new THREE.SkinnedMesh(geo,mat);
+  out.bind(mesh.skeleton,mesh.bindMatrix);
+  out.userData.isOutline=true;
+  return out;
+}
+
+// --- 地面(Phase 1: 平坦な仮地面。神社の造形/砂利テクスチャはPhase 2) ---
+const groundGeo=new THREE.PlaneGeometry(100,100);
+groundGeo.rotateX(-Math.PI/2);
+const groundMat=new THREE.MeshToonMaterial({color:0x262b31,gradientMap:toonGradient});
+const ground=new THREE.Mesh(groundGeo,groundMat);
+scene.add(ground);
+
+// --- キャラクター ---
+const characterRoot=new THREE.Group();
+scene.add(characterRoot);
+let model=null, mixer=null, idleAction=null, runAction=null, handBone=null;
+let flashLight=null, flashProp=null, flashOn=true;
+
+function clearCharacter(){
+  if(model){ characterRoot.remove(model); model=null; }
+  mixer=null; idleAction=null; runAction=null; handBone=null;
+  removeFlashlight();
+}
+
+function attachFlashlight(){
+  removeFlashlight();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.026,0.14,10),
+    new THREE.MeshStandardMaterial({color:0x22262c,roughness:0.6}));
+  body.rotation.x=Math.PI/2;
+  const tip=new THREE.Mesh(new THREE.CylinderGeometry(0.023,0.023,0.02,10),
+    new THREE.MeshBasicMaterial({color:0xfff3cf,toneMapped:false}));
+  tip.rotation.x=Math.PI/2; tip.position.z=-0.08;
+  flashProp=new THREE.Group();
+  flashProp.add(body); flashProp.add(tip);
+  flashProp.position.set(0.01,-0.02,0.04); // 握っているように見える程度のオフセット(目視調整前提)
+  const parent=handBone||model;
+  if(parent) parent.add(flashProp);
+
+  flashLight=new THREE.SpotLight(0xffe9b0, flashOn?1.5:0, 13, THREE.MathUtils.degToRad(30), 0.45, 1.3);
+  flashLight.target=new THREE.Object3D();
+  scene.add(flashLight);
+  scene.add(flashLight.target);
+  document.getElementById('flashToggle').classList.add('visible');
+}
+function removeFlashlight(){
+  if(flashProp&&flashProp.parent) flashProp.parent.remove(flashProp);
+  if(flashLight){ scene.remove(flashLight); scene.remove(flashLight.target); }
+  flashProp=null; flashLight=null;
+  document.getElementById('flashToggle').classList.remove('visible');
+}
+const _flashWorldPos=new THREE.Vector3();
+function updateFlashlight(){
+  if(!flashProp||!flashLight) return;
+  flashProp.getWorldPosition(_flashWorldPos);
+  flashLight.position.copy(_flashWorldPos);
+  // ビームの狙う方向は手ボーンの生の回転(走行中に激しく振れる)ではなく、
+  // キャラクターの向き(charYaw)から求めた水平前方ベクトルを使い、揺れを抑える。
+  const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
+  flashLight.target.position.set(_flashWorldPos.x+fx*3, _flashWorldPos.y-0.15, _flashWorldPos.z+fz*3);
+  flashLight.target.updateMatrixWorld();
+}
+document.getElementById('flashToggle').onclick=()=>{
+  flashOn=!flashOn;
+  document.getElementById('flashToggle').classList.toggle('on',flashOn);
+  if(flashLight) flashLight.intensity=flashOn?1.5:0;
+};
+
+const MOTION_NAMES=['idle','run'];
+function loadMotions(){
+  if(!model||!mixer)return;
+  MOTION_NAMES.forEach(name=>{
+    fetch('motion_'+name+'.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
+      .then(buf=>new Promise((resolve,reject)=>{
+        new THREE.GLTFLoader().parse(buf,'',gltf=>resolve(gltf.animations||[]),reject);
+      }))
+      .then(clips=>{
+        if(!clips.length||!mixer)return;
+        const action=mixer.clipAction(clips[0]);
+        action.play();
+        if(name==='idle'){ idleAction=action; action.weight=1; }
+        else{ runAction=action; action.weight=0; }
+      }).catch(()=>{ /* モーションglbが無ければ静止表示のまま */ });
+  });
+}
+
+function loadCharacter(buf,onLoaded){
+  new THREE.GLTFLoader().parse(buf,'',function(gltf){
+    let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
+    if(!hasMesh){ document.getElementById('err').textContent='モデルにメッシュが含まれていません'; return; }
+    clearCharacter();
+    model=gltf.scene; characterRoot.add(model);
+    model.traverse(o=>{ if(o.isMesh&&o.material){
+      const old=o.material;
+      const toonMat=new THREE.MeshToonMaterial({map:old.map||null,gradientMap:toonGradient,
+        transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
+      if(toonMat.map){toonMat.map.encoding=THREE.sRGBEncoding;toonMat.map.anisotropy=maxAniso;}
+      o.material=toonMat;
+      if(o.isSkinnedMesh){
+        const outline=buildOutline(o,outlineThickness(40));
+        model.add(outline);
+      }
+    }});
+    handBone=model.getObjectByName('hand_R')||null;
+    attachFlashlight();
+    mixer=new THREE.AnimationMixer(model);
+    document.getElementById('modeChoice').classList.add('hide');
+    document.getElementById('drop').classList.add('hide');
+    document.getElementById('joyBase').classList.add('visible');
+    document.getElementById('err').textContent='';
+    charPos.set(0,0,0); charYaw=0;
+    invalidate();
+    if(onLoaded)onLoaded();
+  }, e=>{ document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e); });
+}
+
+// file picker / drag&drop
+const fileEl=document.getElementById('file');
+document.getElementById('pick').onclick=()=>fileEl.click();
+fileEl.onchange=e=>{ const f=e.target.files[0]; if(f) readCharacterFile(f); };
+function readCharacterFile(f){
+  const r=new FileReader();
+  r.onload=()=>loadCharacter(r.result, loadMotions);
+  r.readAsArrayBuffer(f);
+}
+['dragover','drop'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+document.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0];
+  if(f&&/\.(glb|gltf)$/i.test(f.name)) readCharacterFile(f);
+});
+
+function tryAutoLoadSample(){
+  fetch('model.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); }).then(buf=>{
+    loadCharacter(buf, loadMotions);
+  }).catch(()=>{
+    document.getElementById('modeChoice').classList.add('hide');
+    document.getElementById('drop').classList.remove('hide');
+  });
+}
+document.getElementById('modeSampleBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  tryAutoLoadSample();
+};
+document.getElementById('modeNormalBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  document.getElementById('drop').classList.remove('hide');
+};
+// ランドマークツールからの生成直後ハンドオフ(IndexedDB)を最優先、無ければモード選択。
+(async function(){
+  try{
+    const buf=window.P3D && await P3D.loadGeneratedModel();
+    if(buf){
+      await P3D.clearGeneratedModel();
+      loadCharacter(buf, loadMotions);
+      return;
+    }
+  }catch(e){ console.warn('generated model load failed', e); }
+  document.getElementById('modeChoice').classList.remove('hide');
+})();
+
+document.getElementById('backToLandmark').onclick=()=>{ location.href='landmark_tool.html'; };
+document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
+
+// ============ 三人称カメラ・移動コントローラー ============
+let needsRender=true;
+function invalidate(){ needsRender=true; }
+function resize(){
+  renderer.setSize(innerWidth,innerHeight,false);
+  cvs.style.width=innerWidth+'px'; cvs.style.height=innerHeight+'px';
+  cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
+  invalidate();
+}
+addEventListener('resize',resize); resize();
+
+let orbitYaw=0, orbitPitch=0.35;
+let camDist=4.5; const CAM_DIST_MIN=2.0, CAM_DIST_MAX=9.0;
+let charYaw=0;
+const charPos=new THREE.Vector3(0,0,0);
+const MOVE_SPEED=3.2, YAW_LERP=12, BLEND_LERP=8, CHAR_R=0.3, MAP_RADIUS=16;
+let currentBlend=0;
+
+function lerpAngle(a,b,t){
+  let diff=(b-a+Math.PI*3)%(Math.PI*2)-Math.PI;
+  return a+diff*t;
+}
+
+// --- キーボード入力 ---
+const keys={};
+addEventListener('keydown',e=>{ keys[e.code]=true; });
+addEventListener('keyup',e=>{ keys[e.code]=false; });
+function keyboardVec(){
+  let x=0,y=0;
+  if(keys.KeyW||keys.ArrowUp)y+=1;
+  if(keys.KeyS||keys.ArrowDown)y-=1;
+  if(keys.KeyA||keys.ArrowLeft)x-=1;
+  if(keys.KeyD||keys.ArrowRight)x+=1;
+  const len=Math.hypot(x,y);
+  return len>1?{x:x/len,y:y/len}:{x,y};
+}
+
+// --- 仮想ジョイスティック(タッチ) ---
+const joyBase=document.getElementById('joyBase'), joyKnob=document.getElementById('joyKnob');
+let joyActive=false, joyPtrId=null, joyVec={x:0,y:0};
+const JOY_R=56;
+function joySetFromEvent(e){
+  const rc=joyBase.getBoundingClientRect();
+  const cx=rc.left+rc.width/2, cy=rc.top+rc.height/2;
+  let dx=e.clientX-cx, dy=e.clientY-cy;
+  const d=Math.hypot(dx,dy);
+  if(d>JOY_R){ dx=dx/d*JOY_R; dy=dy/d*JOY_R; }
+  joyKnob.style.transform='translate('+dx+'px,'+dy+'px)';
+  joyVec={x:dx/JOY_R, y:-dy/JOY_R}; // 画面上方向=前進(y+)
+}
+function joyReset(){
+  joyActive=false; joyPtrId=null; joyVec={x:0,y:0};
+  joyKnob.style.transform='translate(0,0)';
+}
+joyBase.addEventListener('pointerdown',e=>{
+  joyActive=true; joyPtrId=e.pointerId;
+  try{ joyBase.setPointerCapture(e.pointerId); }catch(_){}
+  joySetFromEvent(e);
+});
+joyBase.addEventListener('pointermove',e=>{ if(joyActive&&e.pointerId===joyPtrId) joySetFromEvent(e); });
+joyBase.addEventListener('pointerup',e=>{ if(e.pointerId===joyPtrId) joyReset(); });
+joyBase.addEventListener('pointercancel',e=>{ if(e.pointerId===joyPtrId) joyReset(); });
+
+// --- カメラオービット・ズーム(canvas上のドラッグ/ホイール/ピンチ) ---
+const ptrs=new Map(); let dragging=false, lx=0, ly=0, pinchDist=0;
+function dist2(){ const v=[...ptrs.values()]; const dx=v[0].x-v[1].x, dy=v[0].y-v[1].y; return Math.hypot(dx,dy); }
+cvs.addEventListener('pointerdown',e=>{
+  try{ cvs.setPointerCapture(e.pointerId); }catch(_){}
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){ dragging=true; lx=e.clientX; ly=e.clientY; }
+  else if(ptrs.size===2){ dragging=false; pinchDist=dist2(); }
+});
+cvs.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size>=2){
+    const d=dist2();
+    if(pinchDist>0){ camDist*=pinchDist/d; camDist=Math.max(CAM_DIST_MIN,Math.min(CAM_DIST_MAX,camDist)); invalidate(); }
+    pinchDist=d;
+  }else if(dragging){
+    orbitYaw+=(e.clientX-lx)*0.008;
+    orbitPitch+=(e.clientY-ly)*0.008;
+    orbitPitch=Math.max(0.05,Math.min(1.1,orbitPitch));
+    lx=e.clientX; ly=e.clientY; invalidate();
+  }
+});
+function endPtr(e){
+  ptrs.delete(e.pointerId); if(ptrs.size<2)pinchDist=0; if(ptrs.size===0)dragging=false;
+  else if(ptrs.size===1){ const v=[...ptrs.values()][0]; dragging=true; lx=v.x; ly=v.y; }
+}
+cvs.addEventListener('pointerup',endPtr);
+cvs.addEventListener('pointercancel',endPtr);
+cvs.addEventListener('wheel',e=>{
+  e.preventDefault();
+  camDist*=(1+Math.sign(e.deltaY)*0.08);
+  camDist=Math.max(CAM_DIST_MIN,Math.min(CAM_DIST_MAX,camDist));
+  invalidate();
+},{passive:false});
+
+function resolveCollision(pos){
+  const d=Math.hypot(pos.x,pos.z);
+  if(d>MAP_RADIUS-CHAR_R) pos.multiplyScalar((MAP_RADIUS-CHAR_R)/d);
+  return pos;
+}
+
+const _camTarget=new THREE.Vector3(), _camOffset=new THREE.Vector3(), _camDesired=new THREE.Vector3();
+function updateCamera(dt){
+  _camTarget.set(charPos.x, charPos.y+1.3, charPos.z);
+  _camOffset.set(
+    Math.sin(orbitYaw)*Math.cos(orbitPitch),
+    Math.sin(orbitPitch),
+    Math.cos(orbitYaw)*Math.cos(orbitPitch)
+  ).multiplyScalar(camDist);
+  _camDesired.copy(_camTarget).add(_camOffset);
+  const t=1-Math.pow(0.0001,Math.min(dt,0.1));
+  cam.position.lerp(_camDesired,t);
+  cam.lookAt(_camTarget);
+}
+
+const clock=new THREE.Clock();
+// デバッグ/検証用に主要な状態を露出(Playwrightでの自動確認に使う)。
+window.__ghostController={ get charPos(){return charPos;}, get charYaw(){return charYaw;},
+  get orbitYaw(){return orbitYaw;}, get orbitPitch(){return orbitPitch;}, get camDist(){return camDist;},
+  get currentBlend(){return currentBlend;} };
+
+function tick(){
+  requestAnimationFrame(tick);
+  const dt=Math.min(clock.getDelta(),0.05);
+
+  if(model){
+    const inputVec=joyActive?joyVec:keyboardVec();
+    const inputMag=Math.min(1,Math.hypot(inputVec.x,inputVec.y));
+    const camForward=new THREE.Vector3(-Math.sin(orbitYaw),0,-Math.cos(orbitYaw));
+    const camRight=new THREE.Vector3(camForward.z,0,-camForward.x);
+    const dir=camForward.multiplyScalar(inputVec.y).add(camRight.multiplyScalar(inputVec.x));
+    const hasDir=dir.lengthSq()>1e-6;
+    if(hasDir)dir.normalize();
+
+    currentBlend+=(Math.min(1,inputMag)-currentBlend)*Math.min(1,BLEND_LERP*dt);
+    if(idleAction&&runAction){ idleAction.weight=1-currentBlend; runAction.weight=currentBlend; }
+    if(mixer)mixer.update(dt);
+
+    if(hasDir){
+      const targetYaw=Math.atan2(dir.x,dir.z);
+      charYaw=lerpAngle(charYaw,targetYaw,Math.min(1,YAW_LERP*dt));
+    }
+    characterRoot.rotation.y=charYaw;
+
+    if(hasDir&&currentBlend>0.001){
+      const disp=dir.multiplyScalar(MOVE_SPEED*currentBlend*dt);
+      charPos.add(disp);
+      resolveCollision(charPos);
+    }
+    characterRoot.position.set(charPos.x,0,charPos.z);
+
+    updateFlashlight();
+    invalidate(); // idle待機モーション自体が常に動くため毎フレーム再描画
+  }
+
+  updateCamera(dt);
+  if(needsRender){ renderer.render(scene,cam); needsRender=false; }
+}
+tick();
+})();
+</script>
+</body></html>
