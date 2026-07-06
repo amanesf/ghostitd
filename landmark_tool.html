@@ -63,7 +63,37 @@
   .dpad button{width:56px;height:48px;font-size:22px;border-radius:12px;border:1px solid var(--line);
     background:rgba(255,255,255,.06);color:var(--txt);cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}
   .dpad button:active{background:rgba(82,224,196,.18)}
+  .dpad button:disabled{opacity:.3;cursor:default}
+  .dpad button:disabled:active{background:rgba(255,255,255,.06)}
   .hidden{display:none}
+  .btn.danger{border-color:rgba(255,107,107,.45);color:#ff8484}
+  .btn.danger:active{background:rgba(255,107,107,.14)}
+  .qbtn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+    border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.08);color:var(--mut);
+    font-size:11px;line-height:1;cursor:pointer;vertical-align:middle;margin-left:4px;flex:0 0 auto;padding:0}
+  .qbtn.on{color:#ffe14d;border-color:rgba(255,225,77,.5)}
+  .helpText{font-size:11px;color:var(--mut);line-height:1.6;margin:4px 0 10px;
+    background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .subhead{font-size:10.5px;font-weight:700;letter-spacing:.03em;color:var(--mut);margin:9px 0 4px}
+  .subhead:first-child{margin-top:0}
+  .legendGroups{display:flex;flex-direction:column;gap:2px}
+  .bonesGroups{display:flex;flex-direction:column;gap:2px;max-height:230px;overflow:auto}
+  .bonesRow{display:flex;flex-wrap:wrap;gap:4px}
+  .accgroup{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden;background:rgba(255,255,255,.02)}
+  .accgroup>summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;align-items:center;gap:8px;
+    font-size:12.5px;color:var(--txt);font-weight:600;user-select:none}
+  .accgroup>summary::-webkit-details-marker{display:none}
+  .accgroup>summary::before{content:"▸";color:var(--mut);font-size:11px;transition:transform .12s}
+  .accgroup[open]>summary::before{transform:rotate(90deg)}
+  .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:11px}
+  .accgroup>summary .accDot{width:7px;height:7px;border-radius:50%;background:#ffe14d;flex:0 0 auto;
+    box-shadow:0 0 0 2px rgba(255,225,77,.18)}
+  .accgroup>.accbody{padding:0 12px 12px}
+  .accResetGrp{font-size:10.5px;color:var(--mut);border:1px solid var(--line);border-radius:6px;
+    background:rgba(255,255,255,.05);padding:2px 8px;cursor:pointer;flex:0 0 auto}
+  .accToolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .accToolbar button{font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:7px;
+    background:rgba(255,255,255,.05);padding:5px 10px;cursor:pointer}
   #genOverlay{position:fixed;inset:0;background:rgba(8,10,13,.92);z-index:1000;
     display:none;flex-direction:column;align-items:center;justify-content:center;
     gap:14px;padding:20px;text-align:center}
@@ -97,8 +127,7 @@
   .acform label{font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px}
   .acform input[type=text],.acform select{background:rgba(255,255,255,.06);border:1px solid var(--line);
     color:var(--txt);border-radius:7px;padding:6px 8px;font-size:12px}
-  .acform .bones{display:flex;flex-wrap:wrap;gap:4px;max-height:90px;overflow:auto}
-  .acform .bones label{flex-direction:row;align-items:center;gap:4px;font-size:10.5px;
+  .acform .bonesRow label{flex-direction:row;align-items:center;gap:4px;font-size:10.5px;
     background:rgba(255,255,255,.05);border-radius:6px;padding:3px 6px}
   .acform .row{display:flex;gap:8px}
   .acform .row>*{flex:1}
@@ -110,52 +139,49 @@
   <p class="sub">3枚絵 → 全点を自動仮配置 → ドラッグで微調整 → landmarks.json 出力</p>
 
   <div id="editor" class="hidden">
-    <div class="viewbar" id="viewbar">
-      <button class="viewbtn on" data-view="front">正面</button>
-      <button class="viewbtn" data-view="side">側面</button>
-      <button class="viewbtn" data-view="back">背面</button>
+    <div class="tabbar" id="tabbar">
+      <button class="tabbtn on" data-tab="lm">マーク</button>
+      <button class="tabbtn" data-tab="ex">領域</button>
+      <button class="tabbtn" data-tab="ac">パーツ＋</button>
+      <button class="tabbtn" data-tab="bones">ボーン</button>
+      <button class="tabbtn" data-tab="seam">画像境界</button>
+      <button class="tabbtn" data-tab="params">設定値</button>
+      <button class="tabbtn" data-tab="gen">生成</button>
     </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
-      <button class="btn sm" id="lockToggle" style="flex:0 0 auto">🔓 点をロック</button>
-    </div>
-    <div id="wrap"><canvas id="cvs"></canvas></div>
-    <div id="msg"></div>
-    <div class="nudge">
-      <div class="sel">微調整中: <b id="selName">未選択</b>（押しっぱなしで連続移動）</div>
-      <div class="sel" id="selDesc" style="min-height:14px;color:var(--mut)"></div>
-      <div class="nudgerow">
-        <button class="btn" id="viewReset" style="flex:0 0 auto;max-width:130px">表示リセット（拡大/位置）</button>
-        <div class="dpad">
-          <span></span><button id="nUp">▲</button><span></span>
-          <button id="nLeft">◀</button><span></span><button id="nRight">▶</button>
-          <span></span><button id="nDown">▼</button><span></span>
+
+    <div id="imgArea">
+      <div class="viewbar" id="viewbar">
+        <button class="viewbtn on" data-view="front">正面</button>
+        <button class="viewbtn" data-view="side">側面</button>
+        <button class="viewbtn" data-view="back">背面</button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn sm" id="lockToggle" style="flex:0 0 auto">🔓 点をロック</button>
+      </div>
+      <div id="wrap"><canvas id="cvs"></canvas></div>
+      <div id="msg"></div>
+      <div class="nudge">
+        <div class="sel">微調整中: <b id="selName">未選択</b>（押しっぱなしで連続移動）</div>
+        <div class="sel" id="selDesc" style="min-height:14px;color:var(--mut)"></div>
+        <div class="nudgerow">
+          <button class="btn" id="viewReset" style="flex:0 0 auto;max-width:130px">表示リセット（拡大/位置）</button>
+          <div class="dpad">
+            <span></span><button id="nUp">▲</button><span></span>
+            <button id="nLeft">◀</button><span></span><button id="nRight">▶</button>
+            <span></span><button id="nDown">▼</button><span></span>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="tabbar" id="tabbar">
-      <button class="tabbtn on" data-tab="lm">ランドマーク</button>
-      <button class="tabbtn" data-tab="ac">アクセサリー</button>
-      <button class="tabbtn" data-tab="ex">除外</button>
-      <button class="tabbtn" data-tab="seam">境目角度</button>
-      <button class="tabbtn" data-tab="params">パラメータ</button>
-      <button class="tabbtn" data-tab="bones">ボーン</button>
-    </div>
-
     <div class="tabpanel on" data-tabpanel="lm">
-      <div class="legend" id="legend"></div>
-    </div>
-
-    <div class="tabpanel acpanel" data-tabpanel="ac">
-      <h2>アクセサリー（ヘッドホン・猫耳・カメラ小物・スカート等）</h2>
-      <div id="acList" class="aclist"></div>
-      <div id="acForm"></div>
-      <button class="btn mint" id="acAddBtn">+ 手動で追加</button>
+      <div class="legendGroups" id="legend"></div>
     </div>
 
     <div class="tabpanel acpanel" data-tabpanel="ex">
-      <h2>除外範囲（毛先など、シルエット測定から除外したい部分）</h2>
-      <p style="font-size:11px;color:var(--mut);margin:0 0 8px">
+      <h2>除外範囲（毛先など、シルエット測定から除外したい部分）
+        <button type="button" class="qbtn" data-help="help-ex">?</button></h2>
+      <p class="helpText hidden" id="help-ex">
         前髪が首にかぶる等、体のシルエットに紛れ込んで幅/奥行きの自動測定を
         狂わせる部分を、正面/側面/背面それぞれで直接塗って除外できます。
         「マジックツール」はタップした点から色の近い連続領域を自動選択、
@@ -177,27 +203,49 @@
       </div>
     </div>
 
+    <div class="tabpanel acpanel" data-tabpanel="ac">
+      <h2>アクセサリー（ヘッドホン・猫耳・カメラ小物・スカート等）</h2>
+      <div id="acList" class="aclist"></div>
+      <div id="acForm"></div>
+      <button class="btn mint" id="acAddBtn">+ 手動で追加</button>
+    </div>
+
+    <div class="tabpanel acpanel" data-tabpanel="bones">
+      <h2>ボーン配置プレビュー
+        <button type="button" class="qbtn" data-help="help-bones">?</button></h2>
+      <p class="helpText hidden" id="help-bones">
+        自動生成されるボーン（骨格）の位置を正面図に重ねて表示します。ボーンは
+        ランドマークと正面シルエットから自動計算され、調整はできません
+        （見た目の確認のみ）。</p>
+      <div id="bonesMsg" style="font-size:11px;color:var(--mut);margin:0 0 8px"></div>
+    </div>
+
     <div class="tabpanel acpanel" data-tabpanel="seam">
-      <h2>テクスチャ境目の角度調整（任意）</h2>
-      <p style="font-size:11px;color:var(--mut);margin:0 0 8px">
+      <h2>テクスチャ境目の角度調整（任意）
+        <button type="button" class="qbtn" data-help="help-seam">?</button></h2>
+      <p class="helpText hidden" id="help-seam">
         テクスチャは正面/背面写真と側面写真を貼り分けており、体を横から見た面は
         側面写真に切り替わります。この切り替わり角度(既定45°)をパーツごとに
         変えると、継ぎ目の位置を服のシワ等で目立ちにくい場所にずらせます。
         角度を大きくすると正面/背面側が優先され、小さくすると側面側が優先されます。</p>
       <div class="acitem" style="margin-bottom:8px">
-        <span class="nm">境界グラデーションの強さ</span>
-        <input type="number" id="seamSmoothVal" min="0" max="30" step="1" value="8" style="width:56px">回
+        <span class="nm">境界グラデーションの強さ
+          <button type="button" class="qbtn" data-help="help-seamSmooth">?</button></span>
+        <input type="range" id="seamSmoothSlider" min="0" max="30" step="1" value="8" style="flex:1">
+        <input type="number" id="seamSmoothVal" min="0" max="30" step="1" value="8" style="width:52px">回
       </div>
-      <p style="font-size:10.5px;color:var(--mut);margin:0 0 10px">
+      <p class="helpText hidden" id="help-seamSmooth">
         境目の線をメッシュ上でなめらかにする平滑化の反復回数(既定8)。0にすると
         法線そのまま(ギザギザ/飛び地状)の境界線になり、増やすほど境界線が
         滑らかな一本の曲線に近づきます(色自体のグラデーション合成ではなく、
         境界線の形状を滑らかにする処理です)。</p>
       <div class="acitem" style="margin-bottom:8px">
-        <span class="nm">色のグラデーション幅</span>
-        <input type="number" id="colorGradVal" min="0" max="1" step="0.02" value="0" style="width:56px">
+        <span class="nm">色のグラデーション幅
+          <button type="button" class="qbtn" data-help="help-colorGrad">?</button></span>
+        <input type="range" id="colorGradSlider" min="0" max="1" step="0.02" value="0" style="flex:1">
+        <input type="number" id="colorGradVal" min="0" max="1" step="0.02" value="0" style="width:52px">
       </div>
-      <p style="font-size:10.5px;color:var(--mut);margin:0 0 10px">
+      <p class="helpText hidden" id="help-colorGrad">
         境目の帯の中で、front/side(および正面/背面)の実際の写真ピクセルの色を
         角度に応じた比率で数値的に混ぜ合わせ、テクスチャに直接焼き込みます
         (既定0=無効/従来通りのハード切替)。ノイズによるディザ(まだら混在)ではなく
@@ -213,12 +261,13 @@
         <button class="btn sm mint" id="seamSideAllOn">全パーツON</button>
         <button class="btn sm" id="seamSideAllOff">全パーツOFF</button>
       </div>
-      <div id="seamList" class="aclist"></div>
+      <div id="seamList"></div>
     </div>
 
     <div class="tabpanel acpanel" data-tabpanel="params">
-      <h2>モデル生成パラメータ（試行錯誤用）</h2>
-      <p style="font-size:11px;color:var(--mut);margin:0 0 8px">
+      <h2>モデル生成パラメータ（試行錯誤用）
+        <button type="button" class="qbtn" data-help="help-params">?</button></h2>
+      <p class="helpText hidden" id="help-params">
         pipeline.py側にハードコードされていた生成パラメータをここで調整できます。
         landmarks_ai.json に保存され、次回パイプライン実行時に反映されます。
         触らなければ全て既定値のまま動作します（各項目に既定値を記載）。</p>
@@ -228,24 +277,21 @@
       </div>
     </div>
 
-    <div class="tabpanel acpanel" data-tabpanel="bones">
-      <h2>ボーン配置プレビュー</h2>
-      <p style="font-size:11px;color:var(--mut);margin:0 0 8px">
-        自動生成されるボーン（骨格）の位置を正面図に重ねて表示します。ボーンは
-        ランドマークと正面シルエットから自動計算され、調整はできません
-        （見た目の確認のみ）。</p>
-      <div id="bonesMsg" style="font-size:11px;color:var(--mut);margin:0 0 8px"></div>
-    </div>
-
-    <div class="bar">
-      <button class="btn" id="loadJson">JSON読み込み</button>
-      <button class="btn" id="reset">初期配置に戻す</button>
-      <button class="btn mint" id="export">landmarks.json 出力</button>
-      <button class="btn" id="copy" style="flex:0 0 92px">コピー</button>
-      <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
-    </div>
-    <div class="bar">
-      <button class="btn mint" id="generateBtn" style="height:48px;font-size:14px">▶ モデル生成してビューアで見る</button>
+    <div class="tabpanel acpanel" data-tabpanel="gen">
+      <h2>JSON</h2>
+      <div class="bar">
+        <button class="btn" id="loadJson">JSON読み込み</button>
+        <button class="btn mint" id="export">landmarks.json 出力</button>
+        <button class="btn" id="copy">コピー</button>
+        <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
+      </div>
+      <div class="bar" style="margin-top:8px">
+        <button class="btn danger" id="reset">初期配置に戻す</button>
+      </div>
+      <h2 style="margin-top:18px">モデル生成</h2>
+      <div class="bar">
+        <button class="btn mint" id="generateBtn" style="height:48px;font-size:14px">▶ モデル生成してビューアで見る</button>
+      </div>
     </div>
   </div>
 
@@ -312,10 +358,20 @@ const LM=[
  {k:"toe_R",jp:"つま先R",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
 ];
 const GCOL={head:"#52e0c4",arm:"#ffb454",torso:"#7aa2ff",leg:"#ff6ad5"};
+const LM_GROUP_ORDER=["head","torso","arm","leg"];
+const LM_GROUP_JP={head:"頭部",torso:"胴体",arm:"腕",leg:"脚"};
 const BONES=["hips","torso","chest","neck","head",
   "clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L",
   "clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R",
   "thigh_L","shin_L","foot_L","toe_L","thigh_R","shin_R","foot_R","toe_R"];
+// ボーンの部位グルーピング(アクセサリー取付ボーン選択・境目角度一覧の両方で使う)
+const BONE_GROUPS=[
+  {label:"体幹", bones:["hips","torso","chest","neck","head"]},
+  {label:"左腕", bones:["clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L"]},
+  {label:"右腕", bones:["clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R"]},
+  {label:"左脚", bones:["thigh_L","shin_L","foot_L","toe_L"]},
+  {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
+];
 
 let imgs={front:null,side:null,back:null};
 let curView="front";
@@ -373,53 +429,53 @@ const DEFAULT_GEN_PARAMS={
 // group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
 // (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
 const PARAM_META=[
- {group:"ボクセル/メッシュ生成", key:"body_vox", label:"全身のボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
+ {group:"解像度/軽量化", key:"body_vox", label:"全身のボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
   desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。大きくすると速く軽くなるが丸みが粗くなる。"},
- {group:"ボクセル/メッシュ生成", key:"acc_vox", label:"アクセサリーのボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
+ {group:"解像度/軽量化", key:"acc_vox", label:"アクセサリーのボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
   desc:"ヘッドホン・猫耳・スカート等、個別に彫り出すアクセサリー用の解像度。意味はbody_voxと同じ。"},
- {group:"ボクセル/メッシュ生成", key:"body_decimate", label:"全身を間引く(quadric decimation)", type:"checkbox",
+ {group:"解像度/軽量化", key:"body_decimate", label:"全身を間引く(quadric decimation)", type:"checkbox",
   desc:"OFFにすると間引きをせず、body_voxそのままの高解像度メッシュになる(頂点数が数万〜数十万に増えファイルが重くなる)。"},
- {group:"ボクセル/メッシュ生成", key:"body_target_verts", label:"全身の間引き後目標頂点数", type:"number", min:1000, max:300000, step:1000, unit:"頂点",
+ {group:"解像度/軽量化", key:"body_target_verts", label:"全身の間引き後目標頂点数", type:"number", min:1000, max:300000, step:1000, unit:"頂点",
   desc:"増やすと指・脛のくびれ等の細部の丸みが保たれるがファイルが重くなる。減らすと軽くなるが細い部位からカクつきやすくなる(body_decimateがONの時のみ有効)。"},
- {group:"ボクセル/メッシュ生成", key:"acc_decimate", label:"アクセサリーを間引く(quadric decimation)", type:"checkbox",
+ {group:"解像度/軽量化", key:"acc_decimate", label:"アクセサリーを間引く(quadric decimation)", type:"checkbox",
   desc:"ONにするとアクセサリーもacc_target_vertsまで間引く。意味はbody_decimateと同じ。"},
- {group:"ボクセル/メッシュ生成", key:"acc_target_verts", label:"アクセサリーの間引き後目標頂点数", type:"number", min:500, max:300000, step:500, unit:"頂点",
+ {group:"解像度/軽量化", key:"acc_target_verts", label:"アクセサリーの間引き後目標頂点数", type:"number", min:500, max:300000, step:500, unit:"頂点",
   desc:"意味はbody_target_vertsと同じ(acc_decimateがONの時のみ有効)。"},
- {group:"ボクセル/メッシュ生成", key:"psq_head", label:"頭の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面形状(スーパー楕円指数)", key:"psq_head", label:"頭の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく。"},
- {group:"ボクセル/メッシュ生成", key:"psq_torso", label:"胴体の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面形状(スーパー楕円指数)", key:"psq_torso", label:"胴体の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"首〜腰(胸/腹/腰)の断面形状。2に近いほど楕円(丸み)に近づき、大きくすると四角形に近づく(角ばった衣装等で有効な場合がある)。腕/脚が胴体に接続する遷移帯の形状にも使われる。"},
- {group:"ボクセル/メッシュ生成", key:"psq_legs", label:"脚の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面形状(スーパー楕円指数)", key:"psq_legs", label:"脚の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"腰から下(脚)の断面形状。左右対称なので左右で共通の1個の値。意味はpsq_torsoと同じ。"},
- {group:"ボクセル/メッシュ生成", key:"psq_arms", label:"腕の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面形状(スーパー楕円指数)", key:"psq_arms", label:"腕の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"肩→肘→手首の円形断面(arm_circle有効時)に使う指数。左右対称なので左右で共通の1個の値。2に近いほど円形に近く自然な腕になる。"},
- {group:"ボクセル/メッシュ生成", key:"psq_hands", label:"手の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面形状(スーパー楕円指数)", key:"psq_hands", label:"手の断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
- {group:"ボクセル/メッシュ生成", key:"psq_acc", label:"アクセサリーの断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面形状(スーパー楕円指数)", key:"psq_acc", label:"アクセサリーの断面スーパー楕円の指数", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"髪・帽子・スカート等、個別に彫り出すアクセサリーの断面形状。意味はpsq_torsoと同じ。"},
- {group:"ボクセル/メッシュ生成", key:"track_gap", label:"行トラッキングの継続許容ギャップ", type:"number", min:0, max:30, step:1, unit:"行",
+ {group:"行トラッキング/平滑化", key:"track_gap", label:"行トラッキングの継続許容ギャップ", type:"number", min:0, max:30, step:1, unit:"行",
   desc:"大きくすると装飾線や指の隙間で測定が一瞬途切れても同じ塊として繋がりやすくなる(繋げすぎると別部位まで誤って繋がるリスクもある)。小さくすると途切れやすく、彫り込みが縦に凸凹しやすくなる。"},
- {group:"ボクセル/メッシュ生成", key:"track_win", label:"行方向の中央値フィルタ窓幅", type:"number", min:1, max:31, step:2, unit:"行",
+ {group:"行トラッキング/平滑化", key:"track_win", label:"行方向の中央値フィルタ窓幅", type:"number", min:1, max:31, step:2, unit:"行",
   desc:"幅方向(front/back)のセグメント測定に適用する。大きくすると測定ノイズは減るが細かい起伏も均されて鈍る。小さくすると細部の形状は残るがノイズによる凸凹が出やすい。※奥行き(side計測)には適用されない(顎先のような数行の突出が消えるため)。"},
- {group:"ボクセル/メッシュ生成", key:"body_smooth_iters", label:"全身のHC-Laplacian平滑化回数", type:"number", min:0, max:60, step:1, unit:"回",
+ {group:"行トラッキング/平滑化", key:"body_smooth_iters", label:"全身のHC-Laplacian平滑化回数", type:"number", min:0, max:60, step:1, unit:"回",
   desc:"増やすとボクセルの階段状ガタつきが均されるが、増やしすぎると細部が丸くなりすぎる。0でOFF(平滑化なし)。"},
- {group:"ボクセル/メッシュ生成", key:"acc_smooth_iters", label:"アクセサリーの平滑化回数", type:"number", min:0, max:60, step:1, unit:"回",
+ {group:"行トラッキング/平滑化", key:"acc_smooth_iters", label:"アクセサリーの平滑化回数", type:"number", min:0, max:60, step:1, unit:"回",
   desc:"意味はbody_smooth_itersと同じ。"},
- {group:"ボクセル/メッシュ生成", key:"arm_circle", label:"腕を骨線分基準の円形断面にする", type:"checkbox",
+ {group:"腕の彫刻", key:"arm_circle", label:"腕を骨線分基準の円形断面にする", type:"checkbox",
   desc:"ONだと肩→肘→手首の骨線に沿って、front画像の各列で腕の縦(y)方向の太さを測り、それを奥行き(z)に適用した円形断面で彫る(side計測は腕に使わない。腕が板状/胴体並みの厚みになるのを防ぐ)。OFFにすると従来通りside計測の奥行きをそのまま使う。"},
- {group:"ボクセル/メッシュ生成", key:"arm_tol", label:"(旧方式のパラメータ・現在は未使用)", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
+ {group:"腕の彫刻", key:"arm_tol", label:"(旧方式のパラメータ・現在は未使用)", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
   desc:"旧・行スキャン方式で使っていた骨線分からの許容距離。現在の列スキャン方式(縦幅を測って奥行きに適用)では使用しない(変更しても効果なし)。"},
- {group:"ボクセル/メッシュ生成", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
+ {group:"腕の彫刻", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
   desc:"腕の円形断面の半径(縦幅から傾き補正した値)の上限。これを超える列は腕とみなさない(骨線が肩の付け根など胴体内部を通る列を誤って円形化するのを防ぐ)。小さくしすぎると太い袖の腕が拾われなくなる。arm_circleがONの時のみ有効。"},
- {group:"ボクセル/メッシュ生成", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
+ {group:"手の彫刻", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
   desc:"ONだと手首から先(手)を、side計測の奥行き(その高さの胴体・腰の厚み)ではなく、front絵柄のシルエットをhand_depthの薄い奥行きでそのまま押し出した板として彫る。OFFだと従来通りside計測の奥行きになる。"},
- {group:"ボクセル/メッシュ生成", key:"hand_depth", label:"手の半奥行き", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)",
+ {group:"手の彫刻", key:"hand_depth", label:"手の半奥行き", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)",
   desc:"手の押し出しの厚みの半分(全厚はこの2倍)。side計測やシルエット幅に関係なく、手の奥行きは常にこの設定値になる。hand_extrudeがONの時のみ有効。"},
- {group:"ボクセル/メッシュ生成", key:"hand_max_hw", label:"手とみなす最大縦半幅", type:"number", min:0.01, max:0.15, step:0.005, unit:"(model単位)",
+ {group:"手の彫刻", key:"hand_max_hw", label:"手とみなす最大縦半幅", type:"number", min:0.01, max:0.15, step:0.005, unit:"(model単位)",
   desc:"列走査で測った手の縦半幅がこれを超える(=手の線が胴体等の内部を通っている)列は手扱いしない安全弁。arm_max_hwの手版。hand_extrudeがONの時のみ有効。"},
- {group:"ボクセル/メッシュ生成", key:"hand_len", label:"手の長さ(手首から先)", type:"number", min:0.02, max:0.3, step:0.005, unit:"(model単位)",
+ {group:"手の彫刻", key:"hand_len", label:"手の長さ(手首から先)", type:"number", min:0.02, max:0.3, step:0.005, unit:"(model単位)",
   desc:"手首から指方向へ何model単位分を「手」として押し出し扱いにするかの長さ。長すぎると前腕側まで手扱いになり、短すぎると指先が手扱いから外れて胴体側面の奥行きに戻ってしまう。hand_extrudeがONの時のみ有効。"},
- {group:"ボクセル/メッシュ生成", key:"subpixel", label:"サブピクセル境界補正", type:"checkbox",
+ {group:"行トラッキング/平滑化", key:"subpixel", label:"サブピクセル境界補正", type:"checkbox",
   desc:"ONだと2値マスクの境界を元画像の連続値から線形補間し、整数ピクセル単位の階段を滑らかにする。OFFにすると旧来通り整数ピクセル境界を使う(縦方向の階段が目立ちやすくなる)。"},
  {group:"背景/しきい値", key:"white_thr", label:"白背景と判定するしきい値", type:"number", min:200, max:255, step:1, unit:"(0-255)",
   desc:"上げると薄いグレーも背景と判定されやすくなる(白い衣装の淡い陰影を削ってしまうリスクがある)。下げると背景判定が厳しくなり輪郭が太めに残ることがある。prep/carving/accessoriesの3箇所で共通して使う値。"},
@@ -443,53 +499,92 @@ const PARAM_META=[
   desc:"太もも/二の腕等は本来しならず剛体に近い方が自然だが、関節の境目をいきなり切り替えると裂けて見えることがある。0だと従来通り境目で即座に完全剛体へ切り替わる(硬い境目)。上げるほど、関節に近いところから完全剛体になるまでの移行がなだらかになる(柔らかい/しなりが残る範囲が広がる代わりに境目の裂けが目立ちにくくなる)。"},
 ];
 let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
+// カテゴリごとのアコーディオン開閉状態(既定は全部閉じる)。再描画(個別リセット等)を
+// またいで開閉状態を保つため、レンダリング関数の外側に保持する。
+let paramGroupOpen={};
+function paramGroupChanged(g){
+  return PARAM_META.some(m=>m.group===g && genParams[m.key]!==DEFAULT_GEN_PARAMS[m.key]);
+}
 function renderParamsPanel(){
   const el=$("paramsPanel"); if(!el)return;
   const groups=[]; PARAM_META.forEach(m=>{if(!groups.includes(m.group))groups.push(m.group);});
   el.innerHTML=groups.map(g=>{
-    const items=PARAM_META.filter(m=>m.group===g).map(m=>{
+    const itemList=PARAM_META.filter(m=>m.group===g);
+    const items=itemList.map(m=>{
       const dv=DEFAULT_GEN_PARAMS[m.key];
       const cur=genParams[m.key];
       const defTxt="既定値: "+(typeof dv==="boolean"?(dv?"ON":"OFF"):(dv+(m.unit?(" "+m.unit):"")));
-      let inputHtml;
-      if(m.type==="checkbox"){
-        inputHtml='<input type="checkbox" data-param="'+m.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px">';
-      }else{
-        inputHtml='<input type="number" data-param="'+m.key+'" value="'+cur+'" min="'+m.min+'" max="'+m.max+'" step="'+m.step+'" style="width:90px">'+
-          (m.unit?' <span style="color:var(--mut);font-size:10.5px">'+m.unit+'</span>':"");
-      }
-      return '<div class="acform" style="margin-bottom:6px">'+
-        '<label style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px">'+
-        '<span style="color:var(--txt);font-size:12px">'+m.label+'</span>'+
-        '<span style="display:flex;align-items:center;gap:6px">'+inputHtml+
-        '<button type="button" class="paramResetOne" data-reset-param="'+m.key+'" title="既定値に戻す" '+
+      const resetBtn='<button type="button" class="paramResetOne" data-reset-param="'+m.key+'" title="既定値に戻す" '+
         'style="flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--line);'+
-        'background:rgba(255,255,255,.05);color:var(--mut);cursor:pointer;font-size:13px">↺</button></span>'+
-        '</label>'+
+        'background:rgba(255,255,255,.05);color:var(--mut);cursor:pointer;font-size:13px">↺</button>';
+      let body;
+      if(m.type==="checkbox"){
+        body='<label style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px">'+
+          '<span style="color:var(--txt);font-size:12px">'+m.label+'</span>'+
+          '<span style="display:flex;align-items:center;gap:6px">'+
+          '<input type="checkbox" data-param="'+m.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px">'+resetBtn+'</span></label>';
+      }else{
+        body='<div style="color:var(--txt);font-size:12px;margin-bottom:6px">'+m.label+'</div>'+
+          '<div style="display:flex;align-items:center;gap:6px">'+
+          '<input type="range" data-param-range="'+m.key+'" value="'+cur+'" min="'+m.min+'" max="'+m.max+'" step="'+m.step+'" style="flex:1;min-width:60px">'+
+          '<input type="number" data-param="'+m.key+'" value="'+cur+'" min="'+m.min+'" max="'+m.max+'" step="'+m.step+'" style="width:78px;flex:0 0 auto">'+
+          (m.unit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+m.unit+'</span>':"")+resetBtn+'</div>';
+      }
+      return '<div class="acform" style="margin-bottom:6px">'+body+
         '<div style="font-size:10.5px;color:var(--mut)">'+m.desc+' <b style="color:#7aa2ff">('+defTxt+')</b></div>'+
         '</div>';
     }).join("");
-    return '<div style="margin:10px 0 4px;font-size:12px;color:#ffe14d;font-weight:600">'+g+'</div>'+items;
+    const changed=paramGroupChanged(g), isOpen=!!paramGroupOpen[g];
+    return '<details class="accgroup" data-accgroup="'+g+'"'+(isOpen?" open":"")+'>'+
+      '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
+      '<span>'+g+'</span><span class="accCount">'+itemList.length+'項目</span>'+
+      '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
+      '</summary><div class="accbody">'+items+'</div></details>';
   }).join("");
   [].forEach.call(el.querySelectorAll("[data-param]"),inp=>{
     const key=inp.dataset.param;
+    const sync=()=>{
+      const rg=el.querySelector('[data-param-range="'+key+'"]'); if(rg)rg.value=genParams[key];
+    };
     inp.onchange=()=>{
       if(inp.type==="checkbox")genParams[key]=inp.checked;
       else{
         const n=parseFloat(inp.value);
         genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
       }
+      sync();
       // white_thrはランドマーク配置の基準(analysis.ytop/ybot/cx)にも影響するため
       // 変更のたびに実際の生成パイプラインと同じ基準に揃え直す
       if(key==="white_thr"){resyncAnalysisToProfile();draw();}
     };
   });
+  [].forEach.call(el.querySelectorAll("[data-param-range]"),rg=>{
+    const key=rg.dataset.paramRange;
+    rg.oninput=()=>{
+      const n=parseFloat(rg.value);
+      genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
+      const numEl=el.querySelector('[data-param="'+key+'"]'); if(numEl)numEl.value=genParams[key];
+      if(key==="white_thr"){resyncAnalysisToProfile();draw();}
+    };
+  });
   [].forEach.call(el.querySelectorAll("[data-reset-param]"),btn=>{
-    btn.onclick=()=>{
+    btn.onclick=(e)=>{
+      e.preventDefault();
       const key=btn.dataset.resetParam;
       genParams[key]=DEFAULT_GEN_PARAMS[key];
       renderParamsPanel();
     };
+  });
+  [].forEach.call(el.querySelectorAll("[data-reset-group]"),btn=>{
+    btn.onclick=(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const g=btn.dataset.resetGroup;
+      PARAM_META.forEach(m=>{ if(m.group===g)genParams[m.key]=DEFAULT_GEN_PARAMS[m.key]; });
+      renderParamsPanel();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("details.accgroup"),d=>{
+    d.addEventListener("toggle",()=>{ paramGroupOpen[d.dataset.accgroup]=d.open; });
   });
 }
 // 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲を
@@ -1004,8 +1099,10 @@ function applyLoadedJson(d){
   seamNoSide=Object.assign({},d.seam_no_side||{});
   seamSmoothIters=(d.seam_smooth_iters!==undefined)?d.seam_smooth_iters:SEAM_DEFAULT_SMOOTH;
   const seamSmoothEl=$("seamSmoothVal"); if(seamSmoothEl) seamSmoothEl.value=seamSmoothIters;
+  const seamSmoothSl=$("seamSmoothSlider"); if(seamSmoothSl) seamSmoothSl.value=seamSmoothIters;
   colorGradWidth=(d.color_grad_width!==undefined)?d.color_grad_width:COLOR_GRAD_DEFAULT;
   const colorGradEl=$("colorGradVal"); if(colorGradEl) colorGradEl.value=colorGradWidth;
+  const colorGradSl=$("colorGradSlider"); if(colorGradSl) colorGradSl.value=colorGradWidth;
   genParams=Object.assign({},DEFAULT_GEN_PARAMS,d.gen_params||{});
   renderParamsPanel();
   excludeMask={front:null,side:null,back:null};
@@ -1040,16 +1137,20 @@ function loadJsonFile(file){
 
 /* ---------- タブ(ランドマーク/アクセサリー/幅奥行き/境目角度を切り替え、縦スクロールを短縮) ---------- */
 let curTab="lm";
+// 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
+// タブ(画像境界/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
+const IMG_TABS=["lm","ex","ac","bones"];
 function syncTabs(){
   [].forEach.call(document.querySelectorAll(".tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===curTab);});
   [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{p.classList.toggle("on",p.dataset.tabpanel===curTab);});
+  $("imgArea").classList.toggle("hidden",!IMG_TABS.includes(curTab));
 }
 [].forEach.call(document.querySelectorAll(".tabbtn"),b=>{
   b.onclick=()=>{curTab=b.dataset.tab;syncTabs();
     if(curTab==="bones"){
       $("bonesMsg").textContent=(curView==="front")?"":"※ボーンは正面図でのみ表示されます(上の「正面」タブに切り替えてください)";
     }
-    draw();
+    if(IMG_TABS.includes(curTab))draw();
   };
 });
 
@@ -1104,9 +1205,12 @@ function defaultAccRegion(view,pointCount,bones){
 function renderAcForm(){
   const el=$("acForm");
   if(!pendingAcc){el.innerHTML="";return;}
-  const bonesHtml=BONES.map(b=>{
-    const checked=pendingAcc.bones.includes(b)?"checked":"";
-    return '<label><input type="checkbox" value="'+b+'" '+checked+'> '+(BONE_JP[b]||b)+'</label>';
+  const bonesHtml=BONE_GROUPS.map(grp=>{
+    const rowHtml=grp.bones.map(b=>{
+      const checked=pendingAcc.bones.includes(b)?"checked":"";
+      return '<label><input type="checkbox" value="'+b+'" '+checked+'> '+(BONE_JP[b]||b)+'</label>';
+    }).join("");
+    return '<div class="subhead">'+grp.label+'</div><div class="bonesRow">'+rowHtml+'</div>';
   }).join("");
   const canAdd=!!(pendingAcc.regions.front||pendingAcc.regions.back);
   const drawBtns=["front","side","back"].map(v=>{
@@ -1130,7 +1234,7 @@ function renderAcForm(){
     '<option value="soft"'+(pendingAcc.mode==="soft"?" selected":"")+'>soft(複数ボーン追従)</option>'+
     '</select></label>'+
     '<label>取り付けボーン('+(pendingAcc.mode==="rigid"?"1つ選択":"複数選択可")+')'+
-    '<div class="bones">'+bonesHtml+'</div></label>'+
+    '<div class="bonesGroups">'+bonesHtml+'</div></label>'+
     '<label>点数(3〜25、多いほど複雑な輪郭を再現できます)'+
     '<input type="number" id="acPointCount" min="3" max="25" value="'+(pendingAcc.pointCount||8)+'"></label>'+
     '<div style="font-size:11px;color:var(--mut)">「まとめて配置」を押すと、選んだボーン付近に標準形状(直方体)の輪郭が'+
@@ -1148,7 +1252,7 @@ function renderAcForm(){
   $("acPointCount").oninput=e=>{
     pendingAcc.pointCount=Math.max(3,Math.min(25,parseInt(e.target.value,10)||8));
   };
-  [].forEach.call(document.querySelectorAll("#acForm .bones input"),cb=>{
+  [].forEach.call(document.querySelectorAll("#acForm .bonesGroups input"),cb=>{
     cb.onchange=()=>{
       if(pendingAcc.mode==="rigid"){
         pendingAcc.bones=cb.checked?[cb.value]:[];renderAcForm();
@@ -1286,74 +1390,106 @@ function anchorFrontPos(joint){
   }
   return null;
 }
+let seamGroupOpen={}; // 境目角度アコーディオンの開閉状態(既定は全部閉じる)
+function seamRowHtml(label,key,v,ns,rangeAttr){
+  return '<div class="acitem"><span class="nm">'+label+'</span>'+
+    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-seam-range="'+key+'" style="flex:1;min-width:50px">'+
+    '<input type="number" min="1" max="89" step="1" value="'+v+'" '+rangeAttr+'="'+key+'" style="width:48px">°'+
+    '<label style="font-size:11px;color:var(--mut);margin-left:6px;white-space:nowrap">'+
+    '<input type="checkbox" data-seam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面画像を使う</label>'+
+    '</div>';
+}
+function seamGroupChanged(bones){
+  return bones.some(b=>seamAngles[b]!==undefined||seamNoSide[b]);
+}
 function renderSeamList(){
   const el=$("seamList");
-  const boneHtml=BONES.map(b=>{
-    const v=(seamAngles[b]!==undefined)?seamAngles[b]:SEAM_DEFAULT_DEG;
-    const ns=!!seamNoSide[b];
-    return '<div class="acitem"><span class="nm">'+(BONE_JP[b]||b)+'</span>'+
-      '<input type="number" min="1" max="89" step="1" value="'+v+'" data-seam-bone="'+b+'" '+
-      'style="width:56px">°'+
-      '<label style="font-size:11px;color:var(--mut);margin-left:8px;white-space:nowrap">'+
-      '<input type="checkbox" data-seam-side-bone="'+b+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面画像を使う</label>'+
-      '</div>';
+  const boneGroupsHtml=BONE_GROUPS.map(grp=>{
+    const rows=grp.bones.map(b=>{
+      const v=(seamAngles[b]!==undefined)?seamAngles[b]:SEAM_DEFAULT_DEG;
+      return seamRowHtml(BONE_JP[b]||b,b,v,!!seamNoSide[b],"data-seam-bone");
+    }).join("");
+    const changed=seamGroupChanged(grp.bones), isOpen=!!seamGroupOpen[grp.label];
+    return '<details class="accgroup" data-seamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
+      '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
+      '<span>'+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span>'+
+      '</summary><div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
   }).join("");
   let accHtml="";
   if(accessories.length){
-    accHtml='<div style="font-size:11px;color:var(--mut);margin:10px 0 4px">アクセサリー個別(未設定はパーツの角度に従う)</div>'+
-      accessories.map(a=>{
-        const key="acc:"+(a.name||"accessory");
-        const v=(seamAngles[key]!==undefined)?seamAngles[key]:SEAM_DEFAULT_DEG;
-        const ns=!!seamNoSide[key];
-        return '<div class="acitem"><span class="nm">'+(a.name||"(無名)")+'</span>'+
-          '<input type="number" min="1" max="89" step="1" value="'+v+'" data-seam-acc="'+key+'" '+
-          'style="width:56px">°'+
-          '<label style="font-size:11px;color:var(--mut);margin-left:8px;white-space:nowrap">'+
-          '<input type="checkbox" data-seam-side-acc="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面画像を使う</label>'+
-          '</div>';
-      }).join("");
+    const keys=accessories.map(a=>"acc:"+(a.name||"accessory"));
+    const rows=accessories.map(a=>{
+      const key="acc:"+(a.name||"accessory");
+      const v=(seamAngles[key]!==undefined)?seamAngles[key]:SEAM_DEFAULT_DEG;
+      return seamRowHtml(a.name||"(無名)",key,v,!!seamNoSide[key],"data-seam-acc");
+    }).join("");
+    const changed=seamGroupChanged(keys), isOpen=!!seamGroupOpen["アクセサリー"];
+    accHtml='<details class="accgroup" data-seamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
+      '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
+      '<span>アクセサリー個別</span><span class="accCount">'+keys.length+'項目</span>'+
+      '</summary><div class="accbody"><p style="font-size:10.5px;color:var(--mut);margin:0 0 8px">'+
+      '未設定はパーツの角度に従います。</p><div class="aclist">'+rows+'</div></div></details>';
   }
-  el.innerHTML=boneHtml+accHtml;
-  [].forEach.call(el.querySelectorAll("[data-seam-bone]"),inp=>{
-    inp.oninput=()=>{
-      const b=inp.dataset.seamBone, n=parseInt(inp.value,10);
-      if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[b];
-      else seamAngles[b]=n;
+  el.innerHTML=boneGroupsHtml+accHtml;
+  function wireAngle(sel,attr,onSet){
+    [].forEach.call(el.querySelectorAll(sel),inp=>{
+      inp.oninput=()=>{
+        const key=inp.dataset[attr], n=parseInt(inp.value,10);
+        onSet(key,n);
+        const rangeEl=el.querySelector('[data-seam-range="'+key+'"]');
+        const numEl=el.querySelector('[data-seam-bone="'+key+'"],[data-seam-acc="'+key+'"]');
+        if(rangeEl && isFinite(n)) rangeEl.value=n;
+        if(numEl && numEl!==inp && isFinite(n)) numEl.value=n;
+      };
+    });
+  }
+  wireAngle("[data-seam-bone]","seamBone",(b,n)=>{
+    if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[b]; else seamAngles[b]=n;
+  });
+  wireAngle("[data-seam-acc]","seamAcc",(key,n)=>{
+    if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[key]; else seamAngles[key]=n;
+  });
+  [].forEach.call(el.querySelectorAll("[data-seam-range]"),rg=>{
+    rg.oninput=()=>{
+      const key=rg.dataset.seamRange, n=parseInt(rg.value,10);
+      if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[key]; else seamAngles[key]=n;
+      const numEl=el.querySelector('[data-seam-bone="'+key+'"],[data-seam-acc="'+key+'"]');
+      if(numEl)numEl.value=n;
     };
   });
-  [].forEach.call(el.querySelectorAll("[data-seam-acc]"),inp=>{
-    inp.oninput=()=>{
-      const key=inp.dataset.seamAcc, n=parseInt(inp.value,10);
-      if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[key];
-      else seamAngles[key]=n;
-    };
-  });
-  [].forEach.call(el.querySelectorAll("[data-seam-side-bone]"),cb=>{
+  [].forEach.call(el.querySelectorAll("[data-seam-side]"),cb=>{
     cb.onchange=()=>{
-      const b=cb.dataset.seamSideBone;
-      if(cb.checked) delete seamNoSide[b]; else seamNoSide[b]=true;
-    };
-  });
-  [].forEach.call(el.querySelectorAll("[data-seam-side-acc]"),cb=>{
-    cb.onchange=()=>{
-      const key=cb.dataset.seamSideAcc;
+      const key=cb.dataset.seamSide;
       if(cb.checked) delete seamNoSide[key]; else seamNoSide[key]=true;
     };
+  });
+  [].forEach.call(el.querySelectorAll("details[data-seamgroup]"),d=>{
+    d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.seamgroup]=d.open; });
   });
 }
 /* ---------- 凡例チップ ---------- */
 function buildLegend(){
   const wrapEl=$("legend");wrapEl.innerHTML="";
-  LM.forEach(d=>{const s=document.createElement("span");s.className="chip";s.textContent=d.jp;
-    s.dataset.k=d.k;s.style.color=GCOL[d.g];s.title=d.desc;
-    s.onclick=()=>{const key="lm:"+d.k;sel=(sel===key)?null:key;syncChips();draw();};wrapEl.appendChild(s);});
+  LM_GROUP_ORDER.forEach(g=>{
+    const items=LM.filter(d=>d.g===g); if(!items.length)return;
+    const h=document.createElement("div");
+    h.className="subhead";h.style.color=GCOL[g];h.textContent=LM_GROUP_JP[g]||g;
+    wrapEl.appendChild(h);
+    const row=document.createElement("div");
+    row.className="legend";
+    items.forEach(d=>{const s=document.createElement("span");s.className="chip";s.textContent=d.jp;
+      s.dataset.k=d.k;s.style.color=GCOL[d.g];s.title=d.desc;
+      s.onclick=()=>{const key="lm:"+d.k;sel=(sel===key)?null:key;syncChips();draw();};row.appendChild(s);});
+    wrapEl.appendChild(row);
+  });
 }
 function syncChips(){
   // sel はgetInteractivePoints()と同じ"lm:"+ランドマーク名の形式(凡例チップ・
   // 画像上タップのどちらで選択しても統一。以前はチップ経由だけ素の名前が
   // 入ってしまい、十字キー(nudge()はgetInteractivePoints経由でしか探さない)
   // が反応しないバグがあった)。
-  [].forEach.call($("legend").children,s=>{s.classList.toggle("on",("lm:"+s.dataset.k)===sel);});
+  [].forEach.call($("legend").querySelectorAll(".chip"),s=>{s.classList.toggle("on",("lm:"+s.dataset.k)===sel);});
+  [].forEach.call(document.querySelectorAll(".dpad button"),b=>{b.disabled=!sel;});
   var lmKey=(sel&&sel.indexOf("lm:")===0)?sel.slice(3):null;
   var d=LM.filter(function(x){return x.k===lmKey;})[0];
   var sn=document.getElementById("selName"), sd=document.getElementById("selDesc");
@@ -1367,7 +1503,11 @@ function syncChips(){
 [].forEach.call(document.querySelectorAll('input[type="file"][data-slot]'),inp=>{
   inp.addEventListener("change",e=>{const f=e.target.files[0];if(f)loadImg(f,inp.dataset.slot);e.target.value="";});
 });
-$("reset").onclick=()=>{if(analysis){points=placeAll(analysis);sel=null;view={z:1,ox:0,oy:0};syncChips();draw();setMsg("前処理の初期配置に戻しました。");}};
+$("reset").onclick=()=>{
+  if(!analysis)return;
+  if(!confirm("初期配置に戻しますか？現在のランドマークの微調整はすべて失われます。"))return;
+  points=placeAll(analysis);sel=null;view={z:1,ox:0,oy:0};syncChips();draw();setMsg("前処理の初期配置に戻しました。");
+};
 $("export").onclick=exportJson;
 $("copy").onclick=copyJson;
 $("loadJson").onclick=()=>{
@@ -1449,10 +1589,20 @@ $("seamSideAllOff").onclick=()=>{
 $("seamSmoothVal").oninput=()=>{
   const n=parseInt($("seamSmoothVal").value,10);
   seamSmoothIters=(isFinite(n)&&n>=0&&n<=30)?n:SEAM_DEFAULT_SMOOTH;
+  $("seamSmoothSlider").value=seamSmoothIters;
+};
+$("seamSmoothSlider").oninput=()=>{
+  seamSmoothIters=parseInt($("seamSmoothSlider").value,10);
+  $("seamSmoothVal").value=seamSmoothIters;
 };
 $("colorGradVal").oninput=()=>{
   const n=parseFloat($("colorGradVal").value);
   colorGradWidth=(isFinite(n)&&n>=0)?n:COLOR_GRAD_DEFAULT;
+  $("colorGradSlider").value=colorGradWidth;
+};
+$("colorGradSlider").oninput=()=>{
+  colorGradWidth=parseFloat($("colorGradSlider").value);
+  $("colorGradVal").value=colorGradWidth;
 };
 $("acAddBtn").onclick=()=>{
   if(!points){setMsg("先に正面画像を読み込んでください。");return;}
@@ -1478,7 +1628,7 @@ function nudge(dx,dy){
 }
 function holdBtn(id,dx,dy){var b=$(id),t=null;
   var run=function(){nudge(dx,dy);};
-  var start=function(e){e.preventDefault();run();t=setInterval(run,55);};
+  var start=function(e){if(b.disabled)return;e.preventDefault();run();t=setInterval(run,55);};
   var stop=function(){if(t){clearInterval(t);t=null;}};
   b.addEventListener("pointerdown",start);b.addEventListener("pointerup",stop);
   b.addEventListener("pointerleave",stop);b.addEventListener("pointercancel",stop);}
@@ -1526,6 +1676,15 @@ $("exClear").onclick=()=>{
   setMsg(VIEWJP[curView]+"の除外範囲を全解除しました。");
 };
 $("exUndo").onclick=exUndoLast;
+[].forEach.call(document.querySelectorAll(".qbtn[data-help]"),b=>{
+  b.onclick=()=>{
+    const box=document.getElementById(b.dataset.help);
+    if(!box)return;
+    const willShow=box.classList.contains("hidden");
+    box.classList.toggle("hidden",!willShow);
+    b.classList.toggle("on",willShow);
+  };
+});
 buildLegend();
 renderSeamList();
 renderParamsPanel();
