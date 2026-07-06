@@ -54,6 +54,20 @@
   .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
 
+  /* 描画設定パネル */
+  #configPanel{max-height:80vh;overflow-y:auto;text-align:left}
+  #configPanel h2{text-align:center}
+  .cfgRow{margin-bottom:16px;font-size:12.5px;color:var(--txt)}
+  .cfgRow>label{display:flex;flex-direction:column;gap:6px}
+  .cfgRow.cfgCheck>label{flex-direction:row;align-items:center;gap:8px;font-size:13px}
+  .cfgRow input[type=range]{width:100%}
+  .cfgRow select{height:34px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(255,255,255,.05);color:var(--txt);font-size:12.5px}
+  #creditsSection{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .creditsTitle{font-size:11px;color:var(--mut);margin:0 0 6px;letter-spacing:.04em}
+  #creditsList{margin:0;padding-left:18px;font-size:11px;color:var(--mut);line-height:1.7}
+  #creditsList a{color:var(--mint)}
+
   /* virtual joystick (touch movement) */
   #joyBase{position:fixed;left:24px;bottom:calc(24px + env(safe-area-inset-bottom));width:112px;height:112px;
     border-radius:50%;background:rgba(255,255,255,.05);border:1px solid var(--line);z-index:6;
@@ -74,6 +88,7 @@
 <div class="title">ゴーストコントローラー<span class="eng">GHOST CONTROLLER</span></div>
 <div id="topNav">
   <button id="backToIndex" title="トップページに戻る">← トップ</button>
+  <button id="configBtn" title="描画設定">⚙ config</button>
 </div>
 <div id="err"></div>
 
@@ -105,6 +120,34 @@
   <p>.glb ファイルを選択、またはドラッグ＆ドロップしてください。</p>
   <button class="btn" id="pick">ファイルを選択</button>
   <input type="file" id="file" accept=".glb,.gltf" style="display:none"/>
+</div>
+
+<div class="drop hide" id="configPanel">
+  <h2>描画設定</h2>
+  <div class="cfgRow"><label>霧の濃さ
+    <input type="range" id="cfgFog" min="0" max="100" value="50">
+  </label></div>
+  <div class="cfgRow"><label>明るさ
+    <input type="range" id="cfgBrightness" min="50" max="150" value="100">
+  </label></div>
+  <div class="cfgRow"><label>アウトライン太さ
+    <input type="range" id="cfgOutline" min="0" max="100" value="40">
+  </label></div>
+  <div class="cfgRow"><label>PIPカメラ画質
+    <select id="cfgPipQuality">
+      <option value="1">高(毎フレーム更新)</option>
+      <option value="3" selected>標準</option>
+      <option value="8">低(軽量)</option>
+    </select>
+  </label></div>
+  <div class="cfgRow cfgCheck"><label>
+    <input type="checkbox" id="cfgPipEnable" checked> 自撮り/POVカメラを表示
+  </label></div>
+  <button class="btn" id="configClose">閉じる</button>
+  <div id="creditsSection" style="display:none">
+    <p class="creditsTitle">使用フリーモデル</p>
+    <ul id="creditsList"></ul>
+  </div>
 </div>
 
 <div id="joyBase"><div id="joyKnob"></div></div>
@@ -139,8 +182,24 @@ const PIP_W=180, PIP_H=Math.round(PIP_W*9/16), PIP_MARGIN=10, PIP_TOP=52;
 const selfieCam=new THREE.PerspectiveCamera(34,PIP_W/PIP_H,0.05,20);
 const fpsCam=new THREE.PerspectiveCamera(62,PIP_W/PIP_H,0.05,60);
 const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
-const PIP_FRAME_SKIP=3; // PIPは3フレームに1回だけ描画(負荷軽減、監視カメラ風の低フレームレートにもなる)
+// PIPは毎フレーム重いシーン全体を描画すると負荷が大きいので、実際の描画はPIP_FRAME_SKIP
+// フレームに1回だけ行い、その結果をレンダーターゲット(テクスチャ)に焼き付けておく。
+// 表示自体は毎フレーム、そのテクスチャを画面に貼るだけ(激安)にすることで、
+// 「メインカメラがPIP領域を上書きしてしまい間だけちらつく」問題を避けつつ負荷も抑える。
+let PIP_FRAME_SKIP=3; // configパネルの「PIPカメラ画質」で変更可能
+let pipEnabled=true;
 let frameCount=0;
+const selfieRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+const fpsRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+const blitCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+function makeBlitScene(rt){
+  const s=new THREE.Scene();
+  const mat=new THREE.MeshBasicMaterial({map:rt.texture,depthTest:false,depthWrite:false,toneMapped:false});
+  s.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat));
+  return s;
+}
+const selfieBlitScene=makeBlitScene(selfieRT);
+const fpsBlitScene=makeBlitScene(fpsRT);
 function layoutPIPs(){
   const vy=innerHeight-PIP_TOP-PIP_H; // WebGLビューポートのyは下端起点のため変換
   selfieVP.x=PIP_MARGIN; selfieVP.y=vy;
@@ -149,12 +208,14 @@ function layoutPIPs(){
 
 // 平行光はkeyLight1本に統合(hemiとあわせて2灯)。神社の灯籠やセンサーライト等と合わせると
 // ライト数が多く重くなるため、fill/rimは削り、その分だけ少し強めにして明るさを補う。
-const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,0.4);
+const BASE_HEMI_INTENSITY=0.4, BASE_KEY_INTENSITY=0.55;
+const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,BASE_HEMI_INTENSITY);
 scene.add(hemiLight);
-const keyLight=new THREE.DirectionalLight(0xaac2ff,0.55); // 月明かり的な弱い寒色キーライト
+const keyLight=new THREE.DirectionalLight(0xaac2ff,BASE_KEY_INTENSITY); // 月明かり的な弱い寒色キーライト
 keyLight.position.set(2,4,1.5);
 scene.add(keyLight);
 
+let currentOutlinePct=40; // configパネルの「アウトライン太さ」で変更可能
 function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; }
 function buildOutline(mesh,thickness){
   const geo=mesh.geometry.clone();
@@ -169,6 +230,14 @@ function buildOutline(mesh,thickness){
   out.bind(mesh.skeleton,mesh.bindMatrix);
   out.userData.isOutline=true;
   return out;
+}
+function rebuildOutlines(){
+  if(!model)return;
+  const toRemove=[]; model.traverse(o=>{ if(o.userData&&o.userData.isOutline)toRemove.push(o); });
+  toRemove.forEach(o=>o.parent&&o.parent.remove(o));
+  const targets=[]; model.traverse(o=>{ if(o.isSkinnedMesh&&!(o.userData&&o.userData.isOutline))targets.push(o); });
+  targets.forEach(o=>model.add(buildOutline(o,outlineThickness(currentOutlinePct))));
+  invalidate();
 }
 
 // --- 地面(Phase 1: 平坦な仮地面。神社の造形/砂利テクスチャはPhase 2) ---
@@ -202,7 +271,7 @@ const shrineGroup=new THREE.Group();
 scene.add(shrineGroup);
 const colliders=[]; // {type:'circle',x,z,r} | {type:'box',minX,maxX,minZ,maxZ}
 
-function buildTorii(z){
+function buildToriiProcedural(){
   const g=new THREE.Group();
   const pillarMat=new THREE.MeshStandardMaterial({color:0x8a3226,roughness:0.75});
   const beamMat=new THREE.MeshStandardMaterial({color:0x6e2820,roughness:0.8});
@@ -211,7 +280,6 @@ function buildTorii(z){
     const p=new THREE.Mesh(new THREE.CylinderGeometry(pillarR,pillarR*1.15,pillarH,12),pillarMat);
     p.position.set(side*halfSpan,pillarH/2,0);
     g.add(p);
-    colliders.push({type:'circle',x:side*halfSpan,z,r:pillarR+0.05});
   });
   const kasagi=new THREE.Mesh(new THREE.BoxGeometry(halfSpan*2+1.1,0.34,0.5),beamMat);
   kasagi.position.set(0,pillarH+0.05,0); g.add(kasagi);
@@ -221,8 +289,74 @@ function buildTorii(z){
   nuki.position.set(0,pillarH*0.55,0); g.add(nuki);
   const gakuzuka=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.5,0.24),beamMat);
   gakuzuka.position.set(0,pillarH-0.1,0); g.add(gakuzuka);
-  g.position.z=z;
-  shrineGroup.add(g);
+  return g;
+}
+
+// --- 軽量なフリーモデル(CC0/CC-BY、poly.pizza)を読み込めた場合はそちらを使い、
+// 失敗時はこれまでのプロシージャル形状にフォールバックする。実際に使えたものだけ
+// FREE_MODEL_CREDITSに記録し、configパネル下部のクレジット欄に表示する。
+const FREE_MODEL_CREDITS=[];
+function refreshCreditsUI(){
+  const list=document.getElementById('creditsList'), section=document.getElementById('creditsSection');
+  if(!FREE_MODEL_CREDITS.length){ section.style.display='none'; return; }
+  section.style.display='block';
+  list.innerHTML=FREE_MODEL_CREDITS.map(c=>
+    '<li>'+c.name+' — '+c.author+'('+c.license+') <a href="'+c.url+'" target="_blank" rel="noopener">link</a></li>'
+  ).join('');
+}
+function loadStaticGLB(url){
+  return fetch(url).then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
+    .then(buf=>new Promise((resolve,reject)=>{
+      new THREE.GLTFLoader().parse(buf,'',gltf=>resolve(gltf.scene),reject);
+    }));
+}
+function normalizeToHeight(obj,targetHeight){
+  obj.updateMatrixWorld(true);
+  const box=new THREE.Box3().setFromObject(obj);
+  const h=box.max.y-box.min.y;
+  if(h>0.0001) obj.scale.multiplyScalar(targetHeight/h);
+  obj.updateMatrixWorld(true);
+  const box2=new THREE.Box3().setFromObject(obj);
+  obj.position.y-=box2.min.y;
+  return obj;
+}
+
+function placeTorii(z){
+  const halfSpan=2.6;
+  [-1,1].forEach(side=>colliders.push({type:'circle',x:side*halfSpan,z,r:0.3}));
+  const fallback=buildToriiProcedural();
+  fallback.position.z=z;
+  shrineGroup.add(fallback);
+  loadStaticGLB('models/torii_free.glb').then(obj=>{
+    normalizeToHeight(obj,4.3);
+    obj.position.z=z;
+    shrineGroup.remove(fallback);
+    shrineGroup.add(obj);
+    FREE_MODEL_CREDITS.push({name:'Torii Gate',author:'Hattie Stroud',license:'CC-BY 3.0',url:'https://poly.pizza/m/07__lYTDdEH'});
+    refreshCreditsUI();
+    invalidate();
+  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの鳥居のまま */ });
+}
+
+function placeTrees(){
+  loadStaticGLB('models/pine_tree_free.glb').then(template=>{
+    normalizeToHeight(template,7);
+    const count=26;
+    for(let i=0;i<count;i++){
+      const side=i%2===0?-1:1;
+      const t=template.clone(true);
+      const x=side*(8.5+Math.random()*4.5);
+      const z=-2+Math.random()*47;
+      const s=0.8+Math.random()*0.5;
+      t.position.set(x,0,z);
+      t.rotation.y=Math.random()*Math.PI*2;
+      t.scale.multiplyScalar(s);
+      shrineGroup.add(t);
+    }
+    FREE_MODEL_CREDITS.push({name:'Pine Tree',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/gX8WmgkeEm'});
+    refreshCreditsUI();
+    invalidate();
+  }).catch(()=>{ /* 読み込み失敗時は木なし(元々存在しなかったので実害なし) */ });
 }
 
 function buildLantern(x,z,mode){ // mode: 'lit'|'cold'|'dark'
@@ -342,7 +476,8 @@ function buildEntranceLight(z){
 }
 
 buildEntranceLight(4);
-buildTorii(6);
+placeTorii(6);
+placeTrees();
 buildLantern(-2.6,11,'lit');
 buildLantern(2.6,11,'dark');
 buildLantern(-2.4,15.5,'dark');
@@ -478,7 +613,7 @@ function loadCharacter(buf,onLoaded){
       if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
       o.material=smoothMat;
       if(o.isSkinnedMesh){
-        const outline=buildOutline(o,outlineThickness(40));
+        const outline=buildOutline(o,outlineThickness(currentOutlinePct));
         model.add(outline);
       }
     }});
@@ -499,8 +634,8 @@ function loadCharacter(buf,onLoaded){
     document.getElementById('modeChoice').classList.add('hide');
     document.getElementById('drop').classList.add('hide');
     document.getElementById('joyBase').classList.add('visible');
-    document.getElementById('selfieBox').classList.add('visible');
-    document.getElementById('fpsBox').classList.add('visible');
+    document.getElementById('selfieBox').classList.toggle('visible',pipEnabled);
+    document.getElementById('fpsBox').classList.toggle('visible',pipEnabled);
     document.getElementById('err').textContent='';
     charPos.set(0,0,0); charYaw=0;
     startPipRecTimer();
@@ -554,6 +689,28 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 })();
 
 document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
+
+// --- 描画設定パネル ---
+function applyFogDensity(pct){ scene.fog.density=0.02+(pct/100)*0.10; invalidate(); }
+function applyBrightness(pct){
+  const m=pct/100;
+  hemiLight.intensity=BASE_HEMI_INTENSITY*m;
+  keyLight.intensity=BASE_KEY_INTENSITY*m;
+  invalidate();
+}
+function applyPipEnabled(on){
+  pipEnabled=on;
+  document.getElementById('selfieBox').classList.toggle('visible',on&&!!model);
+  document.getElementById('fpsBox').classList.toggle('visible',on&&!!model);
+  invalidate();
+}
+document.getElementById('configBtn').onclick=()=>{ document.getElementById('configPanel').classList.remove('hide'); };
+document.getElementById('configClose').onclick=()=>{ document.getElementById('configPanel').classList.add('hide'); };
+document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
+document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
+document.getElementById('cfgOutline').oninput=e=>{ currentOutlinePct=+e.target.value; rebuildOutlines(); };
+document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; };
+document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
 
 // ============ 三人称カメラ・移動コントローラー ============
 let needsRender=true;
@@ -759,22 +916,32 @@ function tick(){
 
   updateCamera(dt);
   frameCount++;
+  if(model&&pipEnabled&&frameCount%PIP_FRAME_SKIP===0){
+    // 重いPIPシーン描画はここで間引いて行い、結果をレンダーターゲットに焼き付けるだけ
+    // (画面には直接出さない)。表示は下のneedsRenderブロックで毎フレーム安価に行う。
+    renderer.setScissorTest(false);
+    renderer.setRenderTarget(selfieRT);
+    renderer.render(scene,selfieCam);
+    renderer.setRenderTarget(fpsRT);
+    renderer.render(scene,fpsCam);
+    renderer.setRenderTarget(null);
+  }
   if(needsRender){
     renderer.setScissorTest(false);
     renderer.setViewport(0,0,innerWidth,innerHeight);
     renderer.render(scene,cam);
-    // PIPは毎フレーム描画すると全体の描画回数が実質3倍になって重いため、間引いて更新する
-    // (found footage風の監視カメラ映像としてはむしろ低フレームレートの方が雰囲気にも合う)。
-    if(model&&frameCount%PIP_FRAME_SKIP===0){
+    // PIPは毎フレーム、焼き付け済みのテクスチャを該当領域に貼るだけ(激安)にすることで、
+    // メインカメラの描画がPIP領域を上書きしてちらつくのを防ぎつつ、負荷も抑えている。
+    if(model&&pipEnabled){
       renderer.setScissorTest(true);
       renderer.setViewport(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
       renderer.setScissor(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
       renderer.clearDepth();
-      renderer.render(scene,selfieCam);
+      renderer.render(selfieBlitScene,blitCam);
       renderer.setViewport(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
       renderer.setScissor(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
       renderer.clearDepth();
-      renderer.render(scene,fpsCam);
+      renderer.render(fpsBlitScene,blitCam);
       renderer.setScissorTest(false);
     }
     needsRender=false;
