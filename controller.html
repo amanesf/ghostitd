@@ -9,17 +9,33 @@
   html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
   #c{position:fixed;inset:0;display:block;touch-action:none;width:100vw!important;height:100vh!important}
-  .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
+  /* 自撮り/一人称のPIPカメラ映像分だけ、既存の上部HUDを少し下にずらす */
+  .title{position:fixed;top:104px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
     text-shadow:0 1px 6px rgba(0,0,0,.7)}
   .title .eng{display:block;font-family:var(--mono);font-size:9px;font-weight:400;color:var(--green);
     letter-spacing:.22em;margin-top:3px;opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.8)}
-  .hint{position:fixed;top:46px;left:14px;z-index:5;font-size:10.5px;color:var(--mut);pointer-events:none;
+  .hint{position:fixed;top:140px;left:14px;z-index:5;font-size:10.5px;color:var(--mut);pointer-events:none;
     text-shadow:0 1px 4px rgba(0,0,0,.8);max-width:220px;line-height:1.5}
-  #err{position:fixed;top:78px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none;max-width:260px}
-  #topNav{position:fixed;top:8px;right:10px;z-index:7;display:flex;gap:6px}
+  #err{position:fixed;top:172px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none;max-width:260px}
+  #topNav{position:fixed;top:100px;right:10px;z-index:7;display:flex;gap:6px}
   #topNav button{height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);
     background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
   #topNav button:active{background:rgba(57,255,158,.15)}
+
+  /* 自撮りカメラ/一人称カメラのPIP(found footage風、16:9、REC+経過秒数付き) */
+  .pipBox{position:fixed;top:10px;left:10px;width:150px;height:84px;z-index:4;pointer-events:none;
+    border:1px solid rgba(255,255,255,.28);border-radius:4px;overflow:hidden;display:none;
+    box-shadow:0 0 0 1px rgba(0,0,0,.6),0 2px 10px rgba(0,0,0,.5)}
+  .pipBox.visible{display:block}
+  .pipBox.pipRight{left:auto;right:10px}
+  .pipBox .pipLabel{position:absolute;bottom:3px;left:6px;font-family:var(--mono);font-size:8px;
+    color:rgba(255,255,255,.75);letter-spacing:.08em;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  .pipBox .pipRec{position:absolute;top:4px;left:6px;display:flex;align-items:center;gap:4px;
+    font-family:var(--mono);font-size:9px;color:#ff5a6e;letter-spacing:.04em;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  .pipBox .pipRec .dot{width:5px;height:5px;border-radius:50%;background:#ff2d3d;animation:pipBlink 1.4s infinite}
+  .pipBox .pipTs{position:absolute;top:4px;right:6px;font-family:var(--mono);font-size:9px;
+    color:rgba(255,255,255,.8);text-shadow:0 1px 3px rgba(0,0,0,.9);font-variant-numeric:tabular-nums}
+  @keyframes pipBlink{0%,100%{opacity:1}50%{opacity:.15}}
 
   /* center drop card (mode choice / file picker), same pattern as character_3d.html */
   .drop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,86vw);padding:28px;
@@ -62,6 +78,17 @@
 </div>
 <div id="err"></div>
 
+<div class="pipBox" id="selfieBox">
+  <div class="pipRec"><span class="dot"></span>REC</div>
+  <div class="pipTs" id="selfieTs">00:00</div>
+  <div class="pipLabel">SELF-CAM</div>
+</div>
+<div class="pipBox pipRight" id="fpsBox">
+  <div class="pipRec"><span class="dot"></span>REC</div>
+  <div class="pipTs" id="fpsTs">00:00</div>
+  <div class="pipLabel">POV-CAM</div>
+</div>
+
 <div class="drop hide" id="modeChoice">
   <h2>モードを選んでください</h2>
   <div class="modeCard mint" id="modeSampleBtn">
@@ -94,20 +121,30 @@ const cvs=document.getElementById('c');
 const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true,powerPreference:'high-performance'});
 renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
 renderer.outputEncoding=THREE.sRGBEncoding;
-// character_3d.htmlと同じ理由でACESは不採用(トゥーン影の彩度を潰すため)。
 renderer.toneMapping=THREE.NoToneMapping;
 const maxAniso=renderer.capabilities.getMaxAnisotropy();
 
 // 夜霧の神社マップを見据えた暗く寒色寄りの背景+霧(Phase 1では地面は仮の平面のみ)。
-const FOG_COLOR=0x0a0c10;
+// フォグ色を背景と同じほぼ黒(0x0a0c10)にしていると、フォグで暗く沈んでいくのか
+// 単に光が届かず暗いのかが画面上で区別できず「霧が見えない」ことになるため、
+// 視認できる程度に明るいグレー系の霧色にする(背景色もこれに合わせる)。
+const FOG_COLOR=0x454e58;
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(FOG_COLOR);
-// 線形Fogは「近距離は完全にクリア→ある距離から急に真っ暗」という壁のような
-// 見え方になり、単色の仮地面と組み合わせると特に「急に埋もれる」印象が強く出るため、
-// 近距離から緩やかに濃度が上がる指数二乗フォグ(霧らしい透明感のある滲み方)に変更。
-scene.fog=new THREE.FogExp2(FOG_COLOR,0.05);
+scene.fog=new THREE.FogExp2(FOG_COLOR,0.07);
 
 const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,60);
+
+// --- 自撮り/一人称のPIPカメラ(16:9固定、found footage風の演出) ---
+const PIP_W=150, PIP_H=Math.round(PIP_W*9/16), PIP_MARGIN=10, PIP_TOP=10;
+const selfieCam=new THREE.PerspectiveCamera(50,PIP_W/PIP_H,0.05,20);
+const fpsCam=new THREE.PerspectiveCamera(62,PIP_W/PIP_H,0.05,60);
+const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
+function layoutPIPs(){
+  const vy=innerHeight-PIP_TOP-PIP_H; // WebGLビューポートのyは下端起点のため変換
+  selfieVP.x=PIP_MARGIN; selfieVP.y=vy;
+  fpsVP.x=innerWidth-PIP_MARGIN-PIP_W; fpsVP.y=vy;
+}
 
 // --- ライト(character_3d.htmlの三点照明を流用しつつ、夜間仕様に暗く・寒色寄りに) ---
 const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,0.32);
@@ -121,30 +158,6 @@ scene.add(fillLight);
 const rimLight=new THREE.DirectionalLight(0xbcd6ff,0.22);
 rimLight.position.set(-0.5,3,-2.2);
 scene.add(rimLight);
-
-// --- トゥーン用グラデーションマップ(character_3d.htmlと同じ3段階セル影) ---
-let toonGradCtx=null;
-function makeToonGradient(){
-  const c=document.createElement('canvas');c.width=3;c.height=1;
-  const ctx=c.getContext('2d');
-  [70,150,255].forEach((v,i)=>{ctx.fillStyle='rgb('+v+','+v+','+v+')';ctx.fillRect(i,0,1,1);});
-  const tex=new THREE.CanvasTexture(c);
-  tex.minFilter=THREE.NearestFilter;tex.magFilter=THREE.NearestFilter;tex.generateMipmaps=false;
-  toonGradCtx=ctx;
-  return tex;
-}
-const toonGradient=makeToonGradient();
-function setToonGradientStrength(pct){
-  const s=Math.max(0,Math.min(1,pct/100));
-  const ctx=toonGradCtx;
-  const darkV=Math.round(115-85*s), litV=Math.round(225+20*s);
-  const dark=[Math.round(darkV*0.92),Math.round(darkV*0.96),Math.min(255,Math.round(darkV*1.12))];
-  const mid=[Math.round(158*0.97),Math.round(158*0.99),Math.min(255,Math.round(158*1.05))];
-  const lit=[litV,litV,litV];
-  [dark,mid,lit].forEach((rgb,i)=>{ctx.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';ctx.fillRect(i,0,1,1);});
-  toonGradient.needsUpdate=true;
-}
-setToonGradientStrength(70); // character_3d.htmlのセル影スライダー既定値と同じ強さで固定
 
 function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; }
 function buildOutline(mesh,thickness){
@@ -182,21 +195,36 @@ function makeGroundTexture(){
 }
 const groundGeo=new THREE.PlaneGeometry(100,100);
 groundGeo.rotateX(-Math.PI/2);
-const groundMat=new THREE.MeshToonMaterial({map:makeGroundTexture(),gradientMap:toonGradient});
+const groundMat=new THREE.MeshStandardMaterial({map:makeGroundTexture(),roughness:0.92,metalness:0});
 const ground=new THREE.Mesh(groundGeo,groundMat);
 scene.add(ground);
 
 // --- キャラクター ---
 const characterRoot=new THREE.Group();
 scene.add(characterRoot);
-let model=null, mixer=null, idleAction=null, runAction=null, handBone=null;
+let model=null, mixer=null, idleAction=null, runAction=null, handBone=null, headBone=null;
 let flashLight=null, flashProp=null, flashOn=true;
 let charHeight=1.7, charCenterY=0.9; // モデル読込後にバウンディングボックスから実測して上書き
 
 function clearCharacter(){
   if(model){ characterRoot.remove(model); model=null; }
-  mixer=null; idleAction=null; runAction=null; handBone=null;
+  mixer=null; idleAction=null; runAction=null; handBone=null; headBone=null;
   removeFlashlight();
+}
+
+// --- PIPのREC経過秒数カウンター ---
+let pipTimerHandle=null;
+function startPipRecTimer(){
+  if(pipTimerHandle)clearInterval(pipTimerHandle);
+  const t0=Date.now();
+  const selfieTs=document.getElementById('selfieTs'), fpsTs=document.getElementById('fpsTs');
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function tick(){
+    const s=Math.floor((Date.now()-t0)/1000);
+    const txt=pad(Math.floor(s/60)%100)+':'+pad(s%60);
+    selfieTs.textContent=txt; fpsTs.textContent=txt;
+  }
+  tick(); pipTimerHandle=setInterval(tick,1000);
 }
 
 function attachFlashlight(){
@@ -206,7 +234,7 @@ function attachFlashlight(){
   body.rotation.x=Math.PI/2;
   const tip=new THREE.Mesh(new THREE.CylinderGeometry(0.023,0.023,0.02,10),
     new THREE.MeshBasicMaterial({color:0xfff3cf,toneMapped:false}));
-  tip.rotation.x=Math.PI/2; tip.position.z=-0.08;
+  tip.rotation.x=Math.PI/2; tip.position.z=0.08;
   flashProp=new THREE.Group();
   flashProp.add(body); flashProp.add(tip);
   flashProp.position.set(0.01,-0.02,0.04); // 握っているように見える程度のオフセット(目視調整前提)
@@ -268,16 +296,19 @@ function loadCharacter(buf,onLoaded){
     model=gltf.scene; characterRoot.add(model);
     model.traverse(o=>{ if(o.isMesh&&o.material){
       const old=o.material;
-      const toonMat=new THREE.MeshToonMaterial({map:old.map||null,gradientMap:toonGradient,
-        transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
-      if(toonMat.map){toonMat.map.encoding=THREE.sRGBEncoding;toonMat.map.anisotropy=maxAniso;}
-      o.material=toonMat;
+      // セル影(トゥーンの段階的な陰影)はやめ、懐中電灯の光を自然な階調で受ける通常のシェーディングにする。
+      const smoothMat=new THREE.MeshStandardMaterial({map:old.map||null,
+        transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,
+        roughness:0.85,metalness:0});
+      if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
+      o.material=smoothMat;
       if(o.isSkinnedMesh){
         const outline=buildOutline(o,outlineThickness(40));
         model.add(outline);
       }
     }});
     handBone=model.getObjectByName('hand_R')||null;
+    headBone=model.getObjectByName('head')||null;
     model.position.y=0;
     model.updateMatrixWorld(true);
     let bbox=new THREE.Box3().setFromObject(model);
@@ -293,8 +324,11 @@ function loadCharacter(buf,onLoaded){
     document.getElementById('modeChoice').classList.add('hide');
     document.getElementById('drop').classList.add('hide');
     document.getElementById('joyBase').classList.add('visible');
+    document.getElementById('selfieBox').classList.add('visible');
+    document.getElementById('fpsBox').classList.add('visible');
     document.getElementById('err').textContent='';
     charPos.set(0,0,0); charYaw=0;
+    startPipRecTimer();
     invalidate();
     if(onLoaded)onLoaded();
   }, e=>{ document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e); });
@@ -353,6 +387,7 @@ function resize(){
   renderer.setSize(innerWidth,innerHeight,false);
   cvs.style.width=innerWidth+'px'; cvs.style.height=innerHeight+'px';
   cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
+  layoutPIPs();
   invalidate();
 }
 addEventListener('resize',resize); resize();
@@ -451,9 +486,12 @@ function resolveCollision(pos){
   return pos;
 }
 
+// 画面上部に自撮り/一人称のPIPを置いた分、メインカメラの注視点を実際の
+// キャラ中心よりやや上に取り、キャラの見え方を画面下寄りにしてPIPと被らないようにする。
+const FRAME_BIAS_FRAC=0.22;
 const _camTarget=new THREE.Vector3(), _camOffset=new THREE.Vector3(), _camDesired=new THREE.Vector3();
 function updateCamera(dt){
-  _camTarget.set(charPos.x, charPos.y+charCenterY, charPos.z);
+  _camTarget.set(charPos.x, charPos.y+charCenterY+charHeight*FRAME_BIAS_FRAC, charPos.z);
   _camOffset.set(
     Math.sin(orbitYaw)*Math.cos(orbitPitch),
     Math.sin(orbitPitch),
@@ -463,6 +501,19 @@ function updateCamera(dt){
   const t=1-Math.pow(0.0001,Math.min(dt,0.1));
   cam.position.lerp(_camDesired,t);
   cam.lookAt(_camTarget);
+}
+
+const _headWP=new THREE.Vector3();
+function updatePipCameras(){
+  if(!headBone)return;
+  headBone.getWorldPosition(_headWP);
+  // 手ボーンの生の回転をそのまま使わない懐中電灯と同じ理由で、向きはcharYaw基準の
+  // 水平前方ベクトルを使い、走行アニメーション中の頭の細かな回転で揺れないようにする。
+  const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
+  selfieCam.position.set(_headWP.x+fx*0.55, _headWP.y+0.02, _headWP.z+fz*0.55);
+  selfieCam.lookAt(_headWP.x, _headWP.y, _headWP.z);
+  fpsCam.position.set(_headWP.x+fx*0.08, _headWP.y+0.05, _headWP.z+fz*0.08);
+  fpsCam.lookAt(_headWP.x+fx*5, _headWP.y+0.03, _headWP.z+fz*5);
 }
 
 const clock=new THREE.Clock();
@@ -503,11 +554,29 @@ function tick(){
     characterRoot.position.set(charPos.x,0,charPos.z);
 
     updateFlashlight();
+    updatePipCameras();
     invalidate(); // idle待機モーション自体が常に動くため毎フレーム再描画
   }
 
   updateCamera(dt);
-  if(needsRender){ renderer.render(scene,cam); needsRender=false; }
+  if(needsRender){
+    renderer.setScissorTest(false);
+    renderer.setViewport(0,0,innerWidth,innerHeight);
+    renderer.render(scene,cam);
+    if(model){
+      renderer.setScissorTest(true);
+      renderer.setViewport(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
+      renderer.setScissor(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
+      renderer.clearDepth();
+      renderer.render(scene,selfieCam);
+      renderer.setViewport(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
+      renderer.setScissor(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
+      renderer.clearDepth();
+      renderer.render(scene,fpsCam);
+      renderer.setScissorTest(false);
+    }
+    needsRender=false;
+  }
 }
 tick();
 })();
