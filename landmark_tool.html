@@ -176,6 +176,9 @@
 
     <div class="tabpanel on" data-tabpanel="lm">
       <div class="legendGroups" id="legend"></div>
+      <div class="bar" style="margin-top:14px">
+        <button class="btn danger" id="reset">初期配置に戻す</button>
+      </div>
     </div>
 
     <div class="tabpanel acpanel" data-tabpanel="ex">
@@ -185,13 +188,16 @@
         前髪が首にかぶる等、体のシルエットに紛れ込んで幅/奥行きの自動測定を
         狂わせる部分を、正面/側面/背面それぞれで直接塗って除外できます。
         「マジックツール」はタップした点から色の近い連続領域を自動選択、
-        「ブラシ」は丸で塗って除外/解除します(下の「除外する/解除する」で
-        切り替え)。赤く表示されている部分が除外範囲です。</p>
-      <div class="row" style="margin-bottom:8px">
-        <button class="btn sm exmode mint" id="exModeWand" data-exmode="wand">マジック</button>
-        <button class="btn sm exmode" id="exModeBrush" data-exmode="brush">ブラシ</button>
-        <button class="btn sm exact mint" id="exActAdd" data-exact="add">除外</button>
-        <button class="btn sm exact" id="exActRemove" data-exact="remove">解除</button>
+        「ブラシ」は丸で塗って除外/解除します。赤く表示されている部分が除外範囲です。</p>
+      <div class="acitem" style="margin-bottom:6px">
+        <span class="nm">ツール</span>
+        <button class="btn sm exmode mint" id="exModeWand" data-exmode="wand" style="flex:0 0 auto">マジック</button>
+        <button class="btn sm exmode" id="exModeBrush" data-exmode="brush" style="flex:0 0 auto">ブラシ</button>
+      </div>
+      <div class="acitem" style="margin-bottom:8px">
+        <span class="nm">操作</span>
+        <button class="btn sm exact mint" id="exActAdd" data-exact="add" style="flex:0 0 auto">除外する</button>
+        <button class="btn sm exact" id="exActRemove" data-exact="remove" style="flex:0 0 auto">解除する</button>
       </div>
       <div class="acitem" style="margin-bottom:8px">
         <span class="nm" id="exSliderLabel">許容誤差</span>
@@ -284,9 +290,6 @@
         <button class="btn mint" id="export">landmarks.json 出力</button>
         <button class="btn" id="copy">コピー</button>
         <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
-      </div>
-      <div class="bar" style="margin-top:8px">
-        <button class="btn danger" id="reset">初期配置に戻す</button>
       </div>
       <h2 style="margin-top:18px">モデル生成</h2>
       <div class="bar">
