@@ -132,7 +132,7 @@ const scene=new THREE.Scene();
 scene.background=new THREE.Color(FOG_COLOR);
 scene.fog=new THREE.FogExp2(FOG_COLOR,0.07);
 
-const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,60);
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,80);
 
 // --- 自撮り/一人称のPIPカメラ(16:9固定、found footage風の演出) ---
 const PIP_W=180, PIP_H=Math.round(PIP_W*9/16), PIP_MARGIN=10, PIP_TOP=52;
@@ -192,11 +192,184 @@ function makeGroundTexture(){
   tex.anisotropy=maxAniso;
   return tex;
 }
-const groundGeo=new THREE.PlaneGeometry(100,100);
+const groundGeo=new THREE.PlaneGeometry(100,120);
 groundGeo.rotateX(-Math.PI/2);
+groundGeo.translate(0,0,20); // 神社の参道がz=0からz=44付近まで伸びるため、地面も奥へ多めに確保
 const groundMat=new THREE.MeshStandardMaterial({map:makeGroundTexture(),roughness:0.92,metalness:0});
 const ground=new THREE.Mesh(groundGeo,groundMat);
 scene.add(ground);
+
+// --- 神社(Phase 2): 一の鳥居→境内・手水舎→本殿・拝殿→奥の院・禁足地の一直線レイアウト ---
+// 障害物ごとの当たり判定(円/AABB)はcollidersに登録し、resolveCollisionで押し出し解決する。
+const shrineGroup=new THREE.Group();
+scene.add(shrineGroup);
+const colliders=[]; // {type:'circle',x,z,r} | {type:'box',minX,maxX,minZ,maxZ}
+
+function buildTorii(z){
+  const g=new THREE.Group();
+  const pillarMat=new THREE.MeshStandardMaterial({color:0x8a3226,roughness:0.75});
+  const beamMat=new THREE.MeshStandardMaterial({color:0x6e2820,roughness:0.8});
+  const pillarR=0.22, pillarH=4.0, halfSpan=2.6;
+  [-1,1].forEach(side=>{
+    const p=new THREE.Mesh(new THREE.CylinderGeometry(pillarR,pillarR*1.15,pillarH,12),pillarMat);
+    p.position.set(side*halfSpan,pillarH/2,0);
+    g.add(p);
+    colliders.push({type:'circle',x:side*halfSpan,z,r:pillarR+0.05});
+  });
+  const kasagi=new THREE.Mesh(new THREE.BoxGeometry(halfSpan*2+1.1,0.34,0.5),beamMat);
+  kasagi.position.set(0,pillarH+0.05,0); g.add(kasagi);
+  const shimaki=new THREE.Mesh(new THREE.BoxGeometry(halfSpan*2+0.7,0.2,0.4),beamMat);
+  shimaki.position.set(0,pillarH-0.35,0); g.add(shimaki);
+  const nuki=new THREE.Mesh(new THREE.BoxGeometry(halfSpan*2-0.2,0.22,0.22),beamMat);
+  nuki.position.set(0,pillarH*0.55,0); g.add(nuki);
+  const gakuzuka=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.5,0.24),beamMat);
+  gakuzuka.position.set(0,pillarH-0.1,0); g.add(gakuzuka);
+  g.position.z=z;
+  shrineGroup.add(g);
+}
+
+function buildLantern(x,z,mode){ // mode: 'lit'|'cold'|'dark'
+  const g=new THREE.Group();
+  const stoneMat=new THREE.MeshStandardMaterial({color:0x565b5f,roughness:0.95});
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(0.26,0.3,0.18,10),stoneMat);
+  base.position.y=0.09; g.add(base);
+  const pedestal=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.14,0.55,8),stoneMat);
+  pedestal.position.y=0.18+0.275; g.add(pedestal);
+  const fireBoxY=0.18+0.55+0.17;
+  const fireBox=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.34,0.34),stoneMat);
+  fireBox.position.y=fireBoxY; g.add(fireBox);
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(0.32,0.28,4),stoneMat);
+  roof.rotation.y=Math.PI/4; roof.position.y=fireBoxY+0.17+0.14; g.add(roof);
+  if(mode!=='dark'){
+    const lightColor=mode==='cold'?0x8fd8ff:0xffb066;
+    const glow=new THREE.PointLight(lightColor,mode==='cold'?0.5:0.8,4.2,2);
+    glow.position.y=fireBoxY; g.add(glow);
+    const glowMesh=new THREE.Mesh(new THREE.SphereGeometry(0.08,8,8),
+      new THREE.MeshBasicMaterial({color:lightColor,toneMapped:false}));
+    glowMesh.position.y=fireBoxY; g.add(glowMesh);
+  }
+  g.position.set(x,0,z);
+  shrineGroup.add(g);
+  colliders.push({type:'circle',x,z,r:0.32});
+}
+
+let basinBulb=null, basinSwingT=0;
+function buildBasin(x,z){
+  const g=new THREE.Group();
+  const woodMat=new THREE.MeshStandardMaterial({color:0x3a2c22,roughness:0.85});
+  const stoneMat=new THREE.MeshStandardMaterial({color:0x565b5f,roughness:0.95});
+  const postH=2.2, halfW=1.0, halfD=0.75;
+  [[-halfW,-halfD],[halfW,-halfD],[-halfW,halfD],[halfW,halfD]].forEach(([px,pz])=>{
+    const post=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,postH,8),woodMat);
+    post.position.set(px,postH/2,pz); g.add(post);
+  });
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(1.5,0.6,4),woodMat);
+  roof.rotation.y=Math.PI/4; roof.position.y=postH+0.3; g.add(roof);
+  const basin=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.45,0.4,12),stoneMat);
+  basin.position.y=0.2; g.add(basin);
+  const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8),
+    new THREE.MeshBasicMaterial({color:0xffe9b0,toneMapped:false}));
+  bulb.position.y=postH-0.5; g.add(bulb);
+  const bulbLight=new THREE.PointLight(0xffdca0,0.7,5,2);
+  bulb.add(bulbLight);
+  g.position.set(x,0,z);
+  shrineGroup.add(g);
+  basinBulb=bulb;
+  colliders.push({type:'circle',x,z,r:0.55});
+}
+
+let sensorLight=null, sensorLightOn=false, hallFrontZ=0;
+function buildMainHall(z){
+  const g=new THREE.Group();
+  const platformMat=new THREE.MeshStandardMaterial({color:0x4a4540,roughness:0.9});
+  const wallMat=new THREE.MeshStandardMaterial({color:0x2b2320,roughness:0.85});
+  const roofMat=new THREE.MeshStandardMaterial({color:0x1c1815,roughness:0.7});
+  const halfW=3.4, halfD=2.6, wallH=3.0;
+  const platform=new THREE.Mesh(new THREE.BoxGeometry(halfW*2+0.8,0.4,halfD*2+0.8),platformMat);
+  platform.position.y=0.2; g.add(platform);
+  const walls=new THREE.Mesh(new THREE.BoxGeometry(halfW*2,wallH,halfD*2),wallMat);
+  walls.position.y=0.4+wallH/2; g.add(walls);
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(halfW*1.55,1.6,4),roofMat);
+  roof.rotation.y=Math.PI/4; roof.position.y=0.4+wallH+0.8; g.add(roof);
+  // 隙間から覗く純黒の引き戸(光の影響を受けない黒=MeshBasicMaterial)。手前(-Z, 参道側)を向ける。
+  const door=new THREE.Mesh(new THREE.PlaneGeometry(0.9,1.9),
+    new THREE.MeshBasicMaterial({color:0x000000,side:THREE.DoubleSide}));
+  door.position.set(0,0.4+1.0,-halfD-0.01);
+  door.rotation.y=Math.PI;
+  g.add(door);
+  g.position.set(0,0,z);
+  shrineGroup.add(g);
+  colliders.push({type:'box',minX:-halfW-0.4,maxX:halfW+0.4,minZ:z-halfD-0.4,maxZ:z+halfD+0.4});
+
+  // 人感センサーライト: 普段は消灯、参道側から近づくと点灯するハロゲン風の光。
+  sensorLight=new THREE.SpotLight(0xfff0d0,0,11,THREE.MathUtils.degToRad(48),0.4,1.2);
+  sensorLight.position.set(0,3.3,z-halfD-0.3);
+  sensorLight.target.position.set(0,0,z-halfD-4.5);
+  scene.add(sensorLight); scene.add(sensorLight.target);
+  hallFrontZ=z-halfD-0.3;
+}
+
+function buildForbiddenBoundary(z,halfW){
+  const g=new THREE.Group();
+  const stakeMat=new THREE.MeshStandardMaterial({color:0x2e2015,roughness:0.9});
+  const ropeMat=new THREE.MeshStandardMaterial({color:0xcfc29a,roughness:0.95});
+  const shideMat=new THREE.MeshBasicMaterial({color:0xf2efe6,side:THREE.DoubleSide});
+  const stakeCount=6, stakeH=1.1, xs=[];
+  for(let i=0;i<stakeCount;i++){
+    const x=-halfW+(halfW*2)*(i/(stakeCount-1));
+    xs.push(x);
+    const stake=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.07,stakeH,8),stakeMat);
+    stake.position.set(x,stakeH/2,0); g.add(stake);
+  }
+  for(let i=0;i<xs.length-1;i++){
+    const x0=xs[i],x1=xs[i+1],midX=(x0+x1)/2,len=Math.abs(x1-x0),sag=0.05,ropeY=stakeH*0.82-sag;
+    const rope=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,len,6),ropeMat);
+    rope.rotation.z=Math.PI/2; rope.position.set(midX,ropeY,0); g.add(rope);
+    const shide=new THREE.Mesh(new THREE.PlaneGeometry(0.12,0.3),shideMat);
+    shide.position.set(midX,ropeY-0.18,0); g.add(shide);
+  }
+  g.position.z=z;
+  shrineGroup.add(g);
+  colliders.push({type:'box',minX:-halfW,maxX:halfW,minZ:z-0.15,maxZ:z+0.3});
+}
+
+let entranceLight=null, entranceFlickerT=0;
+function buildEntranceLight(z){
+  entranceLight=new THREE.PointLight(0xfff0c0,1.0,7,2);
+  entranceLight.position.set(0,3.6,z);
+  scene.add(entranceLight);
+}
+
+buildEntranceLight(4);
+buildTorii(6);
+buildLantern(-2.6,11,'lit');
+buildLantern(2.6,11,'dark');
+buildLantern(-2.4,15.5,'dark');
+buildLantern(2.4,15.5,'cold');
+buildLantern(-2.8,21,'dark');
+buildLantern(2.8,21,'lit');
+buildBasin(4.4,17.5);
+buildMainHall(30);
+buildForbiddenBoundary(44,6.5);
+
+function updateShrineEffects(dt){
+  if(entranceLight){
+    entranceFlickerT+=dt;
+    let v=0.85+Math.sin(entranceFlickerT*9)*0.08+Math.sin(entranceFlickerT*23)*0.05;
+    if(Math.random()<0.015)v*=0.25;
+    entranceLight.intensity=Math.max(0,v);
+  }
+  if(basinBulb){
+    basinSwingT+=dt;
+    basinBulb.position.x=Math.sin(basinSwingT*1.3)*0.035;
+    basinBulb.position.z=Math.cos(basinSwingT*0.9)*0.025;
+  }
+  if(sensorLight){
+    const d=Math.hypot(charPos.x,charPos.z-hallFrontZ);
+    sensorLightOn=d<5.5;
+    sensorLight.intensity+=((sensorLightOn?1.7:0)-sensorLight.intensity)*Math.min(1,10*dt);
+  }
+}
 
 // --- キャラクター ---
 const characterRoot=new THREE.Group();
@@ -391,11 +564,14 @@ function resize(){
 }
 addEventListener('resize',resize); resize();
 
-let orbitYaw=0, orbitPitch=0.35;
+// 神社は+Z方向に伸びるレイアウトのため、既定のオービット角はカメラが-Z側(参道の手前)に
+// 位置し+Z(鳥居の方)を向くようπにする。こうしないと既定状態でWキーが参道と逆に進んでしまう。
+let orbitYaw=Math.PI, orbitPitch=0.35;
 let camDist=3.6; const CAM_DIST_MIN=1.6, CAM_DIST_MAX=8.0;
 let charYaw=0;
 const charPos=new THREE.Vector3(0,0,0);
-const MOVE_SPEED=3.2, YAW_LERP=12, BLEND_LERP=8, CHAR_R=0.3, MAP_RADIUS=16;
+const MOVE_SPEED=3.2, YAW_LERP=12, BLEND_LERP=8, CHAR_R=0.3;
+const CORRIDOR_HALF_W=7.5, PATH_MIN_Z=-3, PATH_MAX_Z=43;
 let currentBlend=0;
 
 function lerpAngle(a,b,t){
@@ -480,8 +656,23 @@ cvs.addEventListener('wheel',e=>{
 },{passive:false});
 
 function resolveCollision(pos){
-  const d=Math.hypot(pos.x,pos.z);
-  if(d>MAP_RADIUS-CHAR_R) pos.multiplyScalar((MAP_RADIUS-CHAR_R)/d);
+  // 参道の左右(木立/しめ縄の外側という想定、Phase2ではまだ見た目は無い)と奥の境界。
+  pos.x=Math.max(-CORRIDOR_HALF_W+CHAR_R,Math.min(CORRIDOR_HALF_W-CHAR_R,pos.x));
+  pos.z=Math.max(PATH_MIN_Z+CHAR_R,Math.min(PATH_MAX_Z-CHAR_R,pos.z));
+  colliders.forEach(c=>{
+    if(c.type==='circle'){
+      const dx=pos.x-c.x, dz=pos.z-c.z, d=Math.hypot(dx,dz), minD=c.r+CHAR_R;
+      if(d<minD&&d>1e-5){ pos.x=c.x+dx/d*minD; pos.z=c.z+dz/d*minD; }
+    }else if(c.type==='box'){
+      const inMinX=c.minX-CHAR_R, inMaxX=c.maxX+CHAR_R, inMinZ=c.minZ-CHAR_R, inMaxZ=c.maxZ+CHAR_R;
+      if(pos.x>inMinX&&pos.x<inMaxX&&pos.z>inMinZ&&pos.z<inMaxZ){
+        const dLeft=pos.x-inMinX, dRight=inMaxX-pos.x, dNear=pos.z-inMinZ, dFar=inMaxZ-pos.z;
+        const m=Math.min(dLeft,dRight,dNear,dFar);
+        if(m===dLeft)pos.x=inMinX; else if(m===dRight)pos.x=inMaxX;
+        else if(m===dNear)pos.z=inMinZ; else pos.z=inMaxZ;
+      }
+    }
+  });
   return pos;
 }
 
@@ -509,8 +700,9 @@ function updatePipCameras(){
   // 手ボーンの生の回転をそのまま使わない懐中電灯と同じ理由で、向きはcharYaw基準の
   // 水平前方ベクトルを使い、走行アニメーション中の頭の細かな回転で揺れないようにする。
   const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
-  selfieCam.position.set(_headWP.x+fx*1.2, _headWP.y+0.05, _headWP.z+fz*1.2);
-  selfieCam.lookAt(_headWP.x, _headWP.y-0.12, _headWP.z);
+  // 自撮りなので顔(頭ボーン中心)そのものを画面中央に捉える。
+  selfieCam.position.set(_headWP.x+fx*1.05, _headWP.y+0.04, _headWP.z+fz*1.05);
+  selfieCam.lookAt(_headWP.x, _headWP.y+0.02, _headWP.z);
   fpsCam.position.set(_headWP.x+fx*0.08, _headWP.y+0.05, _headWP.z+fz*0.08);
   fpsCam.lookAt(_headWP.x+fx*5, _headWP.y+0.03, _headWP.z+fz*5);
 }
@@ -520,11 +712,16 @@ const clock=new THREE.Clock();
 window.__ghostController={ get charPos(){return charPos;}, get charYaw(){return charYaw;},
   get orbitYaw(){return orbitYaw;}, get orbitPitch(){return orbitPitch;}, get camDist(){return camDist;},
   get currentBlend(){return currentBlend;}, get model(){return model;}, get scene(){return scene;},
-  get ground(){return ground;}, get charHeight(){return charHeight;}, get charCenterY(){return charCenterY;} };
+  get ground(){return ground;}, get charHeight(){return charHeight;}, get charCenterY(){return charCenterY;},
+  get sensorLightOn(){return sensorLightOn;},
+  setCharPos(x,z){ charPos.set(x,0,z); resolveCollision(charPos); invalidate(); } };
 
 function tick(){
   requestAnimationFrame(tick);
   const dt=Math.min(clock.getDelta(),0.05);
+
+  updateShrineEffects(dt);
+  invalidate(); // 点滅灯・吊り電球の揺れは常時アニメーションするため毎フレーム再描画
 
   if(model){
     const inputVec=joyActive?joyVec:keyboardVec();
