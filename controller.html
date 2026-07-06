@@ -139,24 +139,21 @@ const PIP_W=180, PIP_H=Math.round(PIP_W*9/16), PIP_MARGIN=10, PIP_TOP=52;
 const selfieCam=new THREE.PerspectiveCamera(34,PIP_W/PIP_H,0.05,20);
 const fpsCam=new THREE.PerspectiveCamera(62,PIP_W/PIP_H,0.05,60);
 const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
+const PIP_FRAME_SKIP=3; // PIPは3フレームに1回だけ描画(負荷軽減、監視カメラ風の低フレームレートにもなる)
+let frameCount=0;
 function layoutPIPs(){
   const vy=innerHeight-PIP_TOP-PIP_H; // WebGLビューポートのyは下端起点のため変換
   selfieVP.x=PIP_MARGIN; selfieVP.y=vy;
   fpsVP.x=innerWidth-PIP_MARGIN-PIP_W; fpsVP.y=vy;
 }
 
-// --- ライト(character_3d.htmlの三点照明を流用しつつ、夜間仕様に暗く・寒色寄りに) ---
-const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,0.32);
+// 平行光はkeyLight1本に統合(hemiとあわせて2灯)。神社の灯籠やセンサーライト等と合わせると
+// ライト数が多く重くなるため、fill/rimは削り、その分だけ少し強めにして明るさを補う。
+const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,0.4);
 scene.add(hemiLight);
-const keyLight=new THREE.DirectionalLight(0xaac2ff,0.42); // 月明かり的な弱い寒色キーライト
+const keyLight=new THREE.DirectionalLight(0xaac2ff,0.55); // 月明かり的な弱い寒色キーライト
 keyLight.position.set(2,4,1.5);
 scene.add(keyLight);
-const fillLight=new THREE.DirectionalLight(0x33405a,0.14);
-fillLight.position.set(-2,1,-2);
-scene.add(fillLight);
-const rimLight=new THREE.DirectionalLight(0xbcd6ff,0.22);
-rimLight.position.set(-0.5,3,-2.2);
-scene.add(rimLight);
 
 function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; }
 function buildOutline(mesh,thickness){
@@ -242,8 +239,12 @@ function buildLantern(x,z,mode){ // mode: 'lit'|'cold'|'dark'
   roof.rotation.y=Math.PI/4; roof.position.y=fireBoxY+0.17+0.14; g.add(roof);
   if(mode!=='dark'){
     const lightColor=mode==='cold'?0x8fd8ff:0xffb066;
-    const glow=new THREE.PointLight(lightColor,mode==='cold'?0.5:0.8,4.2,2);
-    glow.position.y=fireBoxY; g.add(glow);
+    // 灯籠ごとに本物の点光源を持たせるとライト数が増えすぎるため、実際に周囲を照らす
+    // 点光源は「異様な寒色」の1つだけに絞り、通常の灯りは光る球体だけの見た目にする。
+    if(mode==='cold'){
+      const glow=new THREE.PointLight(lightColor,0.5,4.2,2);
+      glow.position.y=fireBoxY; g.add(glow);
+    }
     const glowMesh=new THREE.Mesh(new THREE.SphereGeometry(0.08,8,8),
       new THREE.MeshBasicMaterial({color:lightColor,toneMapped:false}));
     glowMesh.position.y=fireBoxY; g.add(glowMesh);
@@ -468,10 +469,12 @@ function loadCharacter(buf,onLoaded){
     model=gltf.scene; characterRoot.add(model);
     model.traverse(o=>{ if(o.isMesh&&o.material){
       const old=o.material;
-      // セル影(トゥーンの段階的な陰影)はやめ、懐中電灯の光を自然な階調で受ける通常のシェーディングにする。
-      const smoothMat=new THREE.MeshStandardMaterial({map:old.map||null,
+      // キャラクターはシーンのライティングの影響を受けない(常に地の色のまま見える)不透明な
+      // マテリアルにする。暗い神社の中でも自撮り/POVカメラで顔がちゃんと見え、光源計算も
+      // 不要になる分軽くなる(懐中電灯のビームもキャラの見た目には影響しなくなる)。
+      const smoothMat=new THREE.MeshBasicMaterial({map:old.map||null,
         transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,
-        roughness:0.85,metalness:0});
+        toneMapped:false});
       if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
       o.material=smoothMat;
       if(o.isSkinnedMesh){
@@ -700,8 +703,8 @@ function updatePipCameras(){
   // 手ボーンの生の回転をそのまま使わない懐中電灯と同じ理由で、向きはcharYaw基準の
   // 水平前方ベクトルを使い、走行アニメーション中の頭の細かな回転で揺れないようにする。
   const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
-  // 自撮りなので顔(頭ボーン中心)そのものを画面中央に捉える。
-  selfieCam.position.set(_headWP.x+fx*1.05, _headWP.y+0.04, _headWP.z+fz*1.05);
+  // 自撮りなので顔(頭ボーン中心)そのものを画面中央に、もっとアップで捉える。
+  selfieCam.position.set(_headWP.x+fx*0.55, _headWP.y+0.04, _headWP.z+fz*0.55);
   selfieCam.lookAt(_headWP.x, _headWP.y+0.02, _headWP.z);
   fpsCam.position.set(_headWP.x+fx*0.08, _headWP.y+0.05, _headWP.z+fz*0.08);
   fpsCam.lookAt(_headWP.x+fx*5, _headWP.y+0.03, _headWP.z+fz*5);
@@ -755,11 +758,14 @@ function tick(){
   }
 
   updateCamera(dt);
+  frameCount++;
   if(needsRender){
     renderer.setScissorTest(false);
     renderer.setViewport(0,0,innerWidth,innerHeight);
     renderer.render(scene,cam);
-    if(model){
+    // PIPは毎フレーム描画すると全体の描画回数が実質3倍になって重いため、間引いて更新する
+    // (found footage風の監視カメラ映像としてはむしろ低フレームレートの方が雰囲気にも合う)。
+    if(model&&frameCount%PIP_FRAME_SKIP===0){
       renderer.setScissorTest(true);
       renderer.setViewport(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
       renderer.setScissor(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
