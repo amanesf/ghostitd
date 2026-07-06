@@ -68,6 +68,16 @@ async function loadSessionImages(){
     req.onerror=function(){reject(req.error);};
   });
 }
+async function clearSessionImages(){
+  var db = await openDb();
+  return new Promise(function(resolve,reject){
+    var tx = db.transaction(STORE,'readwrite');
+    tx.objectStore(STORE).delete(IMAGES_KEY);
+    tx.oncomplete=function(){resolve();};
+    tx.onerror=function(){reject(tx.error);};
+  });
+}
 P3D.saveSessionImages=saveSessionImages;
 P3D.loadSessionImages=loadSessionImages;
+P3D.clearSessionImages=clearSessionImages;
 })(window);
