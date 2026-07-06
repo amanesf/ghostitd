@@ -3,23 +3,26 @@
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <title>ゴーストビューア</title>
 <style>
-  :root{--bg:#0d0f12;--panel:rgba(20,24,29,.92);--line:rgba(255,255,255,.10);--mut:#8b94a0;--mint:#52e0c4;--txt:#e8edf2}
+  :root{--bg:#07080a;--panel:rgba(20,24,29,.92);--line:rgba(255,255,255,.10);--mut:#9aa3ad;--mint:#5be6ff;
+    --green:#39ff9e;--txt:#e8edf2;--mono:"SFMono-Regular",Consolas,Menlo,monospace}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
   #c{position:fixed;inset:0;display:block;touch-action:none;width:100vw!important;height:100vh!important}
   .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
     text-shadow:0 1px 6px rgba(0,0,0,.7)}
-  #err{position:fixed;top:34px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none}
+  .title .eng{display:block;font-family:var(--mono);font-size:9px;font-weight:400;color:var(--green);
+    letter-spacing:.22em;margin-top:3px;opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+  #err{position:fixed;top:46px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none}
   #topNav{position:fixed;top:8px;right:10px;z-index:7;display:flex;gap:6px}
   #topNav button{height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);
     background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
-  #topNav button:active{background:rgba(82,224,196,.15)}
+  #topNav button:active{background:rgba(91,230,255,.15)}
   #barToggle{display:none;position:fixed;top:50px;right:10px;z-index:8;height:34px;padding:0 14px;
     border-radius:10px;border:1px solid var(--line);background:rgba(20,24,29,.85);color:var(--txt);
     font-size:12.5px;cursor:pointer}
   #barToggle.visible{display:block}
-  #barToggle:active{background:rgba(82,224,196,.15)}
+  #barToggle:active{background:rgba(91,230,255,.15)}
 
   /* center drop card */
   .drop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,86vw);padding:28px;
@@ -31,8 +34,8 @@
   /* mode choice card */
   .modeCard{display:block;cursor:pointer;text-align:left;border:1px solid var(--line);border-radius:14px;
     background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
-  .modeCard:active{background:rgba(82,224,196,.10);border-color:rgba(82,224,196,.4)}
-  .modeCard.mint{border-color:rgba(82,224,196,.4)}
+  .modeCard:active{background:rgba(91,230,255,.10);border-color:rgba(91,230,255,.4)}
+  .modeCard.mint{border-color:rgba(91,230,255,.4)}
   .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
 
@@ -47,7 +50,7 @@
     background:rgba(255,255,255,.05);color:var(--txt);font-size:13px;cursor:pointer;
     display:flex;align-items:center;justify-content:center;white-space:nowrap;transition:.12s;user-select:none}
   .btn:active{transform:scale(.96)}
-  .btn.on{color:var(--mint);border-color:rgba(82,224,196,.6);background:rgba(82,224,196,.10)}
+  .btn.on{color:var(--mint);border-color:rgba(91,230,255,.6);background:rgba(91,230,255,.10)}
   .btn.sm{flex:0 0 46px}
   .btn:disabled{opacity:.35;cursor:default}
   .btn:disabled:active{transform:none}
@@ -61,7 +64,7 @@
   .vtabbar{display:flex;gap:6px;padding-bottom:2px}
   .vtabbtn{flex:1;height:36px;min-width:0;border-radius:10px;font-size:12.5px;cursor:pointer;
     border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--mut)}
-  .vtabbtn.on{border-color:rgba(82,224,196,.5);background:rgba(82,224,196,.12);color:var(--mint)}
+  .vtabbtn.on{border-color:rgba(91,230,255,.5);background:rgba(91,230,255,.12);color:var(--mint)}
   .vtabpanel{display:none;flex-direction:column;gap:8px}
   .vtabpanel.on{display:flex}
 
@@ -71,11 +74,11 @@
   .dpad button{width:44px;height:38px;border-radius:10px;border:1px solid var(--line);
     background:rgba(255,255,255,.05);color:var(--txt);font-size:15px;cursor:pointer;
     display:flex;align-items:center;justify-content:center;user-select:none}
-  .dpad button:active{background:rgba(82,224,196,.18)}
+  .dpad button:active{background:rgba(91,230,255,.18)}
 </style></head>
 <body>
 <canvas id="c"></canvas>
-<div class="title">ゴーストビューア</div>
+<div class="title">ゴーストビューア<span class="eng">GHOST VIEWER</span></div>
 <div id="topNav">
   <button id="backToIndex" title="トップページに戻る">← トップ</button>
   <button id="backToLandmark" title="ゴーストジェネレータに戻る">← ジェネレータ</button>

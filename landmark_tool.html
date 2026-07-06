@@ -18,18 +18,21 @@
 <script src="js/pipeline.js"></script>
 <script src="js/idb.js"></script>
 <style>
-  :root{--bg:#0d0f12;--mut:#8b94a0;--mint:#52e0c4;--txt:#e8edf2;--line:rgba(255,255,255,.12)}
+  :root{--bg:#07080a;--mut:#9aa3ad;--mint:#ff2fb0;--green:#39ff9e;--txt:#e8edf2;--line:rgba(255,255,255,.12);
+    --mono:"SFMono-Regular",Consolas,Menlo,monospace}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  .page{padding:14px 12px 28px}
-  h1{font-size:16px;font-weight:700;margin:0 0 2px}
-  .sub{font-size:11.5px;color:var(--mut);margin:0 0 14px}
+  .page{max-width:460px;margin:0 auto;padding:14px 12px 28px}
+  h1{font-size:16px;font-weight:700;margin:0 0 2px;letter-spacing:.01em}
+  h1 .eng{display:block;font-family:var(--mono);font-size:9.5px;color:var(--green);
+    letter-spacing:.22em;margin:5px 0 0;opacity:.85;font-weight:400}
+  .sub{font-size:11.5px;color:var(--mut);margin:6px 0 14px}
   .slots{display:flex;gap:8px;margin-bottom:12px}
   .slot{flex:1;height:64px;border-radius:10px;border:1px solid var(--line);
     background:rgba(255,255,255,.04);color:var(--mut);font-size:12px;cursor:pointer;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center}
-  .slot.on{border-color:rgba(82,224,196,.5);background:rgba(82,224,196,.08);color:var(--mint)}
+  .slot.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.08);color:var(--mint)}
   .slot b{font-weight:600}
   .slot small{font-size:10px}
   .slot input{display:none}
@@ -40,7 +43,7 @@
     border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--txt);
     white-space:nowrap;display:flex;align-items:center;justify-content:center;user-select:none}
   .btn:active{transform:scale(.97)}
-  .btn.mint{background:rgba(82,224,196,.14);color:var(--mint);border-color:rgba(82,224,196,.4)}
+  .btn.mint{background:rgba(255,47,176,.14);color:var(--mint);border-color:rgba(255,47,176,.4)}
   .btn.sm{flex:0 0 auto;height:34px;padding:0 10px;font-size:12px}
   .btn[disabled]{opacity:.5}
   #msg{font-size:11.5px;color:var(--mut);min-height:16px;line-height:1.5;margin-bottom:10px}
@@ -51,8 +54,8 @@
   .hint{color:var(--mut);font-size:13px;margin-top:24px;text-align:center}
   .modeCard{display:block;cursor:pointer;border:1px solid var(--line);border-radius:14px;
     background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
-  .modeCard:active{background:rgba(82,224,196,.10);border-color:rgba(82,224,196,.4)}
-  .modeCard.mint{border-color:rgba(82,224,196,.4)}
+  .modeCard:active{background:rgba(255,47,176,.10);border-color:rgba(255,47,176,.4)}
+  .modeCard.mint{border-color:rgba(255,47,176,.4)}
   .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
   .modeCard.disabled{cursor:default;opacity:.45;pointer-events:none}
@@ -64,7 +67,7 @@
   .dpad{display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:48px 48px 48px;gap:6px;flex:0 0 auto}
   .dpad button{width:56px;height:48px;font-size:22px;border-radius:12px;border:1px solid var(--line);
     background:rgba(255,255,255,.06);color:var(--txt);cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}
-  .dpad button:active{background:rgba(82,224,196,.18)}
+  .dpad button:active{background:rgba(255,47,176,.18)}
   .dpad button:disabled{opacity:.3;cursor:default}
   .dpad button:disabled:active{background:rgba(255,255,255,.06)}
   .hidden{display:none}
@@ -100,23 +103,29 @@
     display:none;flex-direction:column;align-items:center;justify-content:center;
     gap:14px;padding:20px;text-align:center}
   #genOverlay:not(.hidden){display:flex}
+  .genTag{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--green);letter-spacing:.16em}
+  .genTag .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:genBlink 1.4s infinite}
+  .genTag.err{color:#ff5a6e}
+  .genTag.err .dot{background:#ff5a6e;animation:none}
+  @keyframes genBlink{0%,100%{opacity:1}50%{opacity:.15}}
   .viewbar{display:flex;gap:6px;margin-bottom:8px}
   .viewbtn{flex:1;height:34px;border-radius:9px;font-size:12px;cursor:pointer;
     border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut)}
-  .viewbtn.on{border-color:rgba(82,224,196,.5);background:rgba(82,224,196,.12);color:var(--mint)}
+  .viewbtn.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
   .acpanel{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
   .acpanel h2{font-size:13px;margin:0 0 8px;color:var(--txt)}
   .tabbar{display:flex;gap:6px;margin:14px 0 10px;flex-wrap:wrap}
   .tabbtn{flex:1 1 0;min-width:0;height:38px;border-radius:10px;font-size:12px;cursor:pointer;
     border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut);white-space:nowrap}
-  .tabbtn.on{border-color:rgba(82,224,196,.5);background:rgba(82,224,196,.12);color:var(--mint)}
+  .tabbtn.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
   .tabpanel{display:none}
   .tabpanel.on{display:block}
   .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
   .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
   .acitem{display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,.04);
     border:1px solid var(--line);border-radius:9px;padding:7px 9px;transition:background .6s ease,border-color .6s ease}
-  .acitem.flash{background:rgba(82,224,196,.22);border-color:rgba(82,224,196,.6)}
+  .acitem.flash{background:rgba(255,47,176,.22);border-color:rgba(255,47,176,.6)}
   .acitem .nm{flex:1;color:var(--txt)}
   .acitem .tag{color:var(--mut);font-size:10.5px}
   .acitem .ed{color:var(--mint);cursor:pointer;font-size:11px;padding:2px 6px}
@@ -141,7 +150,7 @@
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <button class="btn sm" id="backToIndex" style="flex:0 0 auto">← トップに戻る</button>
   </div>
-  <h1>ゴーストジェネレータ</h1>
+  <h1>ゴーストジェネレータ<span class="eng">GHOST GENERATOR</span></h1>
   <p class="sub">3枚絵 → 全点を自動仮配置 → ドラッグで微調整 → landmarks.json 出力</p>
 
   <div id="editor" class="hidden">
@@ -312,6 +321,7 @@
   </div>
 
   <div id="genOverlay" class="hidden">
+    <div class="genTag" id="genTag"><span class="dot"></span><span id="genTagText">GENERATING</span></div>
     <div style="font-size:15px;color:var(--mint);font-weight:600" id="genStage">準備中…</div>
     <div style="font-size:34px;font-variant-numeric:tabular-nums" id="genSeconds">0秒</div>
     <div style="font-size:11.5px;color:var(--mut);max-width:280px" id="genNote">
@@ -1573,6 +1583,7 @@ $("jsonFile").onchange=e=>{const f=e.target.files[0];if(f)loadJsonFile(f);e.targ
 let genTimer=null, genStartMs=0;
 function genOverlayShow(){
   $("genError").classList.add("hidden");$("genError").textContent="";
+  $("genTag").classList.remove("err");$("genTagText").textContent="GENERATING";
   $("genStage").textContent="準備中…";
   $("genSeconds").textContent="0秒";
   $("genOverlay").classList.remove("hidden");
@@ -1588,6 +1599,7 @@ function genOverlayHide(){
 }
 function genOverlayError(msg){
   if(genTimer){clearInterval(genTimer);genTimer=null;}
+  $("genTag").classList.add("err");$("genTagText").textContent="ERROR";
   $("genStage").textContent="生成に失敗しました";
   const err=$("genError");
   err.textContent=msg+"\n(タップで閉じます)";
