@@ -333,7 +333,13 @@ P3D.linspace = linspace;
  *   faCont,baCont,saCont: 連続値配列(Float32Array、サブピクセル補正用、無ければnull)
  *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション値
  *   mxBounds,myBounds,mzBounds: [min,max]
- *   vox, psqHull, trackGap, trackWin, smoothIters
+ *   vox, trackGap, trackWin, smoothIters
+ *   psqHead,psqTorso,psqLegs,psqArms,psqHands: 部位別の断面スーパー楕円指数
+ *     (neckY/hipsYで行(myv)がどの部位相当かを判定してpsqHead/psqTorso/psqLegs
+ *     を使い分ける。neckY/hipsY省略時は常にpsqTorsoを使う=アクセサリー等の
+ *     部位分けが不要な呼び出し元はpsqHead/psqTorso/psqLegs/psqArms/psqHandsに
+ *     同じ値を渡せばよい)
+ *   neckY,hipsY: 頭/胴体、胴体/脚の境界となるモデル座標y(省略可)
  *   frontPolygon, backPolygon, sidePolygon: [[x,y],...] | null (アクセサリー用)
  *   armLines: [[[x0,y0],[x1,y1]],...] | null (肩→肘→手首の骨線分。腕の円形断面用)
  *   armMaxHw: 腕とみなす断面半径(傾き補正後)の上限
@@ -350,7 +356,17 @@ function carveRegion(opts){
   var faCont=opts.faCont, baCont=opts.baCont, saCont=opts.saCont;
   var SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT, SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
   var mxB=opts.mxBounds, myB=opts.myBounds, mzB=opts.mzBounds;
-  var vox=opts.vox, psqHull=opts.psqHull, trackGap=opts.trackGap, trackWin=opts.trackWin;
+  var vox=opts.vox, trackGap=opts.trackGap, trackWin=opts.trackWin;
+  var psqHead=opts.psqHead, psqTorso=opts.psqTorso, psqLegs=opts.psqLegs;
+  var psqArms=opts.psqArms, psqHands=opts.psqHands;
+  var neckY=opts.neckY, hipsY=opts.hipsY;
+  // 行の高さ(myv)から部位を判定して該当する指数を返す。neckY/hipsYが
+  // 渡されない呼び出し(アクセサリー等)は常にpsqTorsoを使う。
+  function regionPsq(myv){
+    if(neckY!=null && myv>neckY) return psqHead;
+    if(hipsY!=null && myv<hipsY) return psqLegs;
+    return psqTorso;
+  }
   var smoothIters=opts.smoothIters||0;
   var frontPolygon=opts.frontPolygon||null, backPolygon=opts.backPolygon||null, sidePolygon=opts.sidePolygon||null;
   var armLines=opts.armLines||null, armMaxHw=opts.armMaxHw||0.07;
@@ -562,7 +578,10 @@ function carveRegion(opts){
   // ---- 3) 疑似SDFフィールドを彫る(ローカルbbox最適化) ----
   var strideY=nx*nz, strideX=nz;
   var field=new Float32Array(ny*nx*nz).fill(-1.0);
-  var boundFactor = Math.pow(2, 1/psqHull); // このbboxの外側は必ずval<=-1相当なので無視できる
+  // このbboxの外側は必ずval<=-1相当なので無視できる(psqが小さいほどbboxを
+  // 広めに取る必要があるため、使用しうる指数のうち最小値で安全側に倒す)
+  var psqMin = Math.min(psqHead,psqTorso,psqLegs,psqArms,psqHands);
+  var boundFactor = Math.pow(2, 1/psqMin);
 
   for(var iy3=0; iy3<ny; iy3++){
     var hd=hdByRow.get(iy3);
@@ -572,6 +591,7 @@ function carveRegion(opts){
     if(!segsRow) continue;
     var rowOff=iy3*strideY;
     var myv=my[iy3];
+    var rowPsq=regionPsq(myv); // 腕/手プロファイル対象外の列(頭/胴体/脚)で使う指数
     for(var si=0;si<segsRow.length;si++){
       var cx2=segsRow[si][0], hw3=segsRow[si][1];
       var segLo=cx2-hw3, segHi=cx2+hw3;
@@ -587,7 +607,7 @@ function carveRegion(opts){
         // (boundFactor倍まで)の行は「何も彫らない」デッドゾーンにする:
         // 胴体扱いにすると腕の上下エッジの行だけ胴体奥行きの薄いヒレが付くため。
         // 手(手首から先)を腕より先に判定する(手首付近で両者が重なるため)。
-        var zr=-1, exVal=-1;
+        var zr=-1, exVal=-1, depthPsq=rowPsq;
         if(handProf && !isNaN(handProf.cy[ix])){
           var uh=Math.abs(myv-handProf.cy[ix]);
           if(uh<=handProf.ry[ix]){
@@ -595,6 +615,7 @@ function carveRegion(opts){
             // 設定値handDepthHwをそのまま採用する(ユーザー指定)。
             zr=Math.max(handDepthHw, EPS);
             exVal=0.0; // 押し出し: 断面はz方向のみで決め、x/yはシルエットと縦幅で切る
+            depthPsq=psqHands;
           }else if(uh<=handProf.ry[ix]*boundFactor){
             continue; // デッドゾーン
           }
@@ -613,7 +634,8 @@ function carveRegion(opts){
           var armRy=armProf.ry[ix];
           if(ua<armRy){
             zr=armProf.rz[ix];
-            exVal=Math.pow(ua/armRy, psqHull); // 傾いた円柱の縦断面プロファイル
+            exVal=Math.pow(ua/armRy, psqArms); // 傾いた円柱の縦断面プロファイル
+            depthPsq=psqArms;
           }else{
             var blendW=Math.max(armRy*(boundFactor-1), EPS);
             if(ua<armRy+blendW){
@@ -622,11 +644,11 @@ function carveRegion(opts){
               zcEff=zc*tBlend;
               hdFrontEff=armR+(hdFront-armR)*tBlend;
               hdBackEff=armR+(hdBack-armR)*tBlend;
-              exVal=Math.pow(Math.abs(xv-cx2)/hw3, psqHull); // 胴体側のxy形状をそのまま使う
+              exVal=Math.pow(Math.abs(xv-cx2)/hw3, rowPsq); // 胴体側のxy形状をそのまま使う
             }
           }
         }
-        if(exVal<0) exVal=Math.pow(Math.abs(xv-cx2)/hw3, psqHull);
+        if(exVal<0) exVal=Math.pow(Math.abs(xv-cx2)/hw3, rowPsq);
         if(exVal>=2) continue;
         // z範囲は列ごとに決める(腕/手はz原点対称、胴体はzc基準の非対称、
         // 肩の遷移帯はzcEff/hdFrontEff/hdBackEffで補間した中間値を使う)
@@ -643,12 +665,12 @@ function carveRegion(opts){
           var ez;
           if(zcEff!==null){
             var hdvB=(mzv>=zcEff)?hdFrontEff:hdBackEff;
-            ez=Math.pow(Math.abs(mzv-zcEff)/hdvB, psqHull);
+            ez=Math.pow(Math.abs(mzv-zcEff)/hdvB, rowPsq);
           }else if(zr>=0){
-            ez=Math.pow(Math.abs(mzv)/zr, psqHull); // 腕=円形/手=押し出し(z原点対称)
+            ez=Math.pow(Math.abs(mzv)/zr, depthPsq); // 腕=円形/手=押し出し(z原点対称)
           }else{
             var hdv = (mzv>=zc) ? hdFront : hdBack;
-            ez=Math.pow(Math.abs(mzv-zc)/hdv, psqHull);
+            ez=Math.pow(Math.abs(mzv-zc)/hdv, rowPsq);
           }
           var val=1.0-(exVal+ez);
           var idx=base+iz;

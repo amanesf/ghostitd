@@ -133,7 +133,13 @@ function stageAccessories(opts){
       SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:SYTOP, SYBOT:SYBOT, SIDE_REF:SIDE_REF,
       backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:sideOffsetX, sideOffsetY:sideOffsetY,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
-      vox: gp.acc_vox, psqHull: gp.psq_hull, trackGap: gp.track_gap, trackWin: gp.track_win,
+      vox: gp.acc_vox,
+      // アクセサリーは頭/胴体/脚のような部位分けが無いため、部位別指数は
+      // 全て同じ値(psq_acc)を渡す(neckY/hipsYを渡さないのでcarveRegion側は
+      // 常にpsqTorso=psq_accを使う)。
+      psqHead: gp.psq_acc, psqTorso: gp.psq_acc, psqLegs: gp.psq_acc,
+      psqArms: gp.psq_acc, psqHands: gp.psq_acc,
+      trackGap: gp.track_gap, trackWin: gp.track_win,
       smoothIters: gp.acc_smooth_iters,
       frontPolygon: frontPolygon, backPolygon: backPolygon, sidePolygon: sidePolygon,
       whiteThr: gp.white_thr,

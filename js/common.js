@@ -21,7 +21,15 @@ var DEFAULT_GEN_PARAMS = {
   body_vox: 0.003, acc_vox: 0.003,
   body_decimate: true, body_target_verts: 30000,
   acc_decimate: true, acc_target_verts: 10000,
-  psq_hull: 2.2, track_gap: 6, track_win: 1,
+  // ★2026-07-06: 断面スーパー楕円の指数はこれまで全身共通(psq_hull)の1個
+  // だったが、部位ごとに理想的な丸み/角ばりが異なる(頭は卵型に近く丸め、
+  // 腕は円筒に近いほど自然、手は厚み一定の板に近いため角を立たせたい等)
+  // ため部位別に分割する。左右対称な部位(腕/脚/手)はL/Rで値を分けず1個の
+  // パラメータを共有する(見た目上、体の対称性を壊す理由がないため)。
+  // 各既定値は現行の2.2(楕円と矩形の中間よりやや矩形寄り)を基準に、
+  // 部位の実際の断面形状に合わせて調整したオススメ値。
+  psq_head: 2.0, psq_torso: 2.2, psq_legs: 2.2, psq_arms: 2.0, psq_hands: 3.0, psq_acc: 2.2,
+  track_gap: 6, track_win: 1,
   body_smooth_iters: 0, acc_smooth_iters: 0,
   arm_circle: true, arm_tol: 0.06, arm_max_hw: 0.2,
   hand_extrude: true, hand_depth: 0.01, hand_max_hw: 0.1, hand_len: 0.25,
