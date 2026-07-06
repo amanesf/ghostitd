@@ -5,7 +5,7 @@
 (function(global){
 "use strict";
 var P3D = global.P3D = global.P3D || {};
-var DB_NAME="3dtooljs_db", STORE="models", KEY="generated_model", IMAGES_KEY="session_images";
+var DB_NAME="3dtooljs_db", STORE="models", KEY="generated_model";
 
 function openDb(){
   return new Promise(function(resolve,reject){
@@ -45,39 +45,4 @@ async function clearGeneratedModel(){
 P3D.saveGeneratedModel=saveGeneratedModel;
 P3D.loadGeneratedModel=loadGeneratedModel;
 P3D.clearGeneratedModel=clearGeneratedModel;
-
-// ランドマークツール往復時、サンプル/通常どちらのモードで読み込んだ画像でも
-// 復元できるように、front/side/backのBlobをまとめて保存する
-// (localStorageはサイズが不安なため、画像本体はIndexedDBに置く。
-// セッションJSON(landmarks_ai.json相当、小さい)はlocalStorageのまま)。
-async function saveSessionImages(blobs){
-  var db = await openDb();
-  return new Promise(function(resolve,reject){
-    var tx = db.transaction(STORE,'readwrite');
-    tx.objectStore(STORE).put(blobs, IMAGES_KEY);
-    tx.oncomplete=function(){resolve();};
-    tx.onerror=function(){reject(tx.error);};
-  });
-}
-async function loadSessionImages(){
-  var db = await openDb();
-  return new Promise(function(resolve,reject){
-    var tx = db.transaction(STORE,'readonly');
-    var req = tx.objectStore(STORE).get(IMAGES_KEY);
-    req.onsuccess=function(){resolve(req.result||null);};
-    req.onerror=function(){reject(req.error);};
-  });
-}
-async function clearSessionImages(){
-  var db = await openDb();
-  return new Promise(function(resolve,reject){
-    var tx = db.transaction(STORE,'readwrite');
-    tx.objectStore(STORE).delete(IMAGES_KEY);
-    tx.oncomplete=function(){resolve();};
-    tx.onerror=function(){reject(tx.error);};
-  });
-}
-P3D.saveSessionImages=saveSessionImages;
-P3D.loadSessionImages=loadSessionImages;
-P3D.clearSessionImages=clearSessionImages;
 })(window);
