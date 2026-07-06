@@ -11,9 +11,10 @@
   .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
     text-shadow:0 1px 6px rgba(0,0,0,.7)}
   #err{position:fixed;top:34px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none}
-  #backToLandmark{position:fixed;top:8px;right:10px;z-index:7;height:34px;padding:0 14px;border-radius:10px;
-    border:1px solid var(--line);background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
-  #backToLandmark:active{background:rgba(82,224,196,.15)}
+  #topNav{position:fixed;top:8px;right:10px;z-index:7;display:flex;gap:6px}
+  #topNav button{height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
+  #topNav button:active{background:rgba(82,224,196,.15)}
   #barToggle{display:none;position:fixed;top:50px;right:10px;z-index:7;height:34px;padding:0 14px;border-radius:10px;
     border:1px solid var(--line);background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
   #barToggle.visible{display:block}
@@ -56,7 +57,10 @@
 <body>
 <canvas id="c"></canvas>
 <div class="title">ゴーストビューア</div>
-<button id="backToLandmark" title="ゴーストジェネレータに戻る">← ジェネレータ</button>
+<div id="topNav">
+  <button id="backToIndex" title="トップページに戻る">← トップ</button>
+  <button id="backToLandmark" title="ゴーストジェネレータに戻る">← ジェネレータ</button>
+</div>
 <button id="barToggle" title="操作パネルの表示/非表示">操作パネル ▾</button>
 <div id="err"></div>
 
@@ -552,6 +556,7 @@ document.getElementById('download').onclick=()=>{
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 };
 document.getElementById('backToLandmark').onclick=()=>{ location.href='landmark_tool.html'; };
+document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
 document.getElementById('barToggle').onclick=()=>{
   const bar=document.getElementById('bar'), open=bar.classList.toggle('show');
   document.getElementById('barToggle').textContent=open?'操作パネル ▾':'操作パネル ▴';

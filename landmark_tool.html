@@ -136,6 +136,10 @@
 </style></head>
 <body>
 <div class="page">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <button class="btn sm" id="backToIndex" style="flex:0 0 auto">← トップに戻る</button>
+    <button class="btn sm" id="startOver" style="flex:0 0 auto">画像を選び直す</button>
+  </div>
   <h1>ゴーストジェネレータ</h1>
   <p class="sub">3枚絵 → 全点を自動仮配置 → ドラッグで微調整 → landmarks.json 出力</p>
 
@@ -1765,23 +1769,51 @@ renderParamsPanel();
     });
   }
   function showModeChoice(){ $("modeChoice").classList.remove("hidden"); }
+  // 保存済みセッション(localStorageのJSON + IndexedDBの画像本体)は、実際に
+  // サンプル/通常モードのどちらかを選んだ瞬間に消す(モード選択画面を開く
+  // こと自体は何も壊さない、選んだ時点で初めて古いデータを捨てる)。
+  async function clearSavedSession(){
+    try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+    try{ if(window.P3D&&P3D.clearSessionImages)await P3D.clearSessionImages(); }catch(e){}
+  }
   function startSampleMode(){
     $("modeChoice").classList.add("hidden");
-    loadSampleImages().catch(function(){
-      setMsg("サンプル画像の読込に失敗しました。通常モードで自分の画像をアップロードしてください。");
-      $("uploadArea").classList.remove("hidden");
+    clearSavedSession().finally(function(){
+      loadSampleImages().catch(function(){
+        setMsg("サンプル画像の読込に失敗しました。通常モードで自分の画像をアップロードしてください。");
+        $("uploadArea").classList.remove("hidden");
+      });
     });
   }
   function startNormalMode(){
     $("modeChoice").classList.add("hidden");
+    clearSavedSession();
     $("uploadArea").classList.remove("hidden");
   }
   $("modeSampleBtn").onclick=startSampleMode;
   $("modeNormalBtn").onclick=startNormalMode;
+  $("backToIndex").onclick=()=>{ location.href="index.html"; };
+  // 一度サンプル/通常モードを選ぶと保存済みセッションが復元され続け、
+  // モード選択画面に戻れなくなる(という報告への対応)。このボタンはまだ
+  // 何も消さず、次回読み込み時だけモード選択画面を強制的に出す
+  // (sessionStorageの一時フラグのみ使用、localStorage/IndexedDBの
+  // 保存データ自体はサンプル/通常を実際に選ぶまで残る)。
+  $("startOver").onclick=()=>{
+    try{ sessionStorage.setItem("P3D_FORCE_MODE_CHOICE","1"); }catch(e){}
+    location.reload();
+  };
 
   // 保存済みセッション(localStorageのJSON + IndexedDBの画像本体)があれば
-  // モード選択をスキップして直接復元する。
+  // モード選択をスキップして直接復元する。ただし直前に「やり直す」が
+  // 押されていた場合は復元を試みずモード選択を強制表示する。
   (async function(){
+    try{
+      if(sessionStorage.getItem("P3D_FORCE_MODE_CHOICE")){
+        sessionStorage.removeItem("P3D_FORCE_MODE_CHOICE");
+        showModeChoice();
+        return;
+      }
+    }catch(e){}
     var raw=null;
     try{ raw=localStorage.getItem(SESSION_KEY); }catch(e){}
     var blobs=null;
