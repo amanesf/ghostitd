@@ -509,8 +509,9 @@ function updatePipCameras(){
   // 手ボーンの生の回転をそのまま使わない懐中電灯と同じ理由で、向きはcharYaw基準の
   // 水平前方ベクトルを使い、走行アニメーション中の頭の細かな回転で揺れないようにする。
   const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
-  selfieCam.position.set(_headWP.x+fx*1.2, _headWP.y+0.05, _headWP.z+fz*1.2);
-  selfieCam.lookAt(_headWP.x, _headWP.y-0.12, _headWP.z);
+  // 自撮りなので顔(頭ボーン中心)そのものを画面中央に捉える。
+  selfieCam.position.set(_headWP.x+fx*1.05, _headWP.y+0.04, _headWP.z+fz*1.05);
+  selfieCam.lookAt(_headWP.x, _headWP.y+0.02, _headWP.z);
   fpsCam.position.set(_headWP.x+fx*0.08, _headWP.y+0.05, _headWP.z+fz*0.08);
   fpsCam.lookAt(_headWP.x+fx*5, _headWP.y+0.03, _headWP.z+fz*5);
 }
