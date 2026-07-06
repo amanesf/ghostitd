@@ -13,14 +13,16 @@ var P3D = global.P3D = global.P3D || {};
 // メッシュで不安定になる(実機ベンチマークで確認: 27,818頂点は成功、280,386頂点
 // では内部エラー)。そのため3DtoolJS版はbody_voxを粗め(0.005)にし、大抵の
 // キャラクターでraw頂点数がtarget_verts以下に収まる(=間引き自体が不要になる)
-// ことを狙う既定値にしている(2026-07-04、実機検証の上でユーザー承認済み)。
+// ことを狙う既定値にしていたが(2026-07-04)、その後ファイルサイズ/軽量性を
+// 優先する方針に変更し、body_target_verts/acc_target_vertsは大きく引き下げて
+// 積極的に間引く既定値にしている(2026-07-06)。
 // 高解像度で試したい場合は「パラメータ」タブから引き上げられる(その場合は
 // carving.jsのSIMPLIFY_SAFE_LIMITを超えるとquadric decimationの代わりに
 // 頂点クラスタリングにフォールバックする)。
 var DEFAULT_GEN_PARAMS = {
   body_vox: 0.003, acc_vox: 0.003,
-  body_decimate: true, body_target_verts: 30000,
-  acc_decimate: true, acc_target_verts: 10000,
+  body_decimate: true, body_target_verts: 3000,
+  acc_decimate: true, acc_target_verts: 1000,
   // ★2026-07-06: 断面スーパー楕円の指数はこれまで全身共通(psq_hull)の1個
   // だったが、部位ごとに理想的な丸み/角ばりが異なる(頭は卵型に近く丸め、
   // 腕は円筒に近いほど自然、手は厚み一定の板に近いため角を立たせたい等)

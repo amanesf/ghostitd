@@ -441,8 +441,8 @@ const COLOR_GRAD_DEFAULT=0;
 // のgen_paramsに入る。
 const DEFAULT_GEN_PARAMS={
   body_vox:0.003, acc_vox:0.003,
-  body_decimate:true, body_target_verts:30000,
-  acc_decimate:true, acc_target_verts:10000,
+  body_decimate:true, body_target_verts:3000,
+  acc_decimate:true, acc_target_verts:1000,
   psq_head:2.0, psq_torso:2.2, psq_legs:2.2, psq_arms:2.0, psq_hands:3.0, psq_acc:2.2,
   track_gap:6, track_win:1,
   body_smooth_iters:0, acc_smooth_iters:0,
@@ -662,6 +662,23 @@ async function saveNormalSessionImages(){
   }
   try{ await P3D.saveNormalSessionImages(blobs); }
   catch(e){ console.warn("画像セッション保存に失敗しました:", e); }
+}
+
+// ★常時オートセーブ: 以前は「モデル生成」完了時にしか保存されず、生成前に閉じると
+// 編集内容が失われていた。ランドマーク/パラメータ編集は呼び出し箇所が非常に多く
+// 全箇所にフックを仕込むのは漏れの元なので、変化があれば数秒おきに拾って保存する
+// ポーリング方式にする(内容が前回と同じならbuildJson()の再シリアライズ以外は何もしない)。
+let autosaveInterval=null, lastAutosaveJson=null;
+function startAutosaveLoop(){
+  if(autosaveInterval)return;
+  autosaveInterval=setInterval(()=>{
+    if(currentMode!=="normal"||!points)return;
+    const json=JSON.stringify(buildJson());
+    if(json===lastAutosaveJson)return;
+    lastAutosaveJson=json;
+    saveNormalSession();
+    saveNormalSessionImages();
+  },4000);
 }
 
 /* ---------- シルエット解析（stage_profile/stage_landmarks のJS移植） ---------- */
@@ -1804,7 +1821,7 @@ renderParamsPanel();
     card.classList.toggle("disabled",!ok);
     $("modeContinueDesc").textContent=ok
       ?"前回保存した通常モードの画像・ランドマークを読み込んで再開します。"
-      :"前回保存した通常モードの作業がまだありません(新規作成後、モデル生成すると保存されます)。";
+      :"前回保存した通常モードの作業がまだありません(新規作成で3枚の画像を読み込むと、以後は自動保存されます)。";
     return ok;
   }
   function showModeChoice(){
@@ -1849,6 +1866,7 @@ renderParamsPanel();
   // モード選択画面は常に表示する(自動復元でモード選択を省略する挙動は撤去し、
   // 毎回必ずここから選ぶ。「前回の続き」の可否だけその都度チェックする)。
   showModeChoice();
+  startAutosaveLoop();
 })();
 })();
 </script>
