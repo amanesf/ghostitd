@@ -139,8 +139,23 @@ const PIP_W=180, PIP_H=Math.round(PIP_W*9/16), PIP_MARGIN=10, PIP_TOP=52;
 const selfieCam=new THREE.PerspectiveCamera(34,PIP_W/PIP_H,0.05,20);
 const fpsCam=new THREE.PerspectiveCamera(62,PIP_W/PIP_H,0.05,60);
 const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
-const PIP_FRAME_SKIP=3; // PIPは3フレームに1回だけ描画(負荷軽減、監視カメラ風の低フレームレートにもなる)
+// PIPは毎フレーム重いシーン全体を描画すると負荷が大きいので、実際の描画はPIP_FRAME_SKIP
+// フレームに1回だけ行い、その結果をレンダーターゲット(テクスチャ)に焼き付けておく。
+// 表示自体は毎フレーム、そのテクスチャを画面に貼るだけ(激安)にすることで、
+// 「メインカメラがPIP領域を上書きしてしまい間だけちらつく」問題を避けつつ負荷も抑える。
+const PIP_FRAME_SKIP=3;
 let frameCount=0;
+const selfieRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+const fpsRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+const blitCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+function makeBlitScene(rt){
+  const s=new THREE.Scene();
+  const mat=new THREE.MeshBasicMaterial({map:rt.texture,depthTest:false,depthWrite:false,toneMapped:false});
+  s.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat));
+  return s;
+}
+const selfieBlitScene=makeBlitScene(selfieRT);
+const fpsBlitScene=makeBlitScene(fpsRT);
 function layoutPIPs(){
   const vy=innerHeight-PIP_TOP-PIP_H; // WebGLビューポートのyは下端起点のため変換
   selfieVP.x=PIP_MARGIN; selfieVP.y=vy;
@@ -759,22 +774,32 @@ function tick(){
 
   updateCamera(dt);
   frameCount++;
+  if(model&&frameCount%PIP_FRAME_SKIP===0){
+    // 重いPIPシーン描画はここで間引いて行い、結果をレンダーターゲットに焼き付けるだけ
+    // (画面には直接出さない)。表示は下のneedsRenderブロックで毎フレーム安価に行う。
+    renderer.setScissorTest(false);
+    renderer.setRenderTarget(selfieRT);
+    renderer.render(scene,selfieCam);
+    renderer.setRenderTarget(fpsRT);
+    renderer.render(scene,fpsCam);
+    renderer.setRenderTarget(null);
+  }
   if(needsRender){
     renderer.setScissorTest(false);
     renderer.setViewport(0,0,innerWidth,innerHeight);
     renderer.render(scene,cam);
-    // PIPは毎フレーム描画すると全体の描画回数が実質3倍になって重いため、間引いて更新する
-    // (found footage風の監視カメラ映像としてはむしろ低フレームレートの方が雰囲気にも合う)。
-    if(model&&frameCount%PIP_FRAME_SKIP===0){
+    // PIPは毎フレーム、焼き付け済みのテクスチャを該当領域に貼るだけ(激安)にすることで、
+    // メインカメラの描画がPIP領域を上書きしてちらつくのを防ぎつつ、負荷も抑えている。
+    if(model){
       renderer.setScissorTest(true);
       renderer.setViewport(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
       renderer.setScissor(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
       renderer.clearDepth();
-      renderer.render(scene,selfieCam);
+      renderer.render(selfieBlitScene,blitCam);
       renderer.setViewport(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
       renderer.setScissor(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
       renderer.clearDepth();
-      renderer.render(scene,fpsCam);
+      renderer.render(fpsBlitScene,blitCam);
       renderer.setScissorTest(false);
     }
     needsRender=false;
