@@ -81,21 +81,27 @@
 
 <div class="bar" id="bar">
   <div class="row">
+    <span class="lbl">視点</span>
     <button class="btn" id="vFront">正面</button>
     <button class="btn" id="vSide">側面</button>
     <button class="btn" id="vBack">背面</button>
-    <button class="btn sm" id="camUp">↑</button>
-    <button class="btn sm" id="camDn">↓</button>
-    <button class="btn sm" id="camL">←</button>
-    <button class="btn sm" id="camR">→</button>
-  </div>
-  <div class="row">
     <button class="btn" id="spin">自動回転</button>
     <button class="btn" id="reset">リセット</button>
-    <button class="btn" id="skel">関節</button>
-    <button class="btn on" id="bgWhite">背景白</button>
-    <button class="btn" id="load2">別のglb</button>
-    <button class="btn" id="download">ダウンロード</button>
+  </div>
+  <div class="row">
+    <span class="lbl">位置</span>
+    <button class="btn sm" id="camUp" title="上へ移動">↑</button>
+    <button class="btn sm" id="camDn" title="下へ移動">↓</button>
+    <button class="btn sm" id="camL" title="左へ移動">←</button>
+    <button class="btn sm" id="camR" title="右へ移動">→</button>
+  </div>
+  <div class="row">
+    <button class="btn" id="skel">ボーン表示</button>
+    <button class="btn on" id="bgWhite">白背景</button>
+  </div>
+  <div class="row">
+    <button class="btn" id="load2">別のモデルを開く</button>
+    <button class="btn" id="download">モデルを保存</button>
   </div>
   <div class="row">
     <button class="btn" id="cel" style="flex:0 0 80px">セル影</button>
@@ -107,13 +113,13 @@
     <button class="btn on" id="vivid" style="flex:0 0 80px">アニメ調</button>
     <span class="lbl">彩度</span>
     <div class="slideWrap"><input type="range" id="vividSat" min="0" max="100" value="50"></div>
-    <span class="lbl">濃淡</span>
+    <span class="lbl">コントラスト</span>
     <div class="slideWrap"><input type="range" id="vividCon" min="0" max="100" value="0"></div>
   </div>
   <div class="row" id="animRow" style="display:none">
     <span class="lbl">モーション</span>
     <select id="animSel"></select>
-    <button class="btn sm" id="loadMotion" title="モーション.glbを追加読込">＋</button>
+    <button class="btn sm" id="loadMotion" title="モーション用のglbファイルを追加読込">＋読込</button>
     <button class="btn" id="play" style="flex:0 0 92px">再生</button>
   </div>
 </div>
