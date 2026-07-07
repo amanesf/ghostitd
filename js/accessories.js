@@ -91,6 +91,7 @@ function stageAccessories(opts){
   if(!accs.length) return null;
 
   var allV=[],allN=[],allF=[],allJ=[],allW=[],allNF=[],allAccName=[]; var voff=0;
+  var rawParts=[]; // フェーズ1: 彫刻直後(平滑化/間引き前)のアクセサリー別メッシュ
 
   accs.forEach(function(acc){
     var name = acc.name || 'accessory';
@@ -140,16 +141,18 @@ function stageAccessories(opts){
       psqHead: gp.psq_acc, psqTorso: gp.psq_acc, psqLegs: gp.psq_acc,
       psqArms: gp.psq_acc, psqHands: gp.psq_acc,
       trackGap: gp.track_gap, trackWin: gp.track_win,
-      smoothIters: gp.acc_smooth_iters,
+      // ★フェーズ1: bodyと同様、平滑化前の生メッシュをキャッシュするため
+      // carveRegion自体には常にsmoothIters:0を渡し、平滑化はfinishAccessoryMesh
+      // 側で別途適用する。
+      smoothIters: 0,
       frontPolygon: frontPolygon, backPolygon: backPolygon, sidePolygon: sidePolygon,
       whiteThr: gp.white_thr,
     });
     if(!result){ console.log("  accessories: carve失敗", name); return; }
-    var V=result.V, F=result.F;
-    if(gp.acc_decimate){
-      var dec=P3D.decimateMesh(V,F,gp.acc_target_verts);
-      V=dec.V; F=dec.F;
-    }
+    var rawV=result.V, rawF=result.F;
+    rawParts.push({name:name, mode:mode, bones:bones.slice(), rawV:rawV, rawF:rawF});
+    var finished=finishAccessoryMesh(rawV, rawF, gp);
+    var V=finished.V, F=finished.F;
     var fw=P3D.computeNormalsFixWinding(V,F);
     var Nv=fw.N; F=fw.F;
 
@@ -186,8 +189,23 @@ function stageAccessories(opts){
   allW.forEach(function(a){ Wt.set(a,wo); wo+=a.length; });
   var NF=Uint8Array.from(allNF.map(function(b){return b?1:0;}));
   console.log("  accessories: total verts", V.length/3);
-  return {V:V, N:Nv, F:F, J:J, W:Wt, NF:NF, accName:allAccName};
+  return {V:V, N:Nv, F:F, J:J, W:Wt, NF:NF, accName:allAccName, rawParts:rawParts};
 }
 P3D.stageAccessories = stageAccessories;
+
+// ★フェーズ1: rawV/rawF(彫刻直後・平滑化/間引き前)にgen_paramsのacc_smooth_iters/
+// acc_decimate/acc_target_vertsを適用する(visual_hull.jsのfinishBodyMeshの
+// アクセサリー版)。ビューア側でrawParts配列の各要素にこれを呼び直すことで、
+// 再彫刻なしに平滑化/間引きパラメータを反映できる(フェーズ2で使用)。
+function finishAccessoryMesh(rawV, rawF, gp){
+  var V=rawV, F=rawF;
+  if(gp.acc_smooth_iters>0) V=P3D.laplacianSmooth(V,F,gp.acc_smooth_iters);
+  if(gp.acc_decimate){
+    var dec=P3D.decimateMesh(V,F,gp.acc_target_verts);
+    V=dec.V; F=dec.F;
+  }
+  return {V:V, F:F};
+}
+P3D.finishAccessoryMesh = finishAccessoryMesh;
 
 })(window);

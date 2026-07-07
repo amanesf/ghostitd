@@ -97,6 +97,294 @@ P3D.buildDerivedLandmarks = buildDerivedLandmarks;
  * onProgress(stageLabel): 各ステージ開始時に呼ばれる(UIの経過秒数表示用)
  * 戻り値: Promise<ArrayBuffer> (GLBファイル全体)
  */
+/**
+ * フェーズ1: 中間データ契約。runPipeline()の前半(prep〜accessories、重い
+ * marching cubesまで)だけを実行し、GLBを作らずに以下を返す:
+ *   - rawBody: {V,F} (visual_hullの彫刻直後・平滑化/間引き前メッシュ)
+ *   - rawAccessories: [{name,mode,bones,V,F}, ...] (アクセサリー別、平滑化/間引き前)
+ *   - bledCanvases: {front,back,side} (prep+bleed済みcanvas。atlas_bakeの入力用)
+ *   - pivots: スキン計算/atlas継ぎ目判定に必要な骨格ピボット(モデル座標)
+ *   - calib: {SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF} (atlas_bake/finishFromIntermediateで再利用)
+ * ビューア(character_3d.html)側はこの中間データ+gen_paramsの一部を使って
+ * finishFromIntermediate()を呼べば、再彫刻なしにモデルを再構築できる。
+ * 戻り値: Promise<object>
+ */
+async function runToIntermediate(state, onProgress){
+  function report(label){ console.log("=== stage:", label, "==="); if(onProgress) onProgress(label); }
+  var gp = state.genParams;
+
+  report("prep(背景除去)");
+  var views=['front','side','back'];
+  var rgbaFull={}, alphaFull={}, sizes={};
+  views.forEach(function(v){
+    var img = state.imgs[v].el;
+    var w = state.imgs[v].w, h = state.imgs[v].h;
+    var id = P3D.imageToImageData(img, w, h);
+    rgbaFull[v] = id.data;
+    sizes[v] = {w:w,h:h};
+  });
+  var excludeBool = {};
+  views.forEach(function(v){ excludeBool[v] = excludeMaskToBool(state.excludeMask[v], sizes[v].w, sizes[v].h); });
+  views.forEach(function(v){
+    var img = state.imgs[v].el;
+    var res = P3D.loadRgbaRemoveWhite(img, gp.white_thr, excludeBool[v]);
+    alphaFull[v] = res.alpha;
+  });
+  await tick();
+
+  report("bleed(縁の色にじみ)");
+  var bledRgba={};
+  views.forEach(function(v){
+    bledRgba[v] = P3D.bleedEdges(rgbaFull[v], sizes[v].w, sizes[v].h, alphaFull[v], gp.alpha_dilate);
+  });
+  function toCanvas(rgba,w,h){
+    var c=document.createElement('canvas'); c.width=w; c.height=h;
+    var ctx=c.getContext('2d');
+    var id=new ImageData(new Uint8ClampedArray(rgba.buffer.slice(0)), w, h);
+    ctx.putImageData(id,0,0);
+    return c;
+  }
+  var bledCanvas={};
+  views.forEach(function(v){
+    var rgba=bledRgba[v];
+    var opaque=new Uint8ClampedArray(rgba.length);
+    opaque.set(rgba);
+    for(var a=3; a<opaque.length; a+=4) opaque[a]=255;
+    bledCanvas[v]=toCanvas(opaque, sizes[v].w, sizes[v].h);
+  });
+  await tick();
+
+  report("profile/core(キャリブレーション)");
+  var prof = P3D.stageProfile(alphaFull.front, sizes.front.w, sizes.front.h, alphaFull.side, sizes.side.w, sizes.side.h);
+  var core = P3D.stageCore(alphaFull.side, sizes.side.w, sizes.side.h, prof.YTOP, prof.YBOT);
+  var SCALE = prof.YBOT-prof.YTOP;
+  await tick();
+
+  report("skeleton(骨格ピボット計算)");
+  var derivedBase = state.deriveFromPoints(state.points, state.analysis);
+  var LM = buildDerivedLandmarks(state.points, state.analysis, derivedBase);
+  var pivRes = P3D.computePivots(alphaFull.front, sizes.front.w, sizes.front.h, prof.YTOP, prof.YBOT, prof.CX, LM);
+  var pivots = Object.assign({}, pivRes.pivots, pivRes.extraPivots);
+  await tick();
+
+  var frontAlpha = alphaFull.front.slice();
+  var backAlpha = alphaFull.back.slice();
+  var sideAlpha = alphaFull.side.slice();
+  if(excludeBool.front) for(var i=0;i<frontAlpha.length;i++){ if(excludeBool.front[i]) frontAlpha[i]=0; }
+  if(excludeBool.back) for(var i2=0;i2<backAlpha.length;i2++){ if(excludeBool.back[i2]) backAlpha[i2]=0; }
+  if(excludeBool.side) for(var i3=0;i3<sideAlpha.length;i3++){ if(excludeBool.side[i3]) sideAlpha[i3]=0; }
+
+  function contArray(rgba){
+    var n=rgba.length/4;
+    var out=new Float32Array(n);
+    for(var i=0;i<n;i++){ out[i]=Math.min(rgba[i*4],rgba[i*4+1],rgba[i*4+2]); }
+    return out;
+  }
+  var frontCont = gp.subpixel ? contArray(rgbaFull.front) : null;
+  var backCont = gp.subpixel ? contArray(rgbaFull.back) : null;
+  var sideCont = gp.subpixel ? contArray(rgbaFull.side) : null;
+
+  report("visual_hull(全身のvisual hull carving)");
+  var body = P3D.stageVisualHull({
+    frontAlpha:frontAlpha, backAlpha:backAlpha, sideAlpha:sideAlpha,
+    faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
+    frontCont:frontCont, backCont:backCont, sideCont:sideCont,
+    SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
+    pivots:pivots, gp:gp,
+  });
+  await tick();
+
+  report("accessories(アクセサリーのcarving)");
+  var acc = null;
+  if(state.accessories && state.accessories.length){
+    acc = P3D.stageAccessories({
+      accs: state.accessories,
+      frontRgba: rgbaFull.front, backRgba: rgbaFull.back, sideRgba: rgbaFull.side,
+      W: sizes.front.w, H: sizes.front.h,
+      SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
+      frontCont:frontCont, backCont:backCont, sideCont:sideCont,
+      pivots:pivots, gp:gp,
+    });
+  }
+  await tick();
+
+  return {
+    rawBody: {V: body.rawV, F: body.rawF},
+    rawAccessories: (acc && acc.rawParts) ? acc.rawParts.map(function(p){
+      return {name:p.name, mode:p.mode, bones:p.bones, V:p.rawV, F:p.rawF};
+    }) : [],
+    bledCanvases: bledCanvas,
+    pivots: pivots,
+    calib: {SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF},
+  };
+}
+P3D.runToIntermediate = runToIntermediate;
+
+/**
+ * フェーズ1/2: 中間データ(runToIntermediateの戻り値と同じ形。IndexedDBから
+ * 読み込んだ場合はbledCanvasesがHTMLCanvasElementに復元済みであること)から
+ * GLBを再構築する。彫刻(marching cubes)はやり直さず、rawBody/rawAccessories
+ * に間引き(decimate)・平滑化(smooth_iters)・スキニング・atlas焼き込み・
+ * GLB書き出しだけを適用する(フェーズ2のライブパラメータ編集の中核関数)。
+ * opts: {gp, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth}
+ * 戻り値: Promise<ArrayBuffer>
+ *
+ * ★フェーズ2追加課題6の対応(段階的キャッシュ): どのパラメータ層(Tier1〜3)が
+ * 実際に変わったかに応じて、変化のなかった段の再計算を省略する。
+ * 段の依存関係と実際の処理順(このinter._stageCacheのみで完結する話であり、
+ * P3D.finishBodyMesh/finishAccessoryMesh(runPipeline側で使う共有関数、
+ * 平滑化→間引きの順)には手を入れていない。ここでは
+ * キャッシュを効かせるため意図的に「間引き→平滑化」の順に組み替えている
+ * (間引きはTier2のみに依存させ、Tier1(平滑化回数等)だけを変えた時に
+ * 間引き結果を再利用できるようにするための設計変更。数式的な最終結果は
+ * 従来の「平滑化→間引き」と厳密には同一にならない可能性があるが、
+ * どちらも彫刻直後の生メッシュに対する後処理であり見た目上の破綻はない):
+ *   1. decimate段: body_decimate/body_target_verts/acc_decimate/acc_target_verts
+ *      (Tier2)にのみ依存。rawV/rawFに対して間引きのみ適用。
+ *   2. mesh_finish段(平滑化+スキニング): 1の出力 + body_smooth_iters/
+ *      acc_smooth_iters/rigid_soft_width(Tier1)に依存。
+ *   3. atlas_bake段: 2の出力 + seamAngles/seamNoSide/seamSmoothIters/
+ *      colorGradWidth(Tier3)に依存。
+ *   4. model_glb段(テクスチャ圧縮+GLB書き出し): 3の出力 + kb_per_face(Tier1)。
+ *      圧縮のみなので常に軽量、キャッシュ不要で毎回実行する。
+ * 各段の入力シグネチャ(JSON文字列)をinter._stageCacheに保存し、前回と一致
+ * すればその段はスキップして前回の結果を再利用する。あるTierが変わって
+ * 上流の段が再計算されれば、その下流の段も強制的に再計算する。
+ */
+function decimateStage(inter, gp){
+  var bodyV=inter.raw_body.V, bodyF=inter.raw_body.F;
+  if(gp.body_decimate){
+    var d=P3D.decimateMesh(bodyV,bodyF,gp.body_target_verts);
+    bodyV=d.V; bodyF=d.F;
+  }
+  var accParts=[];
+  (inter.raw_accessories||[]).forEach(function(p){
+    var V=p.V, F=p.F;
+    if(gp.acc_decimate){
+      var d=P3D.decimateMesh(V,F,gp.acc_target_verts);
+      V=d.V; F=d.F;
+    }
+    accParts.push({name:p.name, mode:p.mode, bones:p.bones, V:V, F:F});
+  });
+  return {bodyV:bodyV, bodyF:bodyF, accParts:accParts};
+}
+
+function meshFinishStage(decimated, gp, pivots){
+  var V=decimated.bodyV, F=decimated.bodyF;
+  if(gp.body_smooth_iters>0) V=P3D.laplacianSmooth(V,F,gp.body_smooth_iters);
+  var fw=P3D.computeNormalsFixWinding(V,F);
+  var bodyV=V, bodyF=fw.F, bodyN=fw.N;
+  var bodySkin=P3D.nearestBoneSegmentSkin(bodyV, pivots, P3D.BONES, 4, gp.rigid_soft_width);
+
+  var acc=null;
+  if(decimated.accParts && decimated.accParts.length){
+    var allV=[],allN=[],allF=[],allJ=[],allW=[],allAccName=[]; var voff=0;
+    decimated.accParts.forEach(function(p){
+      var V2=p.V, F2=p.F;
+      if(gp.acc_smooth_iters>0) V2=P3D.laplacianSmooth(V2,F2,gp.acc_smooth_iters);
+      var fw2=P3D.computeNormalsFixWinding(V2,F2);
+      V2=V2; var F2b=fw2.F, Nv=fw2.N;
+      var skin;
+      if(p.mode==='rigid'){
+        skin = P3D.rigidSkin(V2, (p.bones&&p.bones[0])||'head');
+      }else{
+        skin = P3D.nearestBoneSegmentSkin(V2, pivots, (p.bones&&p.bones.length)?p.bones:P3D.BONES, 4, gp.rigid_soft_width);
+      }
+      allV.push(V2); allN.push(Nv);
+      for(var i=0;i<F2b.length;i++) allF.push(F2b[i]+voff);
+      allJ.push(skin.J); allW.push(skin.W);
+      var nv=V2.length/3;
+      for(var i2=0;i2<nv;i2++) allAccName.push(p.name);
+      voff+=nv;
+    });
+    function concatF32(arrs){
+      var total=0; arrs.forEach(function(a){total+=a.length;});
+      var out=new Float32Array(total); var off=0;
+      arrs.forEach(function(a){ out.set(a,off); off+=a.length; });
+      return out;
+    }
+    var accV=concatF32(allV), accN=concatF32(allN);
+    var accF=Uint32Array.from(allF);
+    var accJ=new Uint16Array(allJ.reduce(function(s,a){return s+a.length;},0));
+    var accW=new Float32Array(allW.reduce(function(s,a){return s+a.length;},0));
+    var jo=0,wo=0;
+    allJ.forEach(function(a){ accJ.set(a,jo); jo+=a.length; });
+    allW.forEach(function(a){ accW.set(a,wo); wo+=a.length; });
+    var accNF=Uint8Array.from(allAccName.map(function(){return 0;}));
+    acc = {V:accV, N:accN, F:accF, J:accJ, W:accW, NF:accNF, accName:allAccName};
+  }
+  return {bodyV:bodyV, bodyF:bodyF, bodyN:bodyN, bodySkin:bodySkin, acc:acc};
+}
+
+async function finishFromIntermediate(inter, opts, onProgress){
+  function report(label){ console.log("=== stage:", label, "==="); if(onProgress) onProgress(label); }
+  var gp = opts.gp;
+  var cache = inter._stageCache || (inter._stageCache = {});
+  function sig(o){ return JSON.stringify(o); }
+
+  var decSig = sig({bd:gp.body_decimate, btv:gp.body_target_verts, ad:gp.acc_decimate, atv:gp.acc_target_verts});
+  var decimated;
+  if(cache.decSig===decSig && cache.decimated){
+    decimated = cache.decimated;
+  }else{
+    report("decimate(間引き)");
+    decimated = decimateStage(inter, gp);
+    cache.decSig = decSig; cache.decimated = decimated;
+    cache.meshSig = null; cache.bakeSig = null; // 下流を強制再計算
+  }
+  await tick();
+
+  var meshSig = decSig+"|"+sig({bs:gp.body_smooth_iters, as:gp.acc_smooth_iters, rsw:gp.rigid_soft_width});
+  var meshFinished;
+  if(cache.meshSig===meshSig && cache.meshFinished){
+    meshFinished = cache.meshFinished;
+  }else{
+    report("mesh_finish(平滑化/スキニング)");
+    meshFinished = meshFinishStage(decimated, gp, inter.pivots);
+    cache.meshSig = meshSig; cache.meshFinished = meshFinished;
+    cache.bakeSig = null; // 下流を強制再計算
+  }
+  await tick();
+
+  var bledCanvas = inter.bled_canvases;
+  var bakeSig = meshSig+"|"+sig({sa:opts.seamAngles, sns:opts.seamNoSide, ssi:opts.seamSmoothIters, cgw:opts.colorGradWidth});
+  var bake, atlasCanvas;
+  if(cache.bakeSig===bakeSig && cache.bake){
+    bake = cache.bake; atlasCanvas = cache.atlasCanvas;
+  }else{
+    report("atlas_bake(テクスチャベイク)");
+    var bodyV=meshFinished.bodyV, bodyF=meshFinished.bodyF, bodyN=meshFinished.bodyN, bodySkin=meshFinished.bodySkin, acc=meshFinished.acc;
+    bake = P3D.stageAtlasBake({
+      W: bledCanvas.front.width, H: bledCanvas.front.height, SCALE:inter.calib.SCALE, CX:inter.calib.CX, YBOT:inter.calib.YBOT,
+      SYTOP:inter.calib.SYTOP, SYBOT:inter.calib.SYBOT, SIDE_REF:inter.calib.SIDE_REF,
+      backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
+      sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
+      bodyV:bodyV, bodyN:bodyN, bodyF:bodyF, bodyJ:bodySkin.J, bodyW:bodySkin.W,
+      accV: acc?acc.V:null, accN: acc?acc.N:null, accF: acc?acc.F:null,
+      accJ: acc?acc.J:null, accW: acc?acc.W:null, accNF: acc?acc.NF:null,
+      accName: acc?acc.accName:null,
+      seamAngles: opts.seamAngles,
+      seamNoSide: opts.seamNoSide,
+      seamSmoothIters: opts.seamSmoothIters,
+      colorGradWidth: opts.colorGradWidth,
+      frontCanvas: bledCanvas.front, backCanvas: bledCanvas.back, sideCanvas: bledCanvas.side,
+    });
+    atlasCanvas = P3D.buildAtlasCanvas(bledCanvas.front, bledCanvas.back, bledCanvas.side);
+    cache.bakeSig = bakeSig; cache.bake = bake; cache.atlasCanvas = atlasCanvas;
+  }
+  await tick();
+
+  report("model_glb(GLB書き出し)");
+  var tex = await P3D.compressAtlas(atlasCanvas, gp.kb_per_face);
+  var glb = P3D.buildGLB({
+    V: bake.restV, N: bake.norm, UV: bake.UV, J: bake.J, W: bake.W, F: bake.F,
+    pivots: inter.pivots, atlasTexBuffer: tex.buffer, atlasMime: tex.mime,
+  });
+  console.log("DONE(finishFromIntermediate) -> glb bytes:", glb.byteLength);
+  return glb;
+}
+P3D.finishFromIntermediate = finishFromIntermediate;
+
 async function runPipeline(state, onProgress){
   function report(label){ console.log("=== stage:", label, "==="); if(onProgress) onProgress(label); }
   var gp = state.genParams;

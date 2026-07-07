@@ -40,7 +40,10 @@
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
 
   /* single bottom control bar (slides up from below; hidden by default) */
-  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;
+  /* フェーズ2: パラメータパネルが増えても画面上半分の3Dビューは必ず見える
+     ように、バー全体の高さを50vh以内に制限しスクロール可能にする
+     (character_3d.htmlのUI制約、GENERATOR_LIVE_PREVIEW_PLAN.md参照)。 */
+  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;max-height:50vh;overflow-y:auto;
     display:flex;flex-direction:column;gap:8px;padding:10px 10px calc(10px + env(safe-area-inset-bottom));
     background:linear-gradient(to top,rgba(13,15,18,.96),rgba(13,15,18,.74) 70%,transparent);
     backdrop-filter:blur(6px);transform:translateY(100%);transition:transform .28s ease;pointer-events:none}
@@ -75,6 +78,31 @@
     background:rgba(255,255,255,.05);color:var(--txt);font-size:15px;cursor:pointer;
     display:flex;align-items:center;justify-content:center;user-select:none}
   .dpad button:active{background:rgba(91,230,255,.18)}
+
+  /* フェーズ2: ライブパラメータパネル(landmark_tool.htmlのaccgroupパターンを踏襲) */
+  .accgroup{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;overflow:hidden;background:rgba(255,255,255,.03)}
+  .accgroup>summary{list-style:none;cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;
+    font-size:12.5px;color:var(--txt)}
+  .accgroup>summary::-webkit-details-marker{display:none}
+  .accgroup>summary::before{content:"▸";color:var(--mut);font-size:10px;transition:transform .12s}
+  .accgroup[open]>summary::before{transform:rotate(90deg)}
+  .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:10.5px}
+  .accgroup>.accbody{padding:2px 10px 10px}
+  .pitem{margin-bottom:8px}
+  .pitem .plabel{color:var(--txt);font-size:11.5px;margin-bottom:4px;display:flex;justify-content:space-between}
+  .pitem .prow{display:flex;align-items:center;gap:6px}
+  .pitem input[type=number]{width:66px;height:28px;border-radius:6px;border:1px solid var(--line);
+    background:#161a1f;color:var(--txt);font-size:11.5px;padding:0 6px}
+  .pitem .punit{color:var(--mut);font-size:10px;flex:0 0 auto}
+  #genPanelStatus{font-size:11px;color:var(--mint);min-height:14px}
+  /* Task1: 継ぎ目角度(seamAngles/seamNoSide)のボーン別一覧。landmark_tool.htmlの
+     .aclist/.acitemを移植 */
+  .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
+  .acitem{display:flex;align-items:center;gap:8px;font-size:11.5px;background:rgba(255,255,255,.04);
+    border:1px solid var(--line);border-radius:9px;padding:6px 8px}
+  .acitem .nm{flex:0 0 52px;color:var(--txt)}
+  .acitem input[type=number]{width:44px;height:26px;border-radius:6px;border:1px solid var(--line);
+    background:#161a1f;color:var(--txt);font-size:11px;padding:0 4px}
 </style></head>
 <body>
 <canvas id="c"></canvas>
@@ -111,6 +139,7 @@
     <button class="vtabbtn" data-vtab="shader">シェーダ</button>
     <button class="vtabbtn" data-vtab="motion">モーション</button>
     <button class="vtabbtn" data-vtab="model">モデル</button>
+    <button class="vtabbtn" data-vtab="gen" id="genTabBtn" style="display:none">生成調整</button>
   </div>
 
   <div class="vtabpanel on" data-vtabpanel="view">
@@ -164,11 +193,45 @@
       <button class="btn" id="download">モデルを保存</button>
     </div>
   </div>
+
+  <!-- フェーズ2: 中間パッケージ(生成ボタンから渡された彫刻直後メッシュ)がある
+       時だけ表示するライブパラメータパネル。彫刻(marching cubes)をやり直さず
+       反映できる12個のパラメータをTier1〜3の折りたたみグループで並べる
+       (landmark_tool.htmlのPARAM_META/accgroupパターンを移植)。 -->
+  <div class="vtabpanel" data-vtabpanel="gen" id="genPanel">
+    <div id="genPanelStatus"></div>
+    <div id="genParamsPanel"></div>
+    <!-- Task1: ボーン別の継ぎ目角度(seamAngles)/側面画像使用有無(seamNoSide) -->
+    <div id="genSeamPanel"></div>
+    <!-- フェーズ3: 現在のライブ調整状態からの最終出力 -->
+    <div class="row">
+      <button class="btn mint" id="exportGlbBtn">GLB書き出し</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="exportJsonBtn">JSON書き出し</button>
+      <button class="btn" id="copyJsonBtn">JSONコピー</button>
+    </div>
+  </div>
 </div>
 
 <script src="js/vendor/three.min.js"></script>
 <script src="js/vendor/GLTFLoader.js"></script>
+<script src="js/vendor/BufferGeometryUtils.js"></script>
+<script src="js/vendor/SimplifyModifier.js"></script>
 <script src="js/idb.js"></script>
+<!-- フェーズ1(2026-07-07〜): ジェネレータ(landmark_tool.html)から渡される
+     中間パッケージ(彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)から
+     GLBを組み立てるため、生成パイプラインの後半(平滑化/間引き/スキニング/
+     テクスチャ焼き込み/GLB書き出し)に必要なモジュールを読み込む。
+     フェーズ2ではこれらを使ったライブパラメータ編集UIをここに追加する。 -->
+<script src="js/common.js"></script>
+<script src="js/carving.js"></script>
+<script src="js/skeleton.js"></script>
+<script src="js/atlas.js"></script>
+<script src="js/model_export.js"></script>
+<script src="js/visual_hull.js"></script>
+<script src="js/accessories.js"></script>
+<script src="js/pipeline.js"></script>
 <script>
 (function(){
 const cvs=document.getElementById('c');
@@ -372,7 +435,7 @@ function addMotionClips(newClips,autoplay){
   if(autoplay)setClip(firstNew,true);
 }
 let lastModelBuf=null;   // ダウンロードボタン用: 直近に読み込んだ「モデル本体」のGLBバイト列
-function loadGLB(buf,onLoaded,autoplayMotion){
+function loadGLB(buf,onLoaded,autoplayMotion,keepView){
   new THREE.GLTFLoader().parse(buf,'',function(gltf){
     let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
     if(!hasMesh){ addMotionClips(gltf.animations||[],autoplayMotion); if(onLoaded)onLoaded(); return; }
@@ -414,8 +477,14 @@ function loadGLB(buf,onLoaded,autoplayMotion){
       clips.forEach((cl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=cl.name||('motion '+(i+1));sel.appendChild(o);});
     }
     document.getElementById('err').textContent='';
-    // center AFTER matrices/skeleton are initialized (next frames), device-independent
-    requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
+    // ★フェーズ2: ライブパラメータ変更での再読み込み(keepView=true)時は、
+    // カメラ位置/回転/ズームを毎回リセットすると微調整のたびに視点が飛んで
+    // しまうため、frameModel()(初期フィット)を呼ばずに現在の視点をそのまま
+    // 維持する。
+    if(!keepView){
+      // center AFTER matrices/skeleton are initialized (next frames), device-independent
+      requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
+    }
     invalidate();
     if(onLoaded)onLoaded();
   }, e=>{ document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e); });
@@ -487,17 +556,300 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 // 3DtoolJS: ランドマークツールの「モデル生成」ボタンからIndexedDB経由で渡された
 // 生成済みGLBがあれば最優先で読み込む(モード選択画面は出さない。読み込んだら
 // 消費して1回限りにし、次回の通常起動では改めてモード選択を出す)。
+// ★フェーズ1(2026-07-07〜): loadGeneratedModel()は完成GLBではなく中間パッケージ
+// (彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)を返すようになった。
+// P3D.finishFromIntermediate()で平滑化/間引き/テクスチャ焼き込み/GLB化まで
+// このページ側で行ってから読み込む(フェーズ2ではこのgen_paramsをライブ編集
+// できるUIパネルに置き換える)。
+let currentPackage=null; // フェーズ2のライブパラメータ編集用に保持しておく
+let liveGP=null;         // currentPackage.gen_paramsのコピー。パネル操作で更新する
+let liveSeamSmoothIters=null, liveColorGradWidth=null;
+// ★追加課題5の対応: seamAngles/seamNoSide(ボーン別の継ぎ目角度・側面画像
+// 不使用フラグ)もビューアでライブ編集できるようにする(landmark_tool.htmlの
+// 「境目角度」タブと同じBONE_GROUPS/seamRowHtmlパターンを移植)。
+let liveSeamAngles=null, liveSeamNoSide=null;
+document.getElementById('err').textContent='';
 (async function(){
   try{
-    const buf = window.P3D && await P3D.loadGeneratedModel();
-    if(buf){
+    const pkg = window.P3D && await P3D.loadGeneratedModel();
+    if(pkg && pkg.raw_body){
       await P3D.clearGeneratedModel();
-      loadGLB(buf,loadMotionClips);
+      currentPackage = pkg;
+      liveGP = Object.assign({}, pkg.gen_params);
+      liveSeamSmoothIters = pkg.seam_smooth_iters;
+      liveColorGradWidth = pkg.color_grad_width;
+      liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
+      liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
+      document.getElementById('err').textContent='モデルを構築中…';
+      const glb = await P3D.finishFromIntermediate(pkg, {
+        gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
+        seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
+      }, (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
+      document.getElementById('err').textContent='';
+      lastModelBuf=glb;
+      loadGLB(glb,loadMotionClips);
+      document.getElementById('genTabBtn').style.display='';
+      renderGenParamsPanel();
+      renderSeamPanel();
       return;
     }
-  }catch(e){ console.warn('generated model load failed', e); }
+  }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル構築に失敗しました: '+((e&&e.message)||e); }
   document.getElementById('modeChoice').classList.remove('hide');
 })();
+
+/* ---------- フェーズ2: ライブパラメータ編集パネル ---------- */
+// 彫刻(marching cubes)をやり直さずに反映できる12パラメータをTier1〜3で分類
+// (GENERATOR_LIVE_PREVIEW_PLAN.md「移動可能パラメータの分類」参照)。
+// Tier1: 完全即時。Tier2: raw_body/raw_accessoriesの間引き前メッシュがあれば
+// 反映可能。Tier3: 上記に加えてbled_canvases(atlas_bake再実行)が必要。
+// いずれもcharacter_3d.htmlは常にraw_*とbled_canvasesを保持しているため、
+// 実装上は全てP3D.finishFromIntermediate()を丸ごと呼び直すだけで反映できる
+// (finishFromIntermediate自体が毎回smooth→decimate→atlas_bakeの順で計算する)。
+const GEN_PARAM_TIERS=[
+  {tier:"Tier1(即時反映)", items:[
+    {key:"body_smooth_iters", label:"全身の表面平滑化回数", min:0,max:60,step:1,unit:"回"},
+    {key:"acc_smooth_iters", label:"アクセサリーの平滑化回数", min:0,max:60,step:1,unit:"回"},
+    {key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", min:0,max:0.8,step:0.05,unit:""},
+    {key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", min:50,max:1000,step:10,unit:"KB"},
+  ]},
+  {tier:"Tier2(生メッシュキャッシュ利用)", items:[
+    {key:"body_decimate", label:"全身の頂点数を間引く", type:"checkbox"},
+    {key:"body_target_verts", label:"全身の間引き後目標頂点数", min:1000,max:300000,step:1000,unit:"頂点"},
+    {key:"acc_decimate", label:"アクセサリーの頂点数を間引く", type:"checkbox"},
+    {key:"acc_target_verts", label:"アクセサリーの間引き後目標頂点数", min:500,max:300000,step:500,unit:"頂点"},
+  ]},
+  {tier:"Tier3(生メッシュ+画像キャッシュ利用)", items:[
+    {key:"__seamSmoothIters", label:"継ぎ目の平滑化回数", min:0,max:30,step:1,unit:"回"},
+    {key:"__colorGradWidth", label:"色のディザグラデーション幅", min:0,max:40,step:1,unit:"px"},
+  ]},
+];
+function genParamGet(key){
+  if(key==="__seamSmoothIters") return liveSeamSmoothIters;
+  if(key==="__colorGradWidth") return liveColorGradWidth;
+  return liveGP[key];
+}
+function genParamSet(key,val){
+  if(key==="__seamSmoothIters"){ liveSeamSmoothIters=val; return; }
+  if(key==="__colorGradWidth"){ liveColorGradWidth=val; return; }
+  liveGP[key]=val;
+}
+let genPanelOpen={};
+function renderGenParamsPanel(){
+  const el=document.getElementById('genParamsPanel'); if(!el)return;
+  el.innerHTML=GEN_PARAM_TIERS.map(grp=>{
+    const isOpen=!!genPanelOpen[grp.tier];
+    const items=grp.items.map(it=>{
+      const cur=genParamGet(it.key);
+      let body;
+      if(it.type==="checkbox"){
+        body='<div class="prow" style="justify-content:space-between">'+
+          '<span>'+it.label+'</span><input type="checkbox" data-gkey="'+it.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px"></div>';
+        return '<div class="pitem">'+body+'</div>';
+      }else{
+        body='<div class="prow">'+
+          '<input type="range" data-gkey-range="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
+          '<input type="number" data-gkey="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
+          (it.unit?'<span class="punit">'+it.unit+'</span>':'')+'</div>';
+      }
+      return '<div class="pitem"><div class="plabel">'+it.label+'</div>'+body+'</div>';
+    }).join("");
+    return '<details class="accgroup" data-gtier="'+grp.tier+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>'+grp.tier+'</span><span class="accCount">'+grp.items.length+'項目</span></summary>'+
+      '<div class="accbody">'+items+'</div></details>';
+  }).join("");
+  [].forEach.call(el.querySelectorAll("details.accgroup"),d=>{
+    d.addEventListener("toggle",()=>{ genPanelOpen[d.dataset.gtier]=d.open; });
+  });
+  [].forEach.call(el.querySelectorAll("[data-gkey]"),inp=>{
+    const key=inp.dataset.gkey;
+    inp.onchange=()=>{
+      const v = inp.type==="checkbox" ? inp.checked : (parseFloat(inp.value)||0);
+      genParamSet(key,v);
+      const rg=el.querySelector('[data-gkey-range="'+key+'"]'); if(rg)rg.value=v;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-gkey-range]"),rg=>{
+    const key=rg.dataset.gkeyRange;
+    rg.oninput=()=>{
+      const v=parseFloat(rg.value)||0;
+      genParamSet(key,v);
+      const numEl=el.querySelector('[data-gkey="'+key+'"]'); if(numEl)numEl.value=v;
+      scheduleGenRecompute();
+    };
+  });
+}
+/* ---------- Task1: seamAngles/seamNoSideのボーン別ライブ編集 ---------- */
+// landmark_tool.htmlのBONE_GROUPS/BONE_JP/seamRowHtmlパターンをそのまま移植。
+const SEAM_DEFAULT_DEG=45;
+const BONE_JP_V={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
+  clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
+  clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
+  thigh_L:"腿L",shin_L:"すねL",foot_L:"足L",toe_L:"つま先L",
+  thigh_R:"腿R",shin_R:"すねR",foot_R:"足R",toe_R:"つま先R"};
+const BONE_GROUPS_V=[
+  {label:"体幹", bones:["hips","torso","chest","neck","head"]},
+  {label:"左腕", bones:["clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L"]},
+  {label:"右腕", bones:["clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R"]},
+  {label:"左脚", bones:["thigh_L","shin_L","foot_L","toe_L"]},
+  {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
+];
+let seamGroupOpen={};
+function seamRowHtmlV(label,key,v,ns){
+  return '<div class="acitem"><span class="nm">'+label+'</span>'+
+    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-vseam-range="'+key+'" style="flex:1;min-width:40px">'+
+    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-vseam-key="'+key+'" style="width:44px">°'+
+    '<label style="font-size:10.5px;color:var(--mut);margin-left:4px;white-space:nowrap">'+
+    '<input type="checkbox" data-vseam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面</label>'+
+    '</div>';
+}
+function renderSeamPanel(){
+  const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
+  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  const boneGroupsHtml=BONE_GROUPS_V.map(grp=>{
+    const rows=grp.bones.map(b=>{
+      const v=(liveSeamAngles[b]!==undefined)?liveSeamAngles[b]:SEAM_DEFAULT_DEG;
+      return seamRowHtmlV(BONE_JP_V[b]||b,b,v,!!liveSeamNoSide[b]);
+    }).join("");
+    const isOpen=!!seamGroupOpen[grp.label];
+    return '<details class="accgroup" data-vseamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }).join("");
+  let accHtml="";
+  if(accKeys.length){
+    const rows=accKeys.map(key=>{
+      const v=(liveSeamAngles[key]!==undefined)?liveSeamAngles[key]:SEAM_DEFAULT_DEG;
+      return seamRowHtmlV(key.replace(/^acc:/,""),key,v,!!liveSeamNoSide[key]);
+    }).join("");
+    const isOpen=!!seamGroupOpen["アクセサリー"];
+    accHtml='<details class="accgroup" data-vseamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }
+  el.innerHTML=boneGroupsHtml+accHtml;
+  [].forEach.call(el.querySelectorAll("details[data-vseamgroup]"),d=>{
+    d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.vseamgroup]=d.open; });
+  });
+  function setAngle(key,n){
+    if(!isFinite(n)||n<1||n>89) return;
+    liveSeamAngles[key]=n;
+  }
+  [].forEach.call(el.querySelectorAll("[data-vseam-key]"),inp=>{
+    inp.onchange=()=>{
+      const key=inp.dataset.vseamKey, n=parseInt(inp.value,10);
+      setAngle(key,n);
+      const rg=el.querySelector('[data-vseam-range="'+key+'"]'); if(rg)rg.value=inp.value;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-vseam-range]"),rg=>{
+    rg.oninput=()=>{
+      const key=rg.dataset.vseamRange, n=parseInt(rg.value,10);
+      setAngle(key,n);
+      const numEl=el.querySelector('[data-vseam-key="'+key+'"]'); if(numEl)numEl.value=rg.value;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-vseam-side]"),cb=>{
+    cb.onchange=()=>{
+      const key=cb.dataset.vseamSide;
+      if(cb.checked) delete liveSeamNoSide[key]; else liveSeamNoSide[key]=true;
+      scheduleGenRecompute();
+    };
+  });
+}
+let genRecomputeTimer=null, genRecomputeBusy=false, genRecomputeQueued=false;
+function scheduleGenRecompute(){
+  clearTimeout(genRecomputeTimer);
+  genRecomputeTimer=setTimeout(doGenRecompute, 250);
+}
+async function doGenRecompute(){
+  if(!currentPackage) return;
+  if(genRecomputeBusy){ genRecomputeQueued=true; return; }
+  genRecomputeBusy=true;
+  const statusEl=document.getElementById('genPanelStatus');
+  try{
+    statusEl.textContent='更新中…';
+    const glb=await P3D.finishFromIntermediate(currentPackage, {
+      gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
+      seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
+    }, (label)=>{ statusEl.textContent='更新中: '+label; });
+    lastModelBuf=glb;
+    loadGLB(glb, undefined, false, true); // keepView=true: 視点を維持したまま差し替え
+    statusEl.textContent='';
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='更新に失敗しました: '+((e&&e.message)||e);
+  }finally{
+    genRecomputeBusy=false;
+    if(genRecomputeQueued){ genRecomputeQueued=false; doGenRecompute(); }
+  }
+}
+
+/* ---------- フェーズ3: ビューアからの最終出力(GLB/JSON) ---------- */
+// 「GLB書き出し」: 現在のライブ調整状態(liveGP/liveSeamSmoothIters/
+// liveColorGradWidth)から改めてfinishFromIntermediate()でGLBを焼き直して
+// ダウンロードする(直近の自動更新がデバウンス待ち/実行中でも、押した時点の
+// 値で確実に最新のGLBを書き出すため、lastModelBufに頼らず明示的に再計算する)。
+document.getElementById('exportGlbBtn').onclick=async()=>{
+  if(!currentPackage){ document.getElementById('genPanelStatus').textContent='中間パッケージがありません(通常モードで読み込んだGLBは書き出し対象外です。「モデル」タブの「モデルを保存」をお使いください)。'; return; }
+  const statusEl=document.getElementById('genPanelStatus');
+  try{
+    statusEl.textContent='GLBを書き出し中…';
+    const glb=await P3D.finishFromIntermediate(currentPackage, {
+      gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
+      seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
+    }, (label)=>{ statusEl.textContent='書き出し中: '+label; });
+    lastModelBuf=glb;
+    const blob=new Blob([glb],{type:'model/gltf-binary'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    statusEl.textContent='GLBを書き出しました。';
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='GLB書き出しに失敗しました: '+((e&&e.message)||e);
+  }
+};
+
+// 「JSON書き出し/コピー」: currentPackage.landmarks_json(landmark_tool.htmlの
+// buildJson()の戻り値そのもの)をベースに、ビューアでライブ調整した
+// gen_params/seam_smooth_iters/color_grad_widthフィールドだけを上書きして
+// landmarks_ai.json形式で出力する(landmark_tool.htmlのexportJson/copyJsonと
+// 同等のUI/挙動)。seam_angles/seam_no_sideはフェーズ2の対象外(生成時点の値の
+// まま)のため上書きしない。
+function buildLiveJson(){
+  const base=currentPackage.landmarks_json || {};
+  return Object.assign({}, base, {
+    gen_params: Object.assign({}, base.gen_params||{}, liveGP),
+    seam_smooth_iters: liveSeamSmoothIters,
+    color_grad_width: liveColorGradWidth,
+    seam_angles: Object.assign({}, liveSeamAngles),
+    seam_no_side: Object.assign({}, liveSeamNoSide),
+  });
+}
+document.getElementById('exportJsonBtn').onclick=()=>{
+  const statusEl=document.getElementById('genPanelStatus');
+  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
+  const str=JSON.stringify(buildLiveJson(),null,1), blob=new Blob([str],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="landmarks_ai.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  statusEl.textContent='landmarks_ai.json を書き出しました。';
+};
+document.getElementById('copyJsonBtn').onclick=async()=>{
+  const statusEl=document.getElementById('genPanelStatus');
+  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
+  const str=JSON.stringify(buildLiveJson(),null,1);
+  try{ await navigator.clipboard.writeText(str); statusEl.textContent='JSONをコピーしました。'; }
+  catch(_){
+    const t=document.createElement("textarea"); t.value=str; document.body.appendChild(t); t.select();
+    try{ document.execCommand("copy"); statusEl.textContent='JSONをコピーしました。'; }
+    catch(__){ statusEl.textContent='コピー不可。書き出しボタンをお試しください。'; }
+    t.remove();
+  }
+};
 
 // interaction (pointer)
 // pointer tracking (supports 1-finger rotate + 2-finger pinch zoom)
