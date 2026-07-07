@@ -257,8 +257,6 @@ build(env){
   const CREDIT_TORII_HERO={name:'Japanese Torii',author:'Jacques Fourie',license:'CC-BY',url:'https://poly.pizza/m/cXyQGUwmlA5'};
   const CREDIT_LANTERN={name:'Toro',author:'Matt Newell',license:'CC-BY',url:'https://poly.pizza/m/0SguM8o_PMc'};
   const CREDIT_LANTERN_ALT={name:'Japanese Stone Lamp',author:'Flopsi',license:'CC-BY 3.0',url:'https://poly.pizza/m/5gZfOZIW92k'};
-  const CREDIT_FOX={name:'Kurama(キツネの神使像)',author:'Imran Bepari (theCH33F)',license:'CC-BY',url:'https://poly.pizza/m/5KQZFKrA-EM'};
-  const CREDIT_PEDESTAL={name:'Pebble Square',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/2YtLzwgsWp'};
   const CREDIT_SHRINE1={name:'Shrine',author:'Kay Lousberg',license:'CC0',url:'https://poly.pizza/m/Qq8M5LSXQ2'};
   const CREDIT_SHRINE2={name:'Shrine(石柱)',author:'Kay Lousberg',license:'CC0',url:'https://poly.pizza/m/tFxdxO5clk'};
   const CREDIT_PINE={name:'Pine Tree',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/gX8WmgkeEm'};
@@ -330,13 +328,8 @@ build(env){
     }).catch(()=>{});
   }
   pushCredit(CREDIT_LANTERN); pushCredit(CREDIT_LANTERN_ALT);
-  // 参道の坂(z=-2〜14の16m)に7組を1.8m間隔で密に配置(圧縮後も物量は維持)
-  const SANDOU_LANTERN_MODES=['lit','dark','cold','lit','dark','lit','dark'];
-  for(let i=0;i<7;i++){
-    const z=2+i*1.8;
-    placeLantern(-4.6,z,SANDOU_LANTERN_MODES[i],i%3===0);
-    placeLantern(4.6,z,SANDOU_LANTERN_MODES[(i+3)%SANDOU_LANTERN_MODES.length],i%2===0);
-  }
+  // user指摘: 参道(坂)に灯籠が残っているとのことで撤去。参道は鳥居と杉並木・生け垣のみとし、
+  // 灯籠は境内広場より奥(実在の神社でも灯籠は本殿に近い境内側に多い)にまとめる。
   // 境内広場: 周囲を囲む配置(広場感を出す)
   const KEIDAI_RING=[[-14,20],[14,20],[-14,50],[14,50],[-15,35],[15,35],[0,22]];
   KEIDAI_RING.forEach((p,i)=>placeLantern(p[0],p[1],i%2===0?'lit':'cold',i%2===1));
@@ -401,8 +394,8 @@ build(env){
   // 蔵/井戸、篝火、提灯スタンド、駐車場の放置車・自動販売機・社号標・掲示板、正式な狛犬。
   // いずれも本レイアウトの各ゾーン内に配置スペースは確保済み(境内広場の外周・駐車場ゾーン等)。
 
-  // --- 本殿参道: 玉垣(低い柵)で囲われた区画、キツネの神使像+台座を対で配置 ---
-  const Z_FOX=Z_NI_TORII+7;
+  // --- 本殿参道: 玉垣(低い柵)で囲われた区画 ---
+  // user指摘で本殿手前のキツネの神使像+台座を撤去(全体的に狐系の像を減らす方針)。
   {
     const zFrom=Z_NI_TORII+3, zTo=Z_HONDEN_END-2;
     [-1,1].forEach(side=>{
@@ -418,20 +411,6 @@ build(env){
     });
     pushCredit(CREDIT_FENCE);
   }
-  [-1,1].forEach(side=>{
-    const x=side*2.5;
-    colliders.push({type:'circle',x,z:Z_FOX,r:0.5});
-    placeStatic('models/pedestal_free.glb',x,Z_FOX,0.35,{});
-    loadStaticGLB('models/fox_statue_free.glb').then(obj=>{
-      normalizeToHeight(obj,0.85);
-      obj.rotation.y=side>0?-Math.PI/2:Math.PI/2; // 参道側(中央)を向くよう対で配置
-      const pedestalH=0.35;
-      obj.position.x=x; obj.position.z=Z_FOX;
-      obj.position.y+=groundHeightAt(x,Z_FOX)+pedestalH;
-      group.add(obj);
-      pushCredit(CREDIT_FOX); pushCredit(CREDIT_PEDESTAL);
-    }).catch(()=>{});
-  });
 
   // --- 本殿(最高地点。前後反転バグを是正: モデルの正面はローカル+Zを向いているため
   //     参道側(-Z方向)を向かせるにはY軸180度回転が必要) ---

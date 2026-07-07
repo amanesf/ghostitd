@@ -489,7 +489,9 @@ function loadCharacter(buf,onLoaded){
     document.getElementById('selfieBox').classList.toggle('visible',pipEnabled);
     document.getElementById('fpsBox').classList.toggle('visible',pipEnabled);
     document.getElementById('err').textContent='';
-    charPos.set(0,0,0); charYaw=0;
+    charPos.set(currentMap.spawnPoint.x,0,currentMap.spawnPoint.z);
+    charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z);
+    charYaw=currentMap.spawnPoint.yaw;
     startPipRecTimer();
     invalidate();
     if(onLoaded)onLoaded();
