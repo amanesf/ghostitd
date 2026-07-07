@@ -40,7 +40,10 @@
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
 
   /* single bottom control bar (slides up from below; hidden by default) */
-  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;
+  /* フェーズ2: パラメータパネルが増えても画面上半分の3Dビューは必ず見える
+     ように、バー全体の高さを50vh以内に制限しスクロール可能にする
+     (character_3d.htmlのUI制約、GENERATOR_LIVE_PREVIEW_PLAN.md参照)。 */
+  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;max-height:50vh;overflow-y:auto;
     display:flex;flex-direction:column;gap:8px;padding:10px 10px calc(10px + env(safe-area-inset-bottom));
     background:linear-gradient(to top,rgba(13,15,18,.96),rgba(13,15,18,.74) 70%,transparent);
     backdrop-filter:blur(6px);transform:translateY(100%);transition:transform .28s ease;pointer-events:none}
@@ -75,6 +78,23 @@
     background:rgba(255,255,255,.05);color:var(--txt);font-size:15px;cursor:pointer;
     display:flex;align-items:center;justify-content:center;user-select:none}
   .dpad button:active{background:rgba(91,230,255,.18)}
+
+  /* フェーズ2: ライブパラメータパネル(landmark_tool.htmlのaccgroupパターンを踏襲) */
+  .accgroup{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;overflow:hidden;background:rgba(255,255,255,.03)}
+  .accgroup>summary{list-style:none;cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;
+    font-size:12.5px;color:var(--txt)}
+  .accgroup>summary::-webkit-details-marker{display:none}
+  .accgroup>summary::before{content:"▸";color:var(--mut);font-size:10px;transition:transform .12s}
+  .accgroup[open]>summary::before{transform:rotate(90deg)}
+  .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:10.5px}
+  .accgroup>.accbody{padding:2px 10px 10px}
+  .pitem{margin-bottom:8px}
+  .pitem .plabel{color:var(--txt);font-size:11.5px;margin-bottom:4px;display:flex;justify-content:space-between}
+  .pitem .prow{display:flex;align-items:center;gap:6px}
+  .pitem input[type=number]{width:66px;height:28px;border-radius:6px;border:1px solid var(--line);
+    background:#161a1f;color:var(--txt);font-size:11.5px;padding:0 6px}
+  .pitem .punit{color:var(--mut);font-size:10px;flex:0 0 auto}
+  #genPanelStatus{font-size:11px;color:var(--mint);min-height:14px}
 </style></head>
 <body>
 <canvas id="c"></canvas>
@@ -111,6 +131,7 @@
     <button class="vtabbtn" data-vtab="shader">シェーダ</button>
     <button class="vtabbtn" data-vtab="motion">モーション</button>
     <button class="vtabbtn" data-vtab="model">モデル</button>
+    <button class="vtabbtn" data-vtab="gen" id="genTabBtn" style="display:none">生成調整</button>
   </div>
 
   <div class="vtabpanel on" data-vtabpanel="view">
@@ -163,6 +184,15 @@
       <button class="btn" id="load2">別のモデルを開く</button>
       <button class="btn" id="download">モデルを保存</button>
     </div>
+  </div>
+
+  <!-- フェーズ2: 中間パッケージ(生成ボタンから渡された彫刻直後メッシュ)がある
+       時だけ表示するライブパラメータパネル。彫刻(marching cubes)をやり直さず
+       反映できる12個のパラメータをTier1〜3の折りたたみグループで並べる
+       (landmark_tool.htmlのPARAM_META/accgroupパターンを移植)。 -->
+  <div class="vtabpanel" data-vtabpanel="gen" id="genPanel">
+    <div id="genPanelStatus"></div>
+    <div id="genParamsPanel"></div>
   </div>
 </div>
 
@@ -387,7 +417,7 @@ function addMotionClips(newClips,autoplay){
   if(autoplay)setClip(firstNew,true);
 }
 let lastModelBuf=null;   // ダウンロードボタン用: 直近に読み込んだ「モデル本体」のGLBバイト列
-function loadGLB(buf,onLoaded,autoplayMotion){
+function loadGLB(buf,onLoaded,autoplayMotion,keepView){
   new THREE.GLTFLoader().parse(buf,'',function(gltf){
     let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
     if(!hasMesh){ addMotionClips(gltf.animations||[],autoplayMotion); if(onLoaded)onLoaded(); return; }
@@ -429,8 +459,14 @@ function loadGLB(buf,onLoaded,autoplayMotion){
       clips.forEach((cl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=cl.name||('motion '+(i+1));sel.appendChild(o);});
     }
     document.getElementById('err').textContent='';
-    // center AFTER matrices/skeleton are initialized (next frames), device-independent
-    requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
+    // ★フェーズ2: ライブパラメータ変更での再読み込み(keepView=true)時は、
+    // カメラ位置/回転/ズームを毎回リセットすると微調整のたびに視点が飛んで
+    // しまうため、frameModel()(初期フィット)を呼ばずに現在の視点をそのまま
+    // 維持する。
+    if(!keepView){
+      // center AFTER matrices/skeleton are initialized (next frames), device-independent
+      requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
+    }
     invalidate();
     if(onLoaded)onLoaded();
   }, e=>{ document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e); });
@@ -508,6 +544,8 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 // このページ側で行ってから読み込む(フェーズ2ではこのgen_paramsをライブ編集
 // できるUIパネルに置き換える)。
 let currentPackage=null; // フェーズ2のライブパラメータ編集用に保持しておく
+let liveGP=null;         // currentPackage.gen_paramsのコピー。パネル操作で更新する
+let liveSeamSmoothIters=null, liveColorGradWidth=null;
 document.getElementById('err').textContent='';
 (async function(){
   try{
@@ -515,18 +553,134 @@ document.getElementById('err').textContent='';
     if(pkg && pkg.raw_body){
       await P3D.clearGeneratedModel();
       currentPackage = pkg;
+      liveGP = Object.assign({}, pkg.gen_params);
+      liveSeamSmoothIters = pkg.seam_smooth_iters;
+      liveColorGradWidth = pkg.color_grad_width;
       document.getElementById('err').textContent='モデルを構築中…';
       const glb = await P3D.finishFromIntermediate(pkg, {
-        gp: pkg.gen_params, seamAngles: pkg.seam_angles, seamNoSide: pkg.seam_no_side,
-        seamSmoothIters: pkg.seam_smooth_iters, colorGradWidth: pkg.color_grad_width,
+        gp: liveGP, seamAngles: pkg.seam_angles, seamNoSide: pkg.seam_no_side,
+        seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
       }, (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
       document.getElementById('err').textContent='';
+      lastModelBuf=glb;
       loadGLB(glb,loadMotionClips);
+      document.getElementById('genTabBtn').style.display='';
+      renderGenParamsPanel();
       return;
     }
   }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル構築に失敗しました: '+((e&&e.message)||e); }
   document.getElementById('modeChoice').classList.remove('hide');
 })();
+
+/* ---------- フェーズ2: ライブパラメータ編集パネル ---------- */
+// 彫刻(marching cubes)をやり直さずに反映できる12パラメータをTier1〜3で分類
+// (GENERATOR_LIVE_PREVIEW_PLAN.md「移動可能パラメータの分類」参照)。
+// Tier1: 完全即時。Tier2: raw_body/raw_accessoriesの間引き前メッシュがあれば
+// 反映可能。Tier3: 上記に加えてbled_canvases(atlas_bake再実行)が必要。
+// いずれもcharacter_3d.htmlは常にraw_*とbled_canvasesを保持しているため、
+// 実装上は全てP3D.finishFromIntermediate()を丸ごと呼び直すだけで反映できる
+// (finishFromIntermediate自体が毎回smooth→decimate→atlas_bakeの順で計算する)。
+const GEN_PARAM_TIERS=[
+  {tier:"Tier1(即時反映)", items:[
+    {key:"body_smooth_iters", label:"全身の表面平滑化回数", min:0,max:60,step:1,unit:"回"},
+    {key:"acc_smooth_iters", label:"アクセサリーの平滑化回数", min:0,max:60,step:1,unit:"回"},
+    {key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", min:0,max:0.8,step:0.05,unit:""},
+    {key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", min:50,max:1000,step:10,unit:"KB"},
+  ]},
+  {tier:"Tier2(生メッシュキャッシュ利用)", items:[
+    {key:"body_decimate", label:"全身の頂点数を間引く", type:"checkbox"},
+    {key:"body_target_verts", label:"全身の間引き後目標頂点数", min:1000,max:300000,step:1000,unit:"頂点"},
+    {key:"acc_decimate", label:"アクセサリーの頂点数を間引く", type:"checkbox"},
+    {key:"acc_target_verts", label:"アクセサリーの間引き後目標頂点数", min:500,max:300000,step:500,unit:"頂点"},
+  ]},
+  {tier:"Tier3(生メッシュ+画像キャッシュ利用)", items:[
+    {key:"__seamSmoothIters", label:"継ぎ目の平滑化回数", min:0,max:30,step:1,unit:"回"},
+    {key:"__colorGradWidth", label:"色のディザグラデーション幅", min:0,max:40,step:1,unit:"px"},
+  ]},
+];
+function genParamGet(key){
+  if(key==="__seamSmoothIters") return liveSeamSmoothIters;
+  if(key==="__colorGradWidth") return liveColorGradWidth;
+  return liveGP[key];
+}
+function genParamSet(key,val){
+  if(key==="__seamSmoothIters"){ liveSeamSmoothIters=val; return; }
+  if(key==="__colorGradWidth"){ liveColorGradWidth=val; return; }
+  liveGP[key]=val;
+}
+let genPanelOpen={};
+function renderGenParamsPanel(){
+  const el=document.getElementById('genParamsPanel'); if(!el)return;
+  el.innerHTML=GEN_PARAM_TIERS.map(grp=>{
+    const isOpen=!!genPanelOpen[grp.tier];
+    const items=grp.items.map(it=>{
+      const cur=genParamGet(it.key);
+      let body;
+      if(it.type==="checkbox"){
+        body='<div class="prow" style="justify-content:space-between">'+
+          '<span>'+it.label+'</span><input type="checkbox" data-gkey="'+it.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px"></div>';
+        return '<div class="pitem">'+body+'</div>';
+      }else{
+        body='<div class="prow">'+
+          '<input type="range" data-gkey-range="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
+          '<input type="number" data-gkey="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
+          (it.unit?'<span class="punit">'+it.unit+'</span>':'')+'</div>';
+      }
+      return '<div class="pitem"><div class="plabel">'+it.label+'</div>'+body+'</div>';
+    }).join("");
+    return '<details class="accgroup" data-gtier="'+grp.tier+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>'+grp.tier+'</span><span class="accCount">'+grp.items.length+'項目</span></summary>'+
+      '<div class="accbody">'+items+'</div></details>';
+  }).join("");
+  [].forEach.call(el.querySelectorAll("details.accgroup"),d=>{
+    d.addEventListener("toggle",()=>{ genPanelOpen[d.dataset.gtier]=d.open; });
+  });
+  [].forEach.call(el.querySelectorAll("[data-gkey]"),inp=>{
+    const key=inp.dataset.gkey;
+    inp.onchange=()=>{
+      const v = inp.type==="checkbox" ? inp.checked : (parseFloat(inp.value)||0);
+      genParamSet(key,v);
+      const rg=el.querySelector('[data-gkey-range="'+key+'"]'); if(rg)rg.value=v;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-gkey-range]"),rg=>{
+    const key=rg.dataset.gkeyRange;
+    rg.oninput=()=>{
+      const v=parseFloat(rg.value)||0;
+      genParamSet(key,v);
+      const numEl=el.querySelector('[data-gkey="'+key+'"]'); if(numEl)numEl.value=v;
+      scheduleGenRecompute();
+    };
+  });
+}
+let genRecomputeTimer=null, genRecomputeBusy=false, genRecomputeQueued=false;
+function scheduleGenRecompute(){
+  clearTimeout(genRecomputeTimer);
+  genRecomputeTimer=setTimeout(doGenRecompute, 250);
+}
+async function doGenRecompute(){
+  if(!currentPackage) return;
+  if(genRecomputeBusy){ genRecomputeQueued=true; return; }
+  genRecomputeBusy=true;
+  const statusEl=document.getElementById('genPanelStatus');
+  try{
+    statusEl.textContent='更新中…';
+    const glb=await P3D.finishFromIntermediate(currentPackage, {
+      gp: liveGP, seamAngles: currentPackage.seam_angles, seamNoSide: currentPackage.seam_no_side,
+      seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
+    }, (label)=>{ statusEl.textContent='更新中: '+label; });
+    lastModelBuf=glb;
+    loadGLB(glb, undefined, false, true); // keepView=true: 視点を維持したまま差し替え
+    statusEl.textContent='';
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='更新に失敗しました: '+((e&&e.message)||e);
+  }finally{
+    genRecomputeBusy=false;
+    if(genRecomputeQueued){ genRecomputeQueued=false; doGenRecompute(); }
+  }
+}
 
 // interaction (pointer)
 // pointer tracking (supports 1-finger rotate + 2-finger pinch zoom)

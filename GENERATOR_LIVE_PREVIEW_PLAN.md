@@ -67,7 +67,7 @@
 |---|---|---|---|---|---|
 | 0 | ランドマークツールの2Dプレビュー＋輪郭線除去＋ボーン表示/範囲トグル | `white_thr`/`alpha_dilate`/`back_offset_x,y`/`side_offset_x,y`/`band_h`/`band_overlap`/`track_gap`/`track_win`のパラメータタブ選択中オーバーレイ表示。パラメータグループ展開時に対象view（front/back/side）へ自動切替。シルエット外周の黒い輪郭線除去（前景マスクをNpx収縮→帯の暗ピクセルを内側色で塗りのばし、`bleedEdges`のBFSを方向反転して流用）を線幅・暗さしきい値パラメータ化し同じプレビュー機構で確認可能にする。加えて「マーク」「パーツ＋」タブに「ボーン表示」（既存`drawBoneOverlay()`を他タブでも呼べるように）と「ボーン範囲」（`computeBonePivots()`の座標系でボーン線分への2D距離を粗いグリッドで計算し、最近傍ボーンごとに色分けしたVoronoi風オーバーレイ）の2トグルを追加し、ランドマーク/アクセサリー配置中にどのボーンの担当領域か一目で分かるようにする | `landmark_tool.html`, `js/common.js` | なし（独立、先行着手可） | 完了 |
 | 1 | 中間データ契約の設計・実装 | `js/idb.js`の契約を「完成GLB」から「中間パッケージ」（元JSON全体＋生の彫刻メッシュV/F(body/accessory別)＋prep/bleed済みfront/back/side canvas＋skeleton/pivots）に変更。`js/pipeline.js`を重い彫刻（marching cubes）まで実行して中間データを返せるよう分割。`landmark_tool.html`の「生成」ボタンをこの保存形式に変更 | `js/idb.js`, `js/pipeline.js`, `landmark_tool.html` | なし（基盤、フェーズ2の前提） | 完了 |
-| 2 | ビューアのライブパラメータUI | `character_3d.html`に`js/atlas.js`, `js/model_export.js`, `js/skeleton.js`, `js/carving.js`を読み込み追加。Tier1〜3の12パラメータのUIパネルを実装（`landmark_tool.html`のパラメータパネルUIを流用/移植）。依存順序（smooth→decimate→atlas bake）を守って連動再計算 | `character_3d.html` | フェーズ1 | 未着手 |
+| 2 | ビューアのライブパラメータUI | `character_3d.html`に`js/atlas.js`, `js/model_export.js`, `js/skeleton.js`, `js/carving.js`を読み込み追加。Tier1〜3の12パラメータのUIパネルを実装（`landmark_tool.html`のパラメータパネルUIを流用/移植）。依存順序（smooth→decimate→atlas bake）を守って連動再計算 | `character_3d.html` | フェーズ1 | 完了 |
 | 3 | ビューアからの最終出力 | 「GLB書き出し」ボタン（現在のプレビュー状態を`model_export.js`でGLB化）。「JSON書き出し/コピー」ボタン（中間パッケージのJSONオブジェクトの該当フィールドをライブ調整値で上書きして`landmarks_ai.json`として出力、`landmark_tool.html`の`exportJson`/`copyJson`と同等のUI） | `character_3d.html` | フェーズ2 | 未着手 |
 
 ## ビューアUIの制約（フェーズ2・3共通）
@@ -202,3 +202,76 @@ GLBであることを確認。実行中に発生した警告(`SimplifyModifier`�
 `Cannot read properties of undefined (reading 'V')`として実際に検出できた)。
 今後この2つの関数間でデータをやり取りする際はスネークケース(保存契約の
 フィールド名)に統一する。
+
+## フェーズ2 実施メモ
+
+`character_3d.html`の下部バー`.bar`に新タブ「生成調整」(`#genTabBtn`、中間
+パッケージがある時だけ表示)を追加した。
+
+- `.bar`に`max-height:50vh;overflow-y:auto`を追加(UI制約を満たす)。
+  `landmark_tool.html`の`accgroup`パターンを移植したCSS(`.accgroup`/
+  `.pitem`等)を追加。
+- `GEN_PARAM_TIERS`(Tier1〜3のパラメータ定義)と`renderGenParamsPanel()`で
+  `<details class="accgroup">`のグループUIを描画。`landmark_tool.html`の
+  `PARAM_META`/`renderParamsPanel`と同じ「スライダー+数値入力+単位」の
+  行パターンを採用。
+- パラメータ変更(`oninput`/`onchange`)は`scheduleGenRecompute()`で250ms
+  デバウンスした上で`doGenRecompute()`を呼び、`P3D.finishFromIntermediate()`
+  を`currentPackage`(フェーズ1でキャッシュ済みの生メッシュ+bled画像+骨格)に
+  対して呼び直してGLBを再構築し、`loadGLB(glb,undefined,false,true)`で
+  差し替える。処理中に追加の変更が来た場合は`genRecomputeQueued`フラグで
+  1回だけキューイングし、多重実行を避ける。
+- `loadGLB()`に`keepView`引数を追加。フェーズ2のライブ更新時は`true`を渡し、
+  初回読み込み時の`frameModel()`(カメラの自動フィット)をスキップすることで、
+  パラメータ調整のたびに視点が初期化されないようにした。
+
+依存順序について: `finishFromIntermediate()`自体がsmooth→decimate→
+skin→atlas_bake→model_glbの順で毎回フルに計算し直す設計なので、
+「Tier1のパラメータだけ変えた時はatlas_bakeを省略する」といった段階的な
+差分最適化は本フェーズでは実装していない(常に全段を再計算する)。
+生メッシュ/bled画像のキャッシュ自体(フェーズ1の中核)により彫刻
+[marching cubes]の再実行は避けられているため実用上のレスポンスは確保できて
+いるが、更に細かい差分キャッシュ(例: Tier1のみ変更時はatlas再焼き込みを
+スキップする等)は今後の課題として末尾に追記する。
+
+スコープ縮小の判断: プランのTier3には`seamAngles`/`seamNoSide`(ボーン別の
+継ぎ目角度・側面画像使用有無の上書き辞書)も含まれるが、これらは
+`landmark_tool.html`の「境目角度」タブと同じボーン別リストUIが必要で
+本フェーズの分量を大きく超えるため、今回は`seamSmoothIters`(継ぎ目の平滑化
+回数)と`colorGradWidth`(色のディザグラデーション幅)の2つのみをTier3として
+ライブ編集可能にし、`seamAngles`/`seamNoSide`は生成時点の値をそのまま
+`finishFromIntermediate`に渡す(据え置き)。ビューア側でこれらを編集したい
+場合は現状ジェネレータに戻って再生成する必要がある。この制約は末尾にも
+追記する。
+
+Playwrightでの確認(chromium): サンプル画像から「生成」→ビューア到達後、
+「操作パネル」を開き「生成調整」タブを選択→Tier1グループを開き
+`body_smooth_iters`を20に、`kb_per_face`を50に変更→コンソールエラー0件で
+モデルが再構築されること、ステータス表示が「更新中: ステージ名」→空に
+遷移することを確認。Tier2グループで`body_decimate`/`acc_decimate`
+チェックボックスと`body_target_verts`(500)/`acc_target_verts`を変更しても
+同様に正常動作。Tier3グループで`__seamSmoothIters`を25に変更しても正常動作。
+`document.getElementById('bar').getBoundingClientRect().height`を測定し、
+3グループ全て開いた状態でも346px(ウィンドウ高さ900pxの50vh=450px以内)で
+あることを確認、かつ`#c`(3Dビュー)のtopが常に0であること(3Dビューが画面上部
+から隠れないこと)を確認。チェックボックス項目でラベルが二重表示される
+軽微な表示バグを発見し、`renderGenParamsPanel()`のcheckbox分岐でラベルを
+`.plabel`と`.prow`の両方に出していた箇所を修正した。
+
+## 追加課題(運用ルール4に基づく追記)
+
+5. フェーズ2で`seamAngles`/`seamNoSide`(ボーン別の継ぎ目角度/側面画像不使用
+   フラグの上書き辞書)はビューアのライブ編集対象から外し、生成時点の値を
+   据え置きにした。これらを編集したい場合は現状ジェネレータ
+   (`landmark_tool.html`)の「境目角度」タブに戻って再生成する必要がある。
+   将来的にビューア側でも編集したい場合は、ボーン別リストUIの追加実装が
+   必要(工数が本フェーズの他項目より大きいため意図的に見送った)。
+6. `P3D.finishFromIntermediate()`は現状、どのパラメータが変わったかに
+   関わらず常にsmooth→decimate→skin→atlas_bake→model_glbの全段を再計算する。
+   Tier1のパラメータ(平滑化回数等)だけを変えた場合でも間引き
+   (decimateMesh)やatlas焼き込みをやり直しており、彫刻(marching cubes)の
+   再実行は避けられているものの、更に細かい「変更のあった段以降だけ
+   再計算する」差分キャッシュは未実装。パラメータ数・メッシュ規模次第では
+   1回の調整で数百ms〜数秒かかることがある(Playwright確認時、間引き目標
+   頂点数の変更でSimplifyModifierが失敗し頂点クラスタリングにフォール
+   バックするケースがあり、その場合は特に時間がかかる)。
