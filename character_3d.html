@@ -193,6 +193,14 @@
   <div class="vtabpanel" data-vtabpanel="gen" id="genPanel">
     <div id="genPanelStatus"></div>
     <div id="genParamsPanel"></div>
+    <!-- フェーズ3: 現在のライブ調整状態からの最終出力 -->
+    <div class="row">
+      <button class="btn mint" id="exportGlbBtn">GLB書き出し</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="exportJsonBtn">JSON書き出し</button>
+      <button class="btn" id="copyJsonBtn">JSONコピー</button>
+    </div>
   </div>
 </div>
 
@@ -681,6 +689,68 @@ async function doGenRecompute(){
     if(genRecomputeQueued){ genRecomputeQueued=false; doGenRecompute(); }
   }
 }
+
+/* ---------- フェーズ3: ビューアからの最終出力(GLB/JSON) ---------- */
+// 「GLB書き出し」: 現在のライブ調整状態(liveGP/liveSeamSmoothIters/
+// liveColorGradWidth)から改めてfinishFromIntermediate()でGLBを焼き直して
+// ダウンロードする(直近の自動更新がデバウンス待ち/実行中でも、押した時点の
+// 値で確実に最新のGLBを書き出すため、lastModelBufに頼らず明示的に再計算する)。
+document.getElementById('exportGlbBtn').onclick=async()=>{
+  if(!currentPackage){ document.getElementById('genPanelStatus').textContent='中間パッケージがありません(通常モードで読み込んだGLBは書き出し対象外です。「モデル」タブの「モデルを保存」をお使いください)。'; return; }
+  const statusEl=document.getElementById('genPanelStatus');
+  try{
+    statusEl.textContent='GLBを書き出し中…';
+    const glb=await P3D.finishFromIntermediate(currentPackage, {
+      gp: liveGP, seamAngles: currentPackage.seam_angles, seamNoSide: currentPackage.seam_no_side,
+      seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
+    }, (label)=>{ statusEl.textContent='書き出し中: '+label; });
+    lastModelBuf=glb;
+    const blob=new Blob([glb],{type:'model/gltf-binary'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    statusEl.textContent='GLBを書き出しました。';
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='GLB書き出しに失敗しました: '+((e&&e.message)||e);
+  }
+};
+
+// 「JSON書き出し/コピー」: currentPackage.landmarks_json(landmark_tool.htmlの
+// buildJson()の戻り値そのもの)をベースに、ビューアでライブ調整した
+// gen_params/seam_smooth_iters/color_grad_widthフィールドだけを上書きして
+// landmarks_ai.json形式で出力する(landmark_tool.htmlのexportJson/copyJsonと
+// 同等のUI/挙動)。seam_angles/seam_no_sideはフェーズ2の対象外(生成時点の値の
+// まま)のため上書きしない。
+function buildLiveJson(){
+  const base=currentPackage.landmarks_json || {};
+  return Object.assign({}, base, {
+    gen_params: Object.assign({}, base.gen_params||{}, liveGP),
+    seam_smooth_iters: liveSeamSmoothIters,
+    color_grad_width: liveColorGradWidth,
+  });
+}
+document.getElementById('exportJsonBtn').onclick=()=>{
+  const statusEl=document.getElementById('genPanelStatus');
+  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
+  const str=JSON.stringify(buildLiveJson(),null,1), blob=new Blob([str],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="landmarks_ai.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  statusEl.textContent='landmarks_ai.json を書き出しました。';
+};
+document.getElementById('copyJsonBtn').onclick=async()=>{
+  const statusEl=document.getElementById('genPanelStatus');
+  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
+  const str=JSON.stringify(buildLiveJson(),null,1);
+  try{ await navigator.clipboard.writeText(str); statusEl.textContent='JSONをコピーしました。'; }
+  catch(_){
+    const t=document.createElement("textarea"); t.value=str; document.body.appendChild(t); t.select();
+    try{ document.execCommand("copy"); statusEl.textContent='JSONをコピーしました。'; }
+    catch(__){ statusEl.textContent='コピー不可。書き出しボタンをお試しください。'; }
+    t.remove();
+  }
+};
 
 // interaction (pointer)
 // pointer tracking (supports 1-finger rotate + 2-finger pinch zoom)

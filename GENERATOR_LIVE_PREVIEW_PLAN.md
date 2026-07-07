@@ -68,7 +68,7 @@
 | 0 | ランドマークツールの2Dプレビュー＋輪郭線除去＋ボーン表示/範囲トグル | `white_thr`/`alpha_dilate`/`back_offset_x,y`/`side_offset_x,y`/`band_h`/`band_overlap`/`track_gap`/`track_win`のパラメータタブ選択中オーバーレイ表示。パラメータグループ展開時に対象view（front/back/side）へ自動切替。シルエット外周の黒い輪郭線除去（前景マスクをNpx収縮→帯の暗ピクセルを内側色で塗りのばし、`bleedEdges`のBFSを方向反転して流用）を線幅・暗さしきい値パラメータ化し同じプレビュー機構で確認可能にする。加えて「マーク」「パーツ＋」タブに「ボーン表示」（既存`drawBoneOverlay()`を他タブでも呼べるように）と「ボーン範囲」（`computeBonePivots()`の座標系でボーン線分への2D距離を粗いグリッドで計算し、最近傍ボーンごとに色分けしたVoronoi風オーバーレイ）の2トグルを追加し、ランドマーク/アクセサリー配置中にどのボーンの担当領域か一目で分かるようにする | `landmark_tool.html`, `js/common.js` | なし（独立、先行着手可） | 完了 |
 | 1 | 中間データ契約の設計・実装 | `js/idb.js`の契約を「完成GLB」から「中間パッケージ」（元JSON全体＋生の彫刻メッシュV/F(body/accessory別)＋prep/bleed済みfront/back/side canvas＋skeleton/pivots）に変更。`js/pipeline.js`を重い彫刻（marching cubes）まで実行して中間データを返せるよう分割。`landmark_tool.html`の「生成」ボタンをこの保存形式に変更 | `js/idb.js`, `js/pipeline.js`, `landmark_tool.html` | なし（基盤、フェーズ2の前提） | 完了 |
 | 2 | ビューアのライブパラメータUI | `character_3d.html`に`js/atlas.js`, `js/model_export.js`, `js/skeleton.js`, `js/carving.js`を読み込み追加。Tier1〜3の12パラメータのUIパネルを実装（`landmark_tool.html`のパラメータパネルUIを流用/移植）。依存順序（smooth→decimate→atlas bake）を守って連動再計算 | `character_3d.html` | フェーズ1 | 完了 |
-| 3 | ビューアからの最終出力 | 「GLB書き出し」ボタン（現在のプレビュー状態を`model_export.js`でGLB化）。「JSON書き出し/コピー」ボタン（中間パッケージのJSONオブジェクトの該当フィールドをライブ調整値で上書きして`landmarks_ai.json`として出力、`landmark_tool.html`の`exportJson`/`copyJson`と同等のUI） | `character_3d.html` | フェーズ2 | 未着手 |
+| 3 | ビューアからの最終出力 | 「GLB書き出し」ボタン（現在のプレビュー状態を`model_export.js`でGLB化）。「JSON書き出し/コピー」ボタン（中間パッケージのJSONオブジェクトの該当フィールドをライブ調整値で上書きして`landmarks_ai.json`として出力、`landmark_tool.html`の`exportJson`/`copyJson`と同等のUI） | `character_3d.html` | フェーズ2 | 完了 |
 
 ## ビューアUIの制約（フェーズ2・3共通）
 
@@ -275,3 +275,36 @@ Playwrightでの確認(chromium): サンプル画像から「生成」→ビュ�
    1回の調整で数百ms〜数秒かかることがある(Playwright確認時、間引き目標
    頂点数の変更でSimplifyModifierが失敗し頂点クラスタリングにフォール
    バックするケースがあり、その場合は特に時間がかかる)。
+
+## フェーズ3 実施メモ
+
+`character_3d.html`の「生成調整」タブ(フェーズ2で追加)の末尾に、最終出力用の
+3ボタンを追加した。
+
+- 「GLB書き出し」(`#exportGlbBtn`): 直近の自動更新(デバウンス)の完了を
+  待たず、押した時点の`liveGP`/`liveSeamSmoothIters`/`liveColorGradWidth`で
+  改めて`P3D.finishFromIntermediate()`を呼び直してGLBを焼き、
+  `model.glb`としてダウンロードする(既存「モデル」タブの「モデルを保存」は
+  `lastModelBuf`という直近表示中のバイト列をそのまま落とすだけなのに対し、
+  こちらは明示的に最新のライブ値で焼き直すため、デバウンス待ち中に押しても
+  必ず最新の調整値が反映される)。
+- 「JSON書き出し」/「JSONコピー」(`#exportJsonBtn`/`#copyJsonBtn`):
+  `currentPackage.landmarks_json`(フェーズ1でパッケージに含めた
+  `buildJson()`の戻り値そのもの)をベースに、`buildLiveJson()`で
+  `gen_params`をliveGPで上書き、`seam_smooth_iters`/`color_grad_width`も
+  ライブ値で上書きして`landmarks_ai.json`と同じ形のJSONを出力する。
+  `landmark_tool.html`の`exportJson`/`copyJson`と同じダウンロード/
+  クリップボードコピーのロジックを踏襲した。`seam_angles`/`seam_no_side`は
+  フェーズ2のスコープ外(ライブ編集非対応)のため上書きせず、パッケージに
+  保存されていた生成時点の値がそのまま出力される。
+
+Playwrightでの確認(chromium): Tier1の`body_smooth_iters`を10に変更した状態で
+「GLB書き出し」を押下し、ダウンロードされたファイルの先頭4バイトが`glTF`
+マジックであること(サイズ約812KB)を確認。「JSON書き出し」でダウンロードした
+JSONをパースし、`gen_params.body_smooth_iters===10`(ライブ調整値が正しく
+反映されている)、かつ`points_px`/`derived`等の元のlandmarks_ai.json構造が
+保持されていることを確認。「JSONコピー」でクリップボードに書き込まれた
+内容をJSONパースし、同じく`body_smooth_iters===10`であることを確認。
+一連の操作でコンソールエラー0件。
+
+以上でフェーズ0〜3すべて完了。
