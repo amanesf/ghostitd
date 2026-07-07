@@ -330,4 +330,84 @@ function bleedEdges(rgba, w, h, alpha, alphaDilate){
 }
 P3D.bleedEdges = bleedEdges;
 
+// ---- 前景マスクの収縮(erosion, 4連結、N回) ----
+// mask: Uint8Array(w*h) 1=前景。境界からiterations px分だけ内側に後退させた
+// マスクを返す(輪郭線除去プレビュー: 前景マスクをNpx収縮して「外周の帯」を
+// 求めるために使う)。
+function erodeMaskPx(mask, w, h, iterations){
+  iterations = iterations || 0;
+  var cur = mask;
+  for(var it=0; it<iterations; it++){
+    var next=new Uint8Array(w*h);
+    for(var y=0;y<h;y++){
+      for(var x=0;x<w;x++){
+        var idx=y*w+x;
+        if(!cur[idx]){ next[idx]=0; continue; }
+        var keep = (x>0?cur[idx-1]:0) && (x<w-1?cur[idx+1]:0) &&
+                   (y>0?cur[idx-w]:0) && (y<h-1?cur[idx+w]:0);
+        next[idx] = keep ? 1 : 0;
+      }
+    }
+    cur = next;
+  }
+  return cur;
+}
+P3D.erodeMaskPx = erodeMaskPx;
+
+// ---- シルエット外周の黒い輪郭線除去(プレビュー用) ----
+// 前景マスクをbandPx収縮し、前景かつ収縮後マスクの外側にある「帯」の中で
+// 暗い(輝度<darkThr)ピクセルだけを、bleedEdgesのBFSを反転させた方向
+// (帯の暗ピクセル→最も近い健全な前景色)で塗りのばして置き換える。
+// シード(健全色の供給元)は「前景かつ帯の暗ピクセルではない」画素全体
+// (=収縮後の内部領域＋帯の中の明るい画素)なので、輪郭線がシルエットの
+// 外周だけにあるという前提の下では内部の黒髪・黒服などは一切変更されない
+// (収縮によって内部領域自体がそもそも帯の外＝対象外になるため)。
+// rgba: Uint8ClampedArray(w*h*4), alpha: Uint8Array(w*h) 1=前景
+// 戻り値: 新しいUint8ClampedArray(w*h*4)(alphaはそのまま維持)
+function removeSilhouetteOutline(rgba, w, h, alpha, bandPx, darkThr){
+  bandPx = (bandPx===undefined) ? 6 : bandPx;
+  darkThr = (darkThr===undefined) ? 90 : darkThr;
+  var n = w*h;
+  if(bandPx<=0) return new Uint8ClampedArray(rgba);
+  var eroded = erodeMaskPx(alpha, w, h, bandPx);
+  var darkBand = new Uint8Array(n);
+  for(var i=0;i<n;i++){
+    if(!alpha[i] || eroded[i]) continue; // 前景外 or 内部領域は対象外
+    var o=i*4;
+    var lum = 0.299*rgba[o] + 0.587*rgba[o+1] + 0.114*rgba[o+2];
+    if(lum < darkThr) darkBand[i]=1;
+  }
+  // 多元BFS: シード=前景かつdarkBandでない画素。前景内だけを伝播して
+  // darkBand画素へ最も近い健全画素のindexを求める(bleedEdgesと同じBFSを
+  // 「透明→不透明」ではなく「帯の暗部→帯外の健全前景」方向に使う)。
+  var nearestIdx=new Int32Array(n).fill(-1);
+  var visited=new Uint8Array(n);
+  var queue=[]; var qh=0;
+  for(var i2=0;i2<n;i2++){
+    if(alpha[i2] && !darkBand[i2]){ nearestIdx[i2]=i2; visited[i2]=1; queue.push(i2); }
+  }
+  while(qh<queue.length){
+    var idx=queue[qh++];
+    var src=nearestIdx[idx];
+    var x=idx%w, y=(idx/w)|0;
+    var nbrs=[];
+    if(x>0)nbrs.push(idx-1); if(x<w-1)nbrs.push(idx+1);
+    if(y>0)nbrs.push(idx-w); if(y<h-1)nbrs.push(idx+w);
+    for(var k=0;k<nbrs.length;k++){
+      var ni=nbrs[k];
+      if(!visited[ni] && alpha[ni]){ visited[ni]=1; nearestIdx[ni]=src; queue.push(ni); }
+    }
+  }
+  var out = new Uint8ClampedArray(rgba);
+  for(var i3=0;i3<n;i3++){
+    if(!darkBand[i3]) continue;
+    var src2 = nearestIdx[i3];
+    if(src2<0) continue;
+    var so=src2*4, oo=i3*4;
+    out[oo]=rgba[so]; out[oo+1]=rgba[so+1]; out[oo+2]=rgba[so+2];
+  }
+  return out;
+}
+P3D.removeSilhouetteOutline = removeSilhouetteOutline;
+
 })(window);

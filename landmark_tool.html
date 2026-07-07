@@ -190,6 +190,13 @@
     </div>
 
     <div class="tabpanel on" data-tabpanel="lm">
+      <div class="acitem" style="margin-bottom:10px">
+        <span class="nm">ボーン表示/範囲プレビュー</span>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneOverlayToggleLM">ボーン表示</label>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneRegionToggleLM">ボーン範囲</label>
+      </div>
       <div class="legendGroups" id="legend"></div>
       <div class="bar" style="margin-top:14px">
         <button class="btn danger" id="reset">初期配置に戻す</button>
@@ -228,6 +235,13 @@
 
     <div class="tabpanel acpanel" data-tabpanel="ac">
       <h2>アクセサリー（ヘッドホン・猫耳・カメラ小物・スカート等）</h2>
+      <div class="acitem" style="margin-bottom:10px">
+        <span class="nm">ボーン表示/範囲プレビュー</span>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneOverlayToggleAC">ボーン表示</label>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneRegionToggleAC">ボーン範囲</label>
+      </div>
       <div id="acList" class="aclist"></div>
       <div id="acForm"></div>
       <button class="btn mint" id="acAddBtn">+ 手動で追加</button>
@@ -300,6 +314,7 @@
         landmarks_ai.json に保存され、次回パイプライン実行時に反映されます。
         触らなければ全て既定値のまま動作します（各項目に既定値を記載）。</p>
       <div id="paramsPanel"></div>
+      <div id="outlinePanel"></div>
       <div class="row" style="margin-top:8px">
         <button class="btn" id="paramsResetAll">全て既定値に戻す</button>
       </div>
@@ -532,6 +547,105 @@ let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
 // カテゴリごとのアコーディオン開閉状態(既定は全部閉じる)。再描画(個別リセット等)を
 // またいで開閉状態を保つため、レンダリング関数の外側に保持する。
 let paramGroupOpen={};
+
+/* ---------- フェーズ0: 2Dプレビュー(パラメータ展開中に効果をその場表示) ---------- */
+// PARAM_META上のグループ名 -> {view:自動切替先, keys:関連パラメータ}。
+// 「純粋な2D画像処理だけで完結する」パラメータ群のみが対象(彫刻/メッシュ
+// 系パラメータのグループはここに含めない)。
+const PREVIEW_GROUPS={
+  "背景/しきい値":{view:"front",keys:["white_thr","alpha_dilate"]},
+  "アクセサリーの背景除去":{view:"front",keys:["band_h","band_overlap"]},
+  "背面/側面ズレ補正":{view:"back",keys:["back_offset_x","back_offset_y","side_offset_x","side_offset_y"]},
+  "ノイズ・ガタつき対策":{view:"front",keys:["track_gap","track_win"]},
+};
+let previewActiveGroup=null; // 現在プレビュー中のPARAM_METAグループ名(展開中のグループ)
+// シルエット外周の輪郭線除去プレビュー用パラメータ(pipeline側には未実装の
+// プレビュー専用機能のため、genParams/landmarks_ai.jsonには含めない)。
+let outlineParams={enabled:false,band_px:6,dark_thr:90};
+const OUTLINE_DEFAULT={band_px:6,dark_thr:90};
+// プレビュー画像のキャッシュ(同一view+パラメータで毎フレーム再計算しない
+// ように、直前の入力をキーにして保持する。white_thr変更のたびに全画素の
+// 背景マスクBFS+bleedをやり直すのはやや重いため)。
+let previewCache={key:null,view:null,canvas:null,w:0,h:0};
+function previewCacheKey(view){
+  return [view, genParams.white_thr, genParams.alpha_dilate, excludeMaskVer,
+    outlineParams.enabled, outlineParams.band_px, outlineParams.dark_thr].join("|");
+}
+function buildPreviewCanvas(view){
+  const img=imgs[view]; if(!img)return null;
+  const key=previewCacheKey(view);
+  if(previewCache.key===key && previewCache.view===view) return previewCache;
+  try{
+    const ex=excludeMask[view]?P3D.excludeMaskToBool(excludeMask[view],img.w,img.h):null;
+    const thr=genParams.white_thr;
+    const loaded=P3D.loadRgbaRemoveWhite(img.el, thr, ex);
+    let bled=P3D.bleedEdges(loaded.rgba, loaded.w, loaded.h, loaded.alpha, genParams.alpha_dilate);
+    if(outlineParams.enabled){
+      const alpha2=new Uint8Array(loaded.w*loaded.h);
+      for(let i=0;i<alpha2.length;i++)alpha2[i]=bled[i*4+3]>0?1:0;
+      bled=P3D.removeSilhouetteOutline(bled, loaded.w, loaded.h, alpha2, outlineParams.band_px, outlineParams.dark_thr);
+    }
+    const c=document.createElement("canvas");c.width=loaded.w;c.height=loaded.h;
+    c.getContext("2d").putImageData(new ImageData(bled,loaded.w,loaded.h),0,0);
+    previewCache={key,view,canvas:c,w:loaded.w,h:loaded.h};
+    return previewCache;
+  }catch(e){ console.error("プレビュー生成に失敗しました",e); return null; }
+}
+// パラメータグループ展開中(またはシルエット輪郭線除去プレビューON)は
+// 「設定値」タブでプレビューを表示する。
+function previewModeActive(){
+  return curTab==="params" && (!!previewActiveGroup || outlineParams.enabled);
+}
+// プレビュー対象view("設定値"タブでの自動切替先)を決める。展開中の
+// パラメータグループの推奨viewを使い、その面の画像が無ければ現在のviewに
+// フォールバックする。
+function previewTargetView(){
+  const group=previewActiveGroup && PREVIEW_GROUPS[previewActiveGroup];
+  const wantView=group?group.view:curView;
+  return imgs[wantView]?wantView:curView;
+}
+function renderOutlinePanel(){
+  const el=$("outlinePanel"); if(!el)return;
+  const changed=outlineParams.band_px!==OUTLINE_DEFAULT.band_px||outlineParams.dark_thr!==OUTLINE_DEFAULT.dark_thr;
+  const isOpen=!!paramGroupOpen["輪郭線除去(プレビュー専用)"];
+  el.innerHTML='<details class="accgroup" data-accgroup="輪郭線除去(プレビュー専用)"'+(isOpen?" open":"")+'>'+
+    '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
+    '<span>シルエット輪郭線の除去(プレビュー専用)</span><span class="accCount">試験機能</span></summary>'+
+    '<div class="accbody">'+
+    '<p class="helpText">線画イラストの外周にできる黒い輪郭線を、前景マスクをNpx収縮した'+
+    '帯の中の暗いピクセルだけ内側の色で塗りのばして消すプレビューです。内部の黒髪・黒服等は'+
+    '対象外(帯の外なので変更されません)。実際のモデル生成には未反映のプレビュー専用機能です。</p>'+
+    '<div class="acform" style="margin-bottom:6px">'+
+    '<label style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px">'+
+    '<span style="color:var(--txt);font-size:12px">有効にする(プレビュー)</span>'+
+    '<input type="checkbox" id="outlineEnabled" '+(outlineParams.enabled?"checked":"")+' style="width:18px;height:18px">'+
+    '</label></div>'+
+    '<div class="acform" style="margin-bottom:6px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">帯の幅(収縮量)</div>'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<input type="range" id="outlineBandRange" value="'+outlineParams.band_px+'" min="1" max="30" step="1" style="flex:1">'+
+    '<input type="number" id="outlineBandNum" value="'+outlineParams.band_px+'" min="1" max="30" step="1" style="width:70px">'+
+    '<span style="color:var(--mut);font-size:10.5px">px</span></div></div>'+
+    '<div class="acform">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">暗さのしきい値(これ未満の輝度を除去対象に)</div>'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<input type="range" id="outlineThrRange" value="'+outlineParams.dark_thr+'" min="0" max="255" step="1" style="flex:1">'+
+    '<input type="number" id="outlineThrNum" value="'+outlineParams.dark_thr+'" min="0" max="255" step="1" style="width:70px">'+
+    '</div></div>'+
+    '</div></details>';
+  const enEl=$("outlineEnabled");
+  enEl.onchange=()=>{ outlineParams.enabled=enEl.checked; renderOutlinePanel(); if(IMG_TABS.includes(curTab))draw(); };
+  const bandR=$("outlineBandRange"), bandN=$("outlineBandNum");
+  const thrR=$("outlineThrRange"), thrN=$("outlineThrNum");
+  const syncBand=v=>{outlineParams.band_px=v;bandR.value=v;bandN.value=v;if(IMG_TABS.includes(curTab))draw();};
+  const syncThr=v=>{outlineParams.dark_thr=v;thrR.value=v;thrN.value=v;if(IMG_TABS.includes(curTab))draw();};
+  bandR.oninput=()=>syncBand(parseInt(bandR.value,10));
+  bandN.onchange=()=>syncBand(Math.max(1,Math.min(30,parseInt(bandN.value,10)||OUTLINE_DEFAULT.band_px)));
+  thrR.oninput=()=>syncThr(parseInt(thrR.value,10));
+  thrN.onchange=()=>syncThr(Math.max(0,Math.min(255,parseInt(thrN.value,10)||OUTLINE_DEFAULT.dark_thr)));
+  const d=el.querySelector("details.accgroup");
+  if(d)d.addEventListener("toggle",()=>{ paramGroupOpen[d.dataset.accgroup]=d.open; });
+}
 function paramGroupChanged(g){
   return PARAM_META.some(m=>m.group===g && genParams[m.key]!==DEFAULT_GEN_PARAMS[m.key]);
 }
@@ -614,7 +728,20 @@ function renderParamsPanel(){
     };
   });
   [].forEach.call(el.querySelectorAll("details.accgroup"),d=>{
-    d.addEventListener("toggle",()=>{ paramGroupOpen[d.dataset.accgroup]=d.open; });
+    d.addEventListener("toggle",()=>{
+      const g=d.dataset.accgroup;
+      paramGroupOpen[g]=d.open;
+      const pg=PREVIEW_GROUPS[g];
+      if(pg){
+        if(d.open){
+          previewActiveGroup=g;
+          if(imgs[pg.view]){curView=pg.view;view={z:1,ox:0,oy:0};syncViewBtns();}
+        }else if(previewActiveGroup===g){
+          previewActiveGroup=null;
+        }
+        if(IMG_TABS.includes(curTab))draw();
+      }
+    });
   });
 }
 // 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲を
@@ -622,6 +749,7 @@ function renderParamsPanel(){
 // マジックツール/ブラシで直接塗って除外する(2026-07-03〜、パーツごとの
 // 幅/奥行き上書きパネルの後継)。
 let excludeMask={front:null,side:null,back:null};
+let excludeMaskVer=0; // 除外マスクが変わるたびに増やし、プレビューキャッシュの無効化に使う
 let exMode="wand", exAction="add";
 let brushCursor=null; // ブラシで塗っている間、現在位置にサイズの円を表示するための画像座標
 let analysis=null, points=null, sel=null, dragPoint=null;
@@ -870,14 +998,102 @@ function drawBoneOverlay(x,sc){
   });
   x.restore();
 }
+// 「マーク」「パーツ＋」タブ共通のボーン表示/範囲トグル状態(両タブの
+// チェックボックスを同じ状態に同期させる=同じオーバーレイの見せ方を共有)。
+let boneOverlayOn=false, boneRegionOn=false;
+// ボーン範囲(Voronoi風)オーバーレイ用の粗いグリッド解像度(front限定MVP)。
+const BONE_REGION_GRID_W=40, BONE_REGION_GRID_H=60;
+const BONE_REGION_COLORS={};
+(function(){
+  P3D.BONES.forEach((b,i)=>{ BONE_REGION_COLORS[b]="hsl("+Math.round(i*360/P3D.BONES.length)+",70%,55%)"; });
+})();
+function pointSegDist2(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay, len2=dx*dx+dy*dy;
+  let t=len2>1e-9?((px-ax)*dx+(py-ay)*dy)/len2:0;
+  t=Math.max(0,Math.min(1,t));
+  const cx=ax+t*dx, cy=ay+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy);
+}
+// front限定MVP: computeBonePivots()の座標系(model単位)をpxに変換した
+// 骨線分ごとに、粗いグリッド(既定40x60)の各セル中心から最も近い骨線分を
+// 求めてその骨の色で塗る、Voronoi風の担当領域プレビュー。フル解像度で
+// 毎フレーム計算しないことで負荷を抑える(セル単位のfillRectのみ)。
+function drawBoneRegionOverlay(x,sc){
+  const bp=computeBonePivots();
+  if(!bp||!imgs.front)return;
+  const pivots=Object.assign({},bp.pivots,bp.extraPivots);
+  const BH=analysis.BH, CX=analysis.cx, YBOT=analysis.ybot;
+  const toPx=p=>[p[0]*BH+CX, YBOT-p[1]*BH];
+  const segs=[];
+  P3D.BONES.forEach(b=>{
+    const par=P3D.BHIER[b];
+    if(!par||!pivots[par]||!pivots[b])return;
+    const a=toPx(pivots[par]), c=toPx(pivots[b]);
+    segs.push({a,c,bone:b});
+  });
+  if(!segs.length)return;
+  const W=imgs.front.w, H=imgs.front.h;
+  const cellW=W/BONE_REGION_GRID_W, cellH=H/BONE_REGION_GRID_H;
+  x.save();x.globalAlpha=0.30;
+  for(let gy=0; gy<BONE_REGION_GRID_H; gy++){
+    const py=(gy+0.5)*cellH;
+    for(let gx=0; gx<BONE_REGION_GRID_W; gx++){
+      const px=(gx+0.5)*cellW;
+      let best=null, bestD=Infinity;
+      for(let i=0;i<segs.length;i++){
+        const s=segs[i];
+        const d=pointSegDist2(px,py,s.a[0],s.a[1],s.c[0],s.c[1]);
+        if(d<bestD){bestD=d;best=s;}
+      }
+      if(!best)continue;
+      const sx=gx*cellW*sc+view.ox, sy=gy*cellH*sc+view.oy;
+      x.fillStyle=BONE_REGION_COLORS[best.bone]||"#7aa2ff";
+      x.fillRect(sx,sy,cellW*sc+0.5,cellH*sc+0.5);
+    }
+  }
+  x.restore();
+}
 function draw(){
-  const CI=curImg();
+  const previewOn=previewModeActive();
+  const CI=previewOn?imgs[previewTargetView()]:curImg();
   if(!CI||!points)return;
   const{el,w,h}=CI, cw=wrap.clientWidth||360, base=cw/w;
   cvs.width=cw; cvs.height=Math.round(h*base);
   const x=cvs.getContext("2d"); x.clearRect(0,0,cvs.width,cvs.height);
   const sc=base*view.z;
-  x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  if(previewOn){
+    // フェーズ0: パラメータタブでの2Dプレビュー。展開中のグループ(または
+    // 輪郭線除去プレビュー)に応じて、背景除去+縁の色にじみ(+輪郭線除去)を
+    // 適用した加工後の画像を代わりに表示する。
+    const pv=previewTargetView();
+    let offX=0,offY=0;
+    if(pv==="back"){offX=genParams.back_offset_x||0;offY=genParams.back_offset_y||0;}
+    if(pv==="side"){offX=genParams.side_offset_x||0;offY=genParams.side_offset_y||0;}
+    const pc=buildPreviewCanvas(pv);
+    if(pc){
+      x.drawImage(pc.canvas,0,0,pc.w,pc.h, view.ox+offX*sc,view.oy+offY*sc, pc.w*sc, pc.h*sc);
+    }else{
+      x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+    }
+    if(previewActiveGroup==="アクセサリーの背景除去"){
+      // band_h/band_overlapの帯の切れ目を目安線として重ねる(実際の
+      // アクセサリー背景除去は個別パーツ単位の帯分割処理だが、ここでは
+      // 「どの高さで帯が切り替わるか」だけを可視化する簡易プレビュー)。
+      const bandH=Math.max(10,genParams.band_h||220), overlap=Math.min(genParams.band_overlap||0,bandH-1);
+      const step=Math.max(1,bandH-overlap);
+      x.save();x.setLineDash([6,4]);x.lineWidth=1.5;x.strokeStyle="rgba(122,162,255,.85)";
+      for(let by=0; by<h; by+=step){
+        const py=by*sc+view.oy;
+        x.beginPath();x.moveTo(view.ox,py);x.lineTo(view.ox+w*sc,py);x.stroke();
+      }
+      x.restore();
+    }
+    x.save();x.font="bold 11px sans-serif";x.fillStyle="#39ff9e";x.textAlign="left";
+    x.fillText("プレビュー中: "+(previewActiveGroup||"輪郭線除去")+"("+VIEWJP[pv]+")",8,16);
+    x.restore();
+  }else{
+    x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  }
   // 除外マスクの赤い塗りは「領域」タブでの作業対象なので、そのタブでのみ見せる
   // (他タブで常に赤く覆われていると、そのタブ本来の要素の邪魔になるため)。
   const ec=excludeMask[curView];
@@ -888,7 +1104,7 @@ function draw(){
     // ボーンタブでは見やすさのためランドマーク/アクセサリー領域点を隠し、
     // ボーンのみ表示する
     drawBoneOverlay(x,sc);
-  }else{
+  }else if(!previewOn){
     // マーク/パーツ＋タブそれぞれの専門の点だけをgetInteractivePoints側で絞っている。
     // 領域(除外)タブ・ボーンタブ(側面/背面)では何も重ねない。
     if(curTab==="ac")drawRegionOutlines(x,sc);
@@ -897,6 +1113,12 @@ function draw(){
       drawCross(x,px,py,on,p.color);
       drawLabel(x,p.label,px,py-13,on?"#ffe14d":p.color);
     });
+  }
+  // 「マーク」「パーツ＋」タブ用のボーン表示/範囲トグル(既存のボーン専用
+  // タブに切り替えなくても、ランドマーク/アクセサリー配置中に確認できる)。
+  if((curTab==="lm"||curTab==="ac")&&curView==="front"){
+    if(boneOverlayOn)drawBoneOverlay(x,sc);
+    if(boneRegionOn)drawBoneRegionOverlay(x,sc);
   }
   if(brushCursor&&curTab==="ex"&&exMode==="brush"){
     const bx=brushCursor[0]*sc+view.ox, by=brushCursor[1]*sc+view.oy;
@@ -915,6 +1137,7 @@ function loadImg(file,slot){
     imgs[slot]={el,w:el.naturalWidth,h:el.naturalHeight};
     $("slot"+slot[0].toUpperCase()+slot.slice(1)).classList.add("on");
     $("slot"+slot[0].toUpperCase()+slot.slice(1)).querySelector("small").textContent="✓ 読込済";
+    previewCache={key:null,view:null,canvas:null,w:0,h:0};
     syncViewBtns();
     if(slot==="front")runAnalyze();
   };el.src=r.result;};
@@ -968,6 +1191,7 @@ function paintBrush(v,px,py,radius,add){
   ec.ctx.fillStyle="rgba(255,40,40,1)";
   ec.ctx.beginPath();ec.ctx.arc(px,py,radius,0,Math.PI*2);ec.ctx.fill();
   ec.ctx.restore();
+  excludeMaskVer++;
 }
 function floodFillSelect(v,x0,y0,tolerance){
   // タップした点から色の近い(許容誤差以内)連続領域を選択する(マジック
@@ -1011,6 +1235,7 @@ function applyExcludeSelection(v,sel,add){
     else{data[o+3]=0;}
   }
   ec.ctx.putImageData(imgData,0,0);
+  excludeMaskVer++;
 }
 // 除外マスクの元に戻す(直近5操作、面をまたいで通しで管理)。ブラシは
 // ひとストローク単位(pointerdown時に1回だけ)、マジックツール/全解除は
@@ -1032,6 +1257,7 @@ function exUndoLast(){
     const ec=ensureExcludeCanvas(last.view);
     if(ec)ec.ctx.putImageData(last.imgData,0,0);
   }
+  excludeMaskVer++;
   if(last.view===curView)draw();
   setMsg(VIEWJP[last.view]+"の除外操作を1つ元に戻しました(残り"+exUndo.length+"回分)。");
 }
@@ -1166,6 +1392,7 @@ function applyLoadedJson(d){
   genParams=Object.assign({},DEFAULT_GEN_PARAMS,d.gen_params||{});
   renderParamsPanel();
   excludeMask={front:null,side:null,back:null};
+  excludeMaskVer++;
   exUndo=[];
   const masks=d.exclude_masks||{};
   resyncAnalysisToProfile(); // white_thr変更分をひとまず反映(除外マスクがあれば下でさらに反映)
@@ -1176,6 +1403,7 @@ function applyLoadedJson(d){
       const ec=ensureExcludeCanvas(v);
       if(ec){
         ec.ctx.clearRect(0,0,ec.canvas.width,ec.canvas.height);ec.ctx.drawImage(im,0,0);
+        excludeMaskVer++;
         if(v==="front")resyncAnalysisToProfile(); // front除外マスク反映後にanalysisを揃え直す
         draw();
       }
@@ -1199,7 +1427,7 @@ function loadJsonFile(file){
 let curTab="lm";
 // 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
 // タブ(画像境界/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
-const IMG_TABS=["lm","ex","ac","bones"];
+const IMG_TABS=["lm","ex","ac","bones","params"];
 function syncTabs(){
   [].forEach.call(document.querySelectorAll(".tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===curTab);});
   [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{p.classList.toggle("on",p.dataset.tabpanel===curTab);});
@@ -1761,6 +1989,7 @@ $("exClear").onclick=()=>{
   if(!excludeMask[curView])return;
   exSnapshot(curView);
   excludeMask[curView]=null; // nullに戻し、書き出し時にこの面のマスク自体を省く
+  excludeMaskVer++;
   draw();
   setMsg(VIEWJP[curView]+"の除外範囲を全解除しました。");
 };
@@ -1774,9 +2003,26 @@ $("exUndo").onclick=exUndoLast;
     b.classList.toggle("on",willShow);
   };
 });
+function wireBoneToggle(overlayId,regionId){
+  const oEl=$(overlayId), rEl=$(regionId);
+  oEl.checked=boneOverlayOn; rEl.checked=boneRegionOn;
+  oEl.onchange=()=>{
+    boneOverlayOn=oEl.checked;
+    ["boneOverlayToggleLM","boneOverlayToggleAC"].forEach(id=>{const e=$(id);if(e)e.checked=boneOverlayOn;});
+    if(IMG_TABS.includes(curTab))draw();
+  };
+  rEl.onchange=()=>{
+    boneRegionOn=rEl.checked;
+    ["boneRegionToggleLM","boneRegionToggleAC"].forEach(id=>{const e=$(id);if(e)e.checked=boneRegionOn;});
+    if(IMG_TABS.includes(curTab))draw();
+  };
+}
+wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
+wireBoneToggle("boneOverlayToggleAC","boneRegionToggleAC");
 buildLegend();
 renderSeamList();
 renderParamsPanel();
+renderOutlinePanel();
 (function(){
   // ★初期画面(サンプルモード/通常モードの選択)。
   // 「サンプルモード」は従来通り、同梱のimages/front.png等+landmarks_ai.jsonを
