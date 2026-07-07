@@ -466,6 +466,41 @@ function addMotionClips(newClips,autoplay){
   if(autoplay)setClip(firstNew,true);
 }
 let lastModelBuf=null;   // ダウンロードボタン用: 直近に読み込んだ「モデル本体」のGLBバイト列
+// モデルの各メッシュに、セル影ON/OFF切替用のflatMat/toonMatを両方作って
+// 保持させ(userData.flatMat/toonMat)、スキンメッシュにはアウトラインも付ける。
+function applyMeshMaterials(model){
+  model.traverse(o=>{ if(o.isMesh&&o.material){
+    const old=o.material;
+    // flatMat(セル影OFF時)は「素のテクスチャをそのまま表示する」役割なので
+    // toneMapped=falseにしてACESトーンマッピングの影響を受けないようにする。
+    const flatMat=new THREE.MeshBasicMaterial({map:old.map||null,transparent:!!old.transparent,
+      alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,toneMapped:false});
+    if(flatMat.map){flatMat.map.encoding=THREE.sRGBEncoding;flatMat.map.anisotropy=maxAniso;}
+    const toonMat=new THREE.MeshToonMaterial({map:old.map||null,gradientMap:toonGradient,
+      transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
+    if(toonMat.map){toonMat.map.encoding=THREE.sRGBEncoding;toonMat.map.anisotropy=maxAniso;}
+    o.userData.flatMat=flatMat;o.userData.toonMat=toonMat;
+    o.material=celOn?toonMat:flatMat;
+    if(o.isSkinnedMesh){
+      const outline=buildOutline(o,outlineThickness(parseInt(document.getElementById('outlineStrength').value)));
+      outline.visible=outlineOn;
+      model.add(outline);
+      o.userData.outline=outline;
+    }
+  }});
+}
+// model.glb自体は通常アニメを持たない(2026-07-02〜、モデル/モーション分割出力)。
+// 旧来の「1ファイルにモデル+アニメ埋め込み」glbとの後方互換のため、埋め込みが
+// あればそのまま使う。モーションは基本的にモーション専用glbを別途「＋」で追加する。
+function setupMotionDropdown(gltf){
+  clips=gltf.animations||[];
+  const sel=document.getElementById('animSel');
+  sel.innerHTML='<option value="-1">未選択</option>'; // モーションは常に未選択スタート
+  if(clips.length){
+    mixer=new THREE.AnimationMixer(model);
+    clips.forEach((cl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=cl.name||('motion '+(i+1));sel.appendChild(o);});
+  }
+}
 function loadGLB(buf,onLoaded,autoplayMotion,keepView){
   new THREE.GLTFLoader().parse(buf,'',function(gltf){
     let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
@@ -473,40 +508,13 @@ function loadGLB(buf,onLoaded,autoplayMotion,keepView){
     lastModelBuf=buf;
     clearModel();
     model=gltf.scene; root.add(model);
-    model.traverse(o=>{ if(o.isMesh&&o.material){
-      const old=o.material;
-      // flatMat(セル影OFF時)は「素のテクスチャをそのまま表示する」役割なので
-      // toneMapped=falseにしてACESトーンマッピングの影響を受けないようにする。
-      const flatMat=new THREE.MeshBasicMaterial({map:old.map||null,transparent:!!old.transparent,
-        alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,toneMapped:false});
-      if(flatMat.map){flatMat.map.encoding=THREE.sRGBEncoding;flatMat.map.anisotropy=maxAniso;}
-      const toonMat=new THREE.MeshToonMaterial({map:old.map||null,gradientMap:toonGradient,
-        transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
-      if(toonMat.map){toonMat.map.encoding=THREE.sRGBEncoding;toonMat.map.anisotropy=maxAniso;}
-      o.userData.flatMat=flatMat;o.userData.toonMat=toonMat;
-      o.material=celOn?toonMat:flatMat;
-      if(o.isSkinnedMesh){
-        const outline=buildOutline(o,outlineThickness(parseInt(document.getElementById('outlineStrength').value)));
-        outline.visible=outlineOn;
-        model.add(outline);
-        o.userData.outline=outline;
-      }
-    }});
+    applyMeshMaterials(model);
     document.getElementById('drop').classList.add('hide');
     // 操作パネルはモデル読込後も自動では出さない(バーの開閉ボタンを
     // 押すまで非表示のまま。初期表示は常に非表示にしたいため)。
     document.getElementById('barToggle').classList.add('visible');
     buildSkelViz(model);
-    // model.glb自体は通常アニメを持たない(2026-07-02〜、モデル/モーション分割出力)。
-    // 旧来の「1ファイルにモデル+アニメ埋め込み」glbとの後方互換のため、埋め込みが
-    // あればそのまま使う。モーションは基本的にモーション専用glbを別途「＋」で追加する。
-    clips=gltf.animations||[];
-    const sel=document.getElementById('animSel');
-    sel.innerHTML='<option value="-1">未選択</option>'; // モーションは常に未選択スタート
-    if(clips.length){
-      mixer=new THREE.AnimationMixer(model);
-      clips.forEach((cl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=cl.name||('motion '+(i+1));sel.appendChild(o);});
-    }
+    setupMotionDropdown(gltf);
     document.getElementById('err').textContent='';
     // ★フェーズ2: ライブパラメータ変更での再読み込み(keepView=true)時は、
     // カメラ位置/回転/ズームを毎回リセットすると微調整のたびに視点が飛んで
@@ -803,9 +811,7 @@ function wireSeamBulkHtml(el){
     scheduleGenRecompute();
   };
 }
-function renderSeamPanel(){
-  const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
-  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+function buildSeamGroupsHtml(accKeys){
   const boneGroupsHtml=BONE_GROUPS_V.map(grp=>{
     const rows=grp.bones.map(b=>{
       const v=(liveSeamAngles[b]!==undefined)?liveSeamAngles[b]:SEAM_DEFAULT_DEG;
@@ -827,8 +833,9 @@ function renderSeamPanel(){
       '<summary><span>継ぎ目: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
       '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
   }
-  el.innerHTML=renderSeamBulkHtml()+boneGroupsHtml+accHtml;
-  wireSeamBulkHtml(el);
+  return boneGroupsHtml+accHtml;
+}
+function wireSeamPanelEvents(el){
   [].forEach.call(el.querySelectorAll("details[data-vseamgroup]:not([data-vseamgroup='一括設定'])"),d=>{
     d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.vseamgroup]=d.open; });
   });
@@ -859,6 +866,13 @@ function renderSeamPanel(){
       scheduleGenRecompute();
     };
   });
+}
+function renderSeamPanel(){
+  const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
+  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  el.innerHTML=renderSeamBulkHtml()+buildSeamGroupsHtml(accKeys);
+  wireSeamBulkHtml(el);
+  wireSeamPanelEvents(el);
 }
 let genRecomputeTimer=null, genRecomputeBusy=false, genRecomputeQueued=false;
 function scheduleGenRecompute(){
