@@ -1,0 +1,67 @@
+# ジェネレータ体感改善プラン（2Dプレビュー・輪郭線除去・ビューア連携）
+
+## 背景・目的
+
+キャラクター生成ツール（`landmark_tool.html` = 通称「ジェネレータ」）は、パラメータを
+調整→「生成」ボタン→フルパイプライン実行（数秒〜10秒程度）→結果を見る、という
+試行錯誤ループになっている。生成時間自体は致命的ではないが、以下の改善余地がある。
+
+1. **2D画像処理系パラメータ（背景しきい値・オフセット補正等）は、3D生成を待たずに
+   その場でプレビューできるはず** なのに、今は生成してみないと効果が分からない。
+2. **メッシュ後処理系パラメータ（平滑化・間引き・テクスチャ継ぎ目）は彫刻
+   （marching cubes）のやり直しが不要** なのに、パラメータを変えるたびにフル
+   パイプラインが再実行され、無駄が大きい。
+3. **線画イラスト特有の問題として、3D化した際にテクスチャの継ぎ目が黒くなる** —
+   輪郭線の存在位置と、テクスチャ継ぎ目の判定位置（表面法線が前向き⇔横向きに
+   切り替わる境界）がほぼ一致するため。
+
+これらは性質の異なる問題なので、独立して着手できるフェーズに分けて計画する。
+
+## 技術調査で分かったこと
+
+- 生成パイプライン（`js/pipeline.js`）: `prep`(背景除去) → `bleed`(縁の色にじみ) →
+  `profile/core` → `skeleton` → `visual_hull`(全身彫刻) → `accessories`(個別彫刻) →
+  `atlas_bake`(テクスチャ焼き) → `model_glb`(GLB書き出し)。
+- **支配的コストは`visual_hull`のmarching cubes**（`js/marching_cubes.js`の3重ループ）。
+  既定の`body_vox=0.003`で体だけでも約2170万セルを走査する（`js/carving.js:383-386`）。
+- 全28個の生成パラメータ（`js/common.js`の`DEFAULT_GEN_PARAMS`＋`seamAngles`等）のうち、
+  **彫刻をやり直さずに反映できるのは12個**（後述の表を参照）。
+- `character_3d.html`（ビューア）は現状**純粋なGLBビューア**で、生成パイプラインへの
+  アクセスは一切ない。`js/idb.js`の`saveGeneratedModel`/`loadGeneratedModel`は
+  完成済みGLBバイナリのみを受け渡す契約になっている。
+- 線画特有の黒い継ぎ目問題: `js/atlas.js`の継ぎ目判定（`:264-268`）は表面法線の
+  front⇔side遷移点で決まり、これは正面イラストの外周輪郭線が引かれる位置と
+  ほぼ一致する。輪郭線が**シルエット外周のみ**（内部の黒髪・黒服等の塗りは対象外）
+  という前提が確認できたため、前景マスクをNpx収縮し、その帯の暗ピクセルを
+  内側の色で塗りのばして除去する、比較的シンプルな手法で対応できる。
+
+## 移動可能パラメータの分類（フェーズ2の対象）
+
+| Tier | パラメータ | 反映に必要な前提 |
+|---|---|---|
+| Tier1（完全即時） | `body_smooth_iters`, `acc_smooth_iters`, `rigid_soft_width`, `kb_per_face` | 追加キャッシュ不要。頂点座標・スキン・テクスチャ圧縮のみで完結 |
+| Tier2（生メッシュキャッシュ要） | `body_decimate`, `body_target_verts`, `acc_decimate`, `acc_target_verts` | 彫刻直後（smooth/decimate前）の生メッシュV/Fをキャッシュしておけば再彫刻不要 |
+| Tier3（生メッシュ+bleed画像キャッシュ要） | `seamAngles`, `seamNoSide`, `seamSmoothIters`, `colorGradWidth` | 上記に加え、prep/bleed済みのfront/back/side画像をキャッシュしておけば`atlas_bake`のみ再実行で反映可能 |
+
+それ以外（`body_vox`, `psq_*`, `track_gap/win`, `arm_*`, `hand_*`, `subpixel`,
+`white_thr`, `alpha_dilate`, `band_h/overlap`, `back_offset_x/y`,
+`side_offset_x/y`）は彫刻（marching cubes）のやり直しが必須で、ビューア側への
+移動対象外。ただしこのうち2D画像処理段階だけで完結するものはフェーズ0で
+ジェネレータ側にプレビューを追加する。
+
+## フェーズ構成
+
+| # | フェーズ | 内容 | 対象ファイル | 依存 | 状態 |
+|---|---|---|---|---|---|
+| 0 | ランドマークツールの2Dプレビュー＋輪郭線除去 | `white_thr`/`alpha_dilate`/`back_offset_x,y`/`side_offset_x,y`/`band_h`/`band_overlap`/`track_gap`/`track_win`のパラメータタブ選択中オーバーレイ表示。パラメータグループ展開時に対象view（front/back/side）へ自動切替。加えて、シルエット外周の黒い輪郭線除去（前景マスクをNpx収縮→帯の暗ピクセルを内側色で塗りのばし、`bleedEdges`のBFSを方向反転して流用）を線幅・暗さしきい値パラメータ化し同じプレビュー機構で確認可能にする | `landmark_tool.html`, `js/common.js` | なし（独立、先行着手可） | 未着手 |
+| 1 | 中間データ契約の設計・実装 | `js/idb.js`の契約を「完成GLB」から「中間パッケージ」（元JSON全体＋生の彫刻メッシュV/F(body/accessory別)＋prep/bleed済みfront/back/side canvas＋skeleton/pivots）に変更。`js/pipeline.js`を重い彫刻（marching cubes）まで実行して中間データを返せるよう分割。`landmark_tool.html`の「生成」ボタンをこの保存形式に変更 | `js/idb.js`, `js/pipeline.js`, `landmark_tool.html` | なし（基盤、フェーズ2の前提） | 未着手 |
+| 2 | ビューアのライブパラメータUI | `character_3d.html`に`js/atlas.js`, `js/model_export.js`, `js/skeleton.js`, `js/carving.js`を読み込み追加。Tier1〜3の12パラメータのUIパネルを実装（`landmark_tool.html`のパラメータパネルUIを流用/移植）。依存順序（smooth→decimate→atlas bake）を守って連動再計算 | `character_3d.html` | フェーズ1 | 未着手 |
+| 3 | ビューアからの最終出力 | 「GLB書き出し」ボタン（現在のプレビュー状態を`model_export.js`でGLB化）。「JSON書き出し/コピー」ボタン（中間パッケージのJSONオブジェクトの該当フィールドをライブ調整値で上書きして`landmarks_ai.json`として出力、`landmark_tool.html`の`exportJson`/`copyJson`と同等のUI） | `character_3d.html` | フェーズ2 | 未着手 |
+
+## 運用ルール
+
+1. フェーズ0は他フェーズと完全に独立しているため、いつ着手してもよい。
+2. フェーズ1→2→3は順番必須（2はデータ契約に、3はビューアのUI状態に依存する）。
+3. 着手するときはこのファイルの状態列を「進行中」に、完了したら「完了」に更新する
+   （簡単な実施メモ・コミットハッシュを添える）。
+4. 実施中に追加の課題が見つかったら、末尾に追記してよい（既存の番号は変更しない）。
