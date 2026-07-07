@@ -1862,8 +1862,26 @@ $("generateBtn").onclick=async()=>{
         regions:Object.keys(a.regions).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{})})),
       excludeMask, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, genParams,
     };
-    const glb=await P3D.runPipeline(state, (label)=>{ $("genStage").textContent=label; });
-    await P3D.saveGeneratedModel(glb);
+    // ★フェーズ1(2026-07-07〜): 「生成」は完成GLBまで作らず、重い彫刻(marching
+    // cubes)までの中間データ(中間パッケージ)を作ってビューアに渡す。ビューア側
+    // (character_3d.html)がP3D.finishFromIntermediate()で平滑化/間引き/
+    // テクスチャ焼き込み/GLB化を行う(フェーズ2でこの部分がライブパラメータ
+    // 編集UIに置き換わる)。
+    const inter=await P3D.runToIntermediate(state, (label)=>{ $("genStage").textContent=label; });
+    const pkg={
+      landmarks_json: buildJson(),
+      raw_body: inter.rawBody,
+      raw_accessories: inter.rawAccessories,
+      bled_canvases: inter.bledCanvases,
+      pivots: inter.pivots,
+      calib: inter.calib,
+      gen_params: Object.assign({},genParams),
+      seam_angles: Object.assign({},seamAngles),
+      seam_no_side: Object.assign({},seamNoSide),
+      seam_smooth_iters: seamSmoothIters,
+      color_grad_width: colorGradWidth,
+    };
+    await P3D.saveGeneratedModel(pkg);
     if(currentMode==="normal"){
       saveNormalSession();
       await saveNormalSessionImages();

@@ -168,7 +168,22 @@
 
 <script src="js/vendor/three.min.js"></script>
 <script src="js/vendor/GLTFLoader.js"></script>
+<script src="js/vendor/BufferGeometryUtils.js"></script>
+<script src="js/vendor/SimplifyModifier.js"></script>
 <script src="js/idb.js"></script>
+<!-- フェーズ1(2026-07-07〜): ジェネレータ(landmark_tool.html)から渡される
+     中間パッケージ(彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)から
+     GLBを組み立てるため、生成パイプラインの後半(平滑化/間引き/スキニング/
+     テクスチャ焼き込み/GLB書き出し)に必要なモジュールを読み込む。
+     フェーズ2ではこれらを使ったライブパラメータ編集UIをここに追加する。 -->
+<script src="js/common.js"></script>
+<script src="js/carving.js"></script>
+<script src="js/skeleton.js"></script>
+<script src="js/atlas.js"></script>
+<script src="js/model_export.js"></script>
+<script src="js/visual_hull.js"></script>
+<script src="js/accessories.js"></script>
+<script src="js/pipeline.js"></script>
 <script>
 (function(){
 const cvs=document.getElementById('c');
@@ -487,15 +502,29 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 // 3DtoolJS: ランドマークツールの「モデル生成」ボタンからIndexedDB経由で渡された
 // 生成済みGLBがあれば最優先で読み込む(モード選択画面は出さない。読み込んだら
 // 消費して1回限りにし、次回の通常起動では改めてモード選択を出す)。
+// ★フェーズ1(2026-07-07〜): loadGeneratedModel()は完成GLBではなく中間パッケージ
+// (彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)を返すようになった。
+// P3D.finishFromIntermediate()で平滑化/間引き/テクスチャ焼き込み/GLB化まで
+// このページ側で行ってから読み込む(フェーズ2ではこのgen_paramsをライブ編集
+// できるUIパネルに置き換える)。
+let currentPackage=null; // フェーズ2のライブパラメータ編集用に保持しておく
+document.getElementById('err').textContent='';
 (async function(){
   try{
-    const buf = window.P3D && await P3D.loadGeneratedModel();
-    if(buf){
+    const pkg = window.P3D && await P3D.loadGeneratedModel();
+    if(pkg && pkg.raw_body){
       await P3D.clearGeneratedModel();
-      loadGLB(buf,loadMotionClips);
+      currentPackage = pkg;
+      document.getElementById('err').textContent='モデルを構築中…';
+      const glb = await P3D.finishFromIntermediate(pkg, {
+        gp: pkg.gen_params, seamAngles: pkg.seam_angles, seamNoSide: pkg.seam_no_side,
+        seamSmoothIters: pkg.seam_smooth_iters, colorGradWidth: pkg.color_grad_width,
+      }, (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
+      document.getElementById('err').textContent='';
+      loadGLB(glb,loadMotionClips);
       return;
     }
-  }catch(e){ console.warn('generated model load failed', e); }
+  }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル構築に失敗しました: '+((e&&e.message)||e); }
   document.getElementById('modeChoice').classList.remove('hide');
 })();
 

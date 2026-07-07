@@ -66,7 +66,7 @@
 | # | フェーズ | 内容 | 対象ファイル | 依存 | 状態 |
 |---|---|---|---|---|---|
 | 0 | ランドマークツールの2Dプレビュー＋輪郭線除去＋ボーン表示/範囲トグル | `white_thr`/`alpha_dilate`/`back_offset_x,y`/`side_offset_x,y`/`band_h`/`band_overlap`/`track_gap`/`track_win`のパラメータタブ選択中オーバーレイ表示。パラメータグループ展開時に対象view（front/back/side）へ自動切替。シルエット外周の黒い輪郭線除去（前景マスクをNpx収縮→帯の暗ピクセルを内側色で塗りのばし、`bleedEdges`のBFSを方向反転して流用）を線幅・暗さしきい値パラメータ化し同じプレビュー機構で確認可能にする。加えて「マーク」「パーツ＋」タブに「ボーン表示」（既存`drawBoneOverlay()`を他タブでも呼べるように）と「ボーン範囲」（`computeBonePivots()`の座標系でボーン線分への2D距離を粗いグリッドで計算し、最近傍ボーンごとに色分けしたVoronoi風オーバーレイ）の2トグルを追加し、ランドマーク/アクセサリー配置中にどのボーンの担当領域か一目で分かるようにする | `landmark_tool.html`, `js/common.js` | なし（独立、先行着手可） | 完了 |
-| 1 | 中間データ契約の設計・実装 | `js/idb.js`の契約を「完成GLB」から「中間パッケージ」（元JSON全体＋生の彫刻メッシュV/F(body/accessory別)＋prep/bleed済みfront/back/side canvas＋skeleton/pivots）に変更。`js/pipeline.js`を重い彫刻（marching cubes）まで実行して中間データを返せるよう分割。`landmark_tool.html`の「生成」ボタンをこの保存形式に変更 | `js/idb.js`, `js/pipeline.js`, `landmark_tool.html` | なし（基盤、フェーズ2の前提） | 未着手 |
+| 1 | 中間データ契約の設計・実装 | `js/idb.js`の契約を「完成GLB」から「中間パッケージ」（元JSON全体＋生の彫刻メッシュV/F(body/accessory別)＋prep/bleed済みfront/back/side canvas＋skeleton/pivots）に変更。`js/pipeline.js`を重い彫刻（marching cubes）まで実行して中間データを返せるよう分割。`landmark_tool.html`の「生成」ボタンをこの保存形式に変更 | `js/idb.js`, `js/pipeline.js`, `landmark_tool.html` | なし（基盤、フェーズ2の前提） | 完了 |
 | 2 | ビューアのライブパラメータUI | `character_3d.html`に`js/atlas.js`, `js/model_export.js`, `js/skeleton.js`, `js/carving.js`を読み込み追加。Tier1〜3の12パラメータのUIパネルを実装（`landmark_tool.html`のパラメータパネルUIを流用/移植）。依存順序（smooth→decimate→atlas bake）を守って連動再計算 | `character_3d.html` | フェーズ1 | 未着手 |
 | 3 | ビューアからの最終出力 | 「GLB書き出し」ボタン（現在のプレビュー状態を`model_export.js`でGLB化）。「JSON書き出し/コピー」ボタン（中間パッケージのJSONオブジェクトの該当フィールドをライブ調整値で上書きして`landmarks_ai.json`として出力、`landmark_tool.html`の`exportJson`/`copyJson`と同等のUI） | `character_3d.html` | フェーズ2 | 未着手 |
 
@@ -130,3 +130,75 @@ Playwrightでの確認（chromium、`python3 -m http.server`でローカル配�
 設計判断: ボーン範囲オーバーレイはプランの指示通りfront限定・グリッド粗さ
 40×60固定とした。輪郭線除去の既定値(band_px=6, dark_thr=90)は既存コード内の
 コメントに基づき採用し、変更していない。
+
+## フェーズ1 実施メモ
+
+契約変更の核心は「彫刻(marching cubes)の平滑化(smooth_iters)を、carveRegion
+自身の内部処理から呼び出し側の後段処理として分離した」こと。平滑化は
+`P3D.laplacianSmooth(V,F,iters)`という「与えられたV/F/itersのみに依存する
+純粋関数」なので、`carveRegion`にsmoothIters:0を渡して彫刻直後の生メッシュ
+(rawV/rawF)を取り、後から同じ`laplacianSmooth`を呼ぶのは、従来
+`smoothIters>0`をcarveRegionに直接渡す場合と数式的に同一の結果になる
+(間引き decimateMesh は元々carveRegionの外(呼び出し側)で行われていたため
+分離は不要だった)。
+
+- `js/visual_hull.js`: `stageVisualHull()`がcarveRegionへ`smoothIters:0`を渡し、
+  戻り値に`rawV`/`rawF`(彫刻直後・平滑化/間引き前)を追加。平滑化+間引きの
+  適用ロジックを`P3D.finishBodyMesh(rawV,rawF,gp)`として切り出し、
+  `stageVisualHull`内からも呼ぶ(挙動は変更なし、内部実装のみ分離)。
+- `js/accessories.js`: `stageAccessories()`もアクセサリーごとに同様の分離を行い、
+  ループ内で`rawParts`配列(`{name,mode,bones,rawV,rawF}`)を蓄積して戻り値に
+  追加。平滑化+間引きは`P3D.finishAccessoryMesh(rawV,rawF,gp)`に切り出した。
+- `js/pipeline.js`: 新規`P3D.runToIntermediate(state,onProgress)`を追加。
+  prep→bleed→profile/core→skeleton→visual_hull→accessoriesまでを実行し、
+  atlas_bake/model_glbは実行せずに`{raw_body:{V,F}, raw_accessories:[...],
+  bled_canvases:{front,back,side}, pivots, calib}`を返す(中間データ)。
+  新規`P3D.finishFromIntermediate(pkg, opts, onProgress)`を追加。中間データ+
+  gen_params/seam系パラメータから、平滑化→間引き→スキニング→atlas_bake→
+  model_glbを実行してGLBを返す(彫刻はやり直さない)。既存`runPipeline()`は
+  そのまま残置(後方互換/デバッグ用。現在の生成ボタンからは呼ばれない)。
+- `js/idb.js`: `saveGeneratedModel`/`loadGeneratedModel`の契約を「完成GLBの
+  ArrayBuffer」から「中間パッケージ」に変更(破壊的変更)。パッケージは
+  `{landmarks_json, raw_body, raw_accessories, bled_canvases, pivots, calib,
+  gen_params, seam_angles, seam_no_side, seam_smooth_iters, color_grad_width}`
+  の形。canvas要素はstructured cloneできないため保存時に`canvas.toBlob()`で
+  Blobに変換し、読み込み時に`Image`経由でHTMLCanvasElementへ復元する
+  (`canvasToBlobEntry`/`blobEntryToCanvas`)。それ以外のTypedArray/プレーン
+  オブジェクトはIndexedDBのstructured cloneでそのまま保存できるため変換不要。
+- `landmark_tool.html`の「生成」ボタン: `P3D.runPipeline`ではなく
+  `P3D.runToIntermediate`を呼び、`buildJson()`(既存のlandmarks_ai.json生成
+  ロジック)の結果と組み合わせてパッケージを構築し`P3D.saveGeneratedModel`に
+  渡すよう変更。ビューアへの遷移(`location.href="character_3d.html?..."`)は
+  変更なし。
+- `character_3d.html`: `js/common.js`/`js/carving.js`/`js/skeleton.js`/
+  `js/atlas.js`/`js/model_export.js`/`js/visual_hull.js`/`js/accessories.js`/
+  `js/pipeline.js`と、間引きに必要な`js/vendor/BufferGeometryUtils.js`/
+  `js/vendor/SimplifyModifier.js`を読み込み追加(フェーズ2のライブパラメータ
+  編集UIもこれらの上に構築する想定)。起動時オートロード処理を、
+  `loadGeneratedModel()`の戻り値が中間パッケージであることを前提に、
+  `P3D.finishFromIntermediate(pkg,{gp:pkg.gen_params,...})`でGLBを構築してから
+  `loadGLB()`する形に変更。`currentPackage`にパッケージを保持(フェーズ2で
+  ライブパラメータ変更時に再利用する)。
+
+Playwrightでの確認(chromium、`python3 -m http.server`でローカル配信):
+サンプルモードで画像/ランドマークを自動読込→「生成」タブで「生成」ボタンを
+押下→`runToIntermediate`の各ステージログ(prep/bleed/profile/skeleton/
+visual_hull/accessories)がコンソールに出ることを確認→`character_3d.html?
+source=generated`へ自動遷移→ビューア側で「構築中: ...」の進捗表示が
+mesh_finish→atlas_bake→model_glbと進み、最終的に髪・カメラ小物・スカート付き
+のフルテクスチャモデルが正しい姿勢(Tポーズ)で表示されることをスクリーン
+ショットで確認。「モデル」タブの「モデルを保存」ボタンでGLBをダウンロードし、
+先頭4バイトが`glTF`マジックであること、ファイルサイズが約820KBの妥当な
+GLBであることを確認。実行中に発生した警告(`SimplifyModifier`が高頂点数の
+メッシュで失敗し頂点クラスタリングにフォールバックする旨)は本フェーズの
+変更とは無関係な既存の挙動(間引き手法のフォールバック)であり、最終的な
+モデル生成・表示は成功している。
+
+設計判断/注意点: 初回実装時、`runToIntermediate`が返すフィールド名
+(`rawBody`/`rawAccessories`/`bledCanvases`、キャメルケース)と、
+`js/idb.js`に保存されるパッケージのフィールド名(`raw_body`/`raw_accessories`/
+`bled_canvases`、スネークケース)が食い違っており、`finishFromIntermediate`
+がスネークケース側を参照するように修正して解決した(Playwright検証で
+`Cannot read properties of undefined (reading 'V')`として実際に検出できた)。
+今後この2つの関数間でデータをやり取りする際はスネークケース(保存契約の
+フィールド名)に統一する。

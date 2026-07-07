@@ -46,6 +46,11 @@ function stageVisualHull(opts){
     });
   }
 
+  // ★フェーズ1(中間データ契約): marching cubes直後(平滑化前)の生メッシュを
+  // rawV/rawFとしてキャッシュできるよう、carveRegion自体にはsmoothIters:0を
+  // 渡し、平滑化はここで別途P3D.laplacianSmoothに分離する。
+  // (carveRegionにsmoothIters>0を直接渡した場合と数式的に同一の結果になる。
+  // 平滑化は与えられたV/F/itersのみに依存する純粋な処理のため)
   var result = P3D.carveRegion({
     fa: opts.frontAlpha, ba: opts.backAlpha, sa: opts.sideAlpha,
     faW: opts.faW, faH: opts.faH, saW: opts.saW, saH: opts.saH,
@@ -62,20 +67,18 @@ function stageVisualHull(opts){
     neckY: opts.pivots.neck ? opts.pivots.neck[1] : null,
     hipsY: opts.pivots.hips ? opts.pivots.hips[1] : null,
     trackGap: gp.track_gap, trackWin: gp.track_win,
-    smoothIters: gp.body_smooth_iters,
+    smoothIters: 0,
     armLines: armLines, armMaxHw: gp.arm_max_hw,
     handLines: handLines.length ? handLines : null,
     handDepthHw: gp.hand_depth, handMaxHw: gp.hand_max_hw,
     whiteThr: gp.white_thr,
   });
   if(!result) throw new Error("visual_hull: carving produced an empty mesh");
-  var V=result.V, F=result.F;
-  console.log("  visual_hull: verts(before decimation)", V.length/3, "faces", F.length/3);
+  var rawV=result.V, rawF=result.F;
+  console.log("  visual_hull: raw verts(彫刻直後)", rawV.length/3, "faces", rawF.length/3);
 
-  if(gp.body_decimate){
-    var dec = P3D.decimateMesh(V, F, gp.body_target_verts);
-    V=dec.V; F=dec.F;
-  }
+  var finished=finishBodyMesh(rawV, rawF, gp);
+  var V=finished.V, F=finished.F;
   var fw = P3D.computeNormalsFixWinding(V,F);
   var Nv=fw.N; F=fw.F;
   console.log("  visual_hull: verts", V.length/3, "faces", F.length/3);
@@ -83,8 +86,23 @@ function stageVisualHull(opts){
   var skin = P3D.nearestBoneSegmentSkin(V, opts.pivots, P3D.BONES, 4, gp.rigid_soft_width);
   console.log("  visual_hull: skinning weights assigned (nearest-bone-segment)");
 
-  return {V:V, N:Nv, F:F, J:skin.J, W:skin.W};
+  return {V:V, N:Nv, F:F, J:skin.J, W:skin.W, rawV:rawV, rawF:rawF};
 }
 P3D.stageVisualHull = stageVisualHull;
+
+// ★フェーズ1: rawV/rawF(彫刻直後・平滑化/間引き前)にgen_paramsのbody_smooth_iters/
+// body_decimate/body_target_vertsを適用して最終メッシュ(法線計算前)を作る。
+// character_3d.htmlのビューア側でキャッシュ済みrawV/rawFを再彫刻せずにこの関数
+// だけ呼び直せば、平滑化/間引きパラメータを即時反映できる(フェーズ2で使用)。
+function finishBodyMesh(rawV, rawF, gp){
+  var V=rawV, F=rawF;
+  if(gp.body_smooth_iters>0) V=P3D.laplacianSmooth(V,F,gp.body_smooth_iters);
+  if(gp.body_decimate){
+    var dec=P3D.decimateMesh(V,F,gp.body_target_verts);
+    V=dec.V; F=dec.F;
+  }
+  return {V:V, F:F};
+}
+P3D.finishBodyMesh = finishBodyMesh;
 
 })(window);
