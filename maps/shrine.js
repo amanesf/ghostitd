@@ -204,7 +204,6 @@ build(env){
   const CREDIT_BUSH={name:'Flower Bushes',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/1X06RgvSr6'};
   const CREDIT_BRIDGE={name:'Small Bridge',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/j4KsIuJYnq'};
   const CREDIT_FENCE={name:'Fence',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/r0n40F7FKx'};
-  const CREDIT_FENCE_C={name:'Fence Center',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/I7D7zk30rv'};
   const CREDIT_SIGNPOST={name:'Signpost',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/3U2lj1gpeH'};
   const CREDIT_STAIRS={name:'Stairs',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/lZFtRSTeKR'};
   const CREDIT_DOOR={name:'Japanese Door',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/t4otyljz8K'};

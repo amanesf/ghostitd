@@ -142,6 +142,9 @@
   <div class="cfgRow"><label>ノイズ(高感度)
     <input type="range" id="cfgNoise" min="0" max="100" value="18">
   </label></div>
+  <div class="cfgRow"><label>彩度
+    <input type="range" id="cfgSaturation" min="0" max="100" value="33">
+  </label></div>
   <div class="cfgRow"><label>FPS上限
     <select id="cfgFpsLimit">
       <option value="0">無制限(画面のリフレッシュレートに追従)</option>
@@ -558,6 +561,13 @@ function applyCharBrightness(pct){
   for(const mat of characterMaterials)mat.color.setScalar(m);
   invalidate();
 }
+// 彩度: WebGL側の色を個々に触らず、canvas全体にCSSのsaturate()フィルタをかけるだけの
+// お手軽な実装(0=無彩色/グレースケール、100=素の彩度)。PIP映像も同じcanvas上に
+// ビューポート分割で描かれているため、これだけでPIPにも自動的に効く。
+function applySaturation(pct){
+  cvs.style.filter=pct>=100?'':'saturate('+pct+'%)';
+  invalidate();
+}
 function applyPipEnabled(on){
   pipEnabled=on;
   document.getElementById('selfieBox').classList.toggle('visible',on&&!!model);
@@ -591,6 +601,7 @@ document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
 document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
 document.getElementById('cfgCharBrightness').oninput=e=>applyCharBrightness(+e.target.value);
 document.getElementById('cfgNoise').oninput=e=>applyNoise(+e.target.value);
+document.getElementById('cfgSaturation').oninput=e=>applySaturation(+e.target.value);
 document.getElementById('cfgFpsLimit').onchange=e=>applyFpsLimit(e.target.value);
 document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; refreshPipQualityLabels(); };
 document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
@@ -870,6 +881,7 @@ applyFogDensity(+document.getElementById('cfgFog').value);
 applyBrightness(+document.getElementById('cfgBrightness').value);
 applyCharBrightness(+document.getElementById('cfgCharBrightness').value);
 applyNoise(+document.getElementById('cfgNoise').value);
+applySaturation(+document.getElementById('cfgSaturation').value);
 applyFpsLimit(document.getElementById('cfgFpsLimit').value);
 tick();
 })();
