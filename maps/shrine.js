@@ -175,8 +175,11 @@ build(env){
   buildGroundMesh(HALFW_PARKING,PATH_MIN_Z,Z_PARKING_END,asphaltTex,0);
   buildGroundMesh(HALFW_KEIDAI+2,Z_PARKING_END,Z_SLOPE3_S,gravelTex,0);
   buildGroundMesh(HALFW_OKU+2,Z_SLOPE3_S,PATH_MAX_Z,dirtMossTex,0);
-  buildGroundMesh(1.6,Z_PARKING_END,Z_SANDOU_END,stonePathTex,0.01); // 参道中央の石畳帯
-  buildGroundMesh(3.2,72,80,stonePathTex,0.01); // 本殿正面の石畳
+  // 正中(せいちゅう)の石畳帯: 参道入口から本殿の手前まで、実在の神社の作法通り
+  // 一本の帯として途切れず連続させる(自己レビューで指摘: 旧実装は参道と本殿正面の
+  // 2箇所に分断されており、境内広場を横切る区間に石畳が無かった)。本殿正面のみ幅を広げる。
+  buildGroundMesh(1.6,Z_PARKING_END,Z_HONDEN_END,stonePathTex,0.01);
+  buildGroundMesh(3.2,72,80,stonePathTex,0.011); // 本殿正面だけ幅広の石畳を上乗せ
 
   // 水面(池、簡易な半透明の平面)
   {
@@ -291,7 +294,11 @@ build(env){
   //     左右に1個ずつ分裂配置していて不自然だったため、幅方向に引き伸ばした1枚へ統合) ---
   function placeStairDecor(zFrom,zTo,halfW){
     loadStaticGLB('models/stairs_free.glb').then(obj=>{
-      normalizeToHeight(obj,(tierY(zTo)-tierY(zFrom))||1.2);
+      // 石段3(本殿→奥の院)は「あえて下る」設計でtierY(zTo)<tierY(zFrom)となり差分が負になる。
+      // normalizeToHeightは targetHeight/現在高さ をそのままscaleに掛けるため、負の値を渡すと
+      // モデルが原点を軸に上下反転し、潰れた木目色の板のように見える不具合の原因だった(自己レビュー)。
+      // 高さは常に正の絶対値を渡し、上り/下りの向きは既存のrotation.y設定にのみ依存させる。
+      normalizeToHeight(obj,Math.abs(tierY(zTo)-tierY(zFrom))||1.2);
       obj.rotation.y=Math.PI/2;
       const len=zTo-zFrom;
       // rotation.y=90°では local X 軸がワールドZ(登り方向)、local Z 軸がワールドX(幅方向)に
@@ -591,7 +598,7 @@ build(env){
 
   return {
     group,
-    spawnPoint:{x:0,z:-10,yaw:0},
+    spawnPoint:{x:0,z:(PATH_MIN_Z+Z_PARKING_END)/2,yaw:0}, // 駐車場ゾーンの中央
     zMin:PATH_MIN_Z, zMax:PATH_MAX_Z,
     corridorBoundsAt,
     groundHeightAt,
