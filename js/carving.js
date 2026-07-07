@@ -399,60 +399,68 @@ function carveRegion(opts){
   var xyPolygon = frontPolygon || backPolygon;
 
   // ---- 1) 行ごとの幅セグメント(front/back)、行トラッキング+中央値フィルタ ----
-  var tracks=[]; // {rows:[],cx:[],hw:[],lastIy,lastCx}
-  for(var iy=0; iy<ny; iy++){
-    var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, byBack[iy]);
-    var frPx = faCont ? Common.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : Common.findRuns(faRow);
-    var brPx = baCont ? Common.findRunsSubpixel(baRow, rowOf1d(baCont,faW,byBack[iy]), whiteThr) : Common.findRuns(baRow);
-    var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
-    var br=brPx.map(function(pq){ return [(faW-pq[1]-CX+backOffsetX)/SCALE, (faW-pq[0]-CX+backOffsetX)/SCALE]; });
-    var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
-    // ★2026-07-04: アクセサリー(ポリゴン指定あり)では、front/backの絵柄の
-    // 描かれ方が行単位で食い違う(片方だけ描線が途切れる等)と交差が空になり
-    // その行のメッシュが丸ごと欠落していた。ポリゴンで範囲が明示されている
-    // 場合は、交差が空なら描かれている方の面のrunだけで続行する。
-    if(xyPolygon && !runsVal.length){
-      runsVal = intersectIntervals(fr.length ? fr : br, mxLim);
-    }
-    if(xyPolygon) runsVal = intersectIntervals(runsVal, polygonRowIntervals(xyPolygon, my[iy]));
-    var segs=[];
-    for(var i=0;i<runsVal.length;i++){
-      var r0=runsVal[i][0], r1=runsVal[i][1];
-      if(r1-r0>=vox) segs.push([(r0+r1)/2.0, Math.max((r1-r0)/2.0, EPS)]);
-    }
-    for(var s=0;s<segs.length;s++){
-      var cx=segs[s][0], hw=segs[s][1];
-      var best=-1, bestd=Infinity;
-      for(var ti=0;ti<tracks.length;ti++){
-        var tr=tracks[ti];
-        if(iy-tr.lastIy>trackGap) continue;
-        var d=Math.abs(cx-tr.lastCx);
-        var lastHw=tr.hw[tr.hw.length-1];
-        var thresh=Math.min(Math.max(hw,lastHw)*1.2, 0.025);
-        var ratio=hw/lastHw;
-        if(d<thresh && ratio>=0.4 && ratio<=2.5 && d<bestd){ best=ti; bestd=d; }
+  // carveRegionのローカル変数(fa/ba/fy/byBack/CX/SCALE/mxLim/xyPolygon等)を
+  // クロージャでそのまま参照する内部関数として切り出す(引数の受け渡しミスに
+  // よる数値ズレを避けるため、あえてトップレベル関数への外出しはしない)。
+  function buildWidthTracks(){
+    var tracks=[]; // {rows:[],cx:[],hw:[],lastIy,lastCx}
+    for(var iy=0; iy<ny; iy++){
+      var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, byBack[iy]);
+      var frPx = faCont ? Common.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : Common.findRuns(faRow);
+      var brPx = baCont ? Common.findRunsSubpixel(baRow, rowOf1d(baCont,faW,byBack[iy]), whiteThr) : Common.findRuns(baRow);
+      var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
+      var br=brPx.map(function(pq){ return [(faW-pq[1]-CX+backOffsetX)/SCALE, (faW-pq[0]-CX+backOffsetX)/SCALE]; });
+      var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
+      // ★2026-07-04: アクセサリー(ポリゴン指定あり)では、front/backの絵柄の
+      // 描かれ方が行単位で食い違う(片方だけ描線が途切れる等)と交差が空になり
+      // その行のメッシュが丸ごと欠落していた。ポリゴンで範囲が明示されている
+      // 場合は、交差が空なら描かれている方の面のrunだけで続行する。
+      if(xyPolygon && !runsVal.length){
+        runsVal = intersectIntervals(fr.length ? fr : br, mxLim);
       }
-      if(best===-1){
-        tracks.push({rows:[iy],cx:[cx],hw:[hw],lastIy:iy,lastCx:cx});
-      }else{
-        var tr2=tracks[best];
-        tr2.rows.push(iy); tr2.cx.push(cx); tr2.hw.push(hw);
-        tr2.lastIy=iy; tr2.lastCx=cx;
+      if(xyPolygon) runsVal = intersectIntervals(runsVal, polygonRowIntervals(xyPolygon, my[iy]));
+      var segs=[];
+      for(var i=0;i<runsVal.length;i++){
+        var r0=runsVal[i][0], r1=runsVal[i][1];
+        if(r1-r0>=vox) segs.push([(r0+r1)/2.0, Math.max((r1-r0)/2.0, EPS)]);
+      }
+      for(var s=0;s<segs.length;s++){
+        var cx=segs[s][0], hw=segs[s][1];
+        var best=-1, bestd=Infinity;
+        for(var ti=0;ti<tracks.length;ti++){
+          var tr=tracks[ti];
+          if(iy-tr.lastIy>trackGap) continue;
+          var d=Math.abs(cx-tr.lastCx);
+          var lastHw=tr.hw[tr.hw.length-1];
+          var thresh=Math.min(Math.max(hw,lastHw)*1.2, 0.025);
+          var ratio=hw/lastHw;
+          if(d<thresh && ratio>=0.4 && ratio<=2.5 && d<bestd){ best=ti; bestd=d; }
+        }
+        if(best===-1){
+          tracks.push({rows:[iy],cx:[cx],hw:[hw],lastIy:iy,lastCx:cx});
+        }else{
+          var tr2=tracks[best];
+          tr2.rows.push(iy); tr2.cx.push(cx); tr2.hw.push(hw);
+          tr2.lastIy=iy; tr2.lastCx=cx;
+        }
       }
     }
-  }
-  var smoothByRow=new Map(); // iy -> [[cx,hw],...]
-  for(var t=0;t<tracks.length;t++){
-    var tr3=tracks[t];
-    var scx=medianFilter(tr3.cx, trackWin), shw=medianFilter(tr3.hw, trackWin);
-    for(var i2=0;i2<tr3.rows.length;i2++){
-      var iyk=tr3.rows[i2];
-      if(!smoothByRow.has(iyk)) smoothByRow.set(iyk, []);
-      smoothByRow.get(iyk).push([scx[i2], shw[i2]]);
+    var smoothByRow=new Map(); // iy -> [[cx,hw],...]
+    for(var t=0;t<tracks.length;t++){
+      var tr3=tracks[t];
+      var scx=medianFilter(tr3.cx, trackWin), shw=medianFilter(tr3.hw, trackWin);
+      for(var i2=0;i2<tr3.rows.length;i2++){
+        var iyk=tr3.rows[i2];
+        if(!smoothByRow.has(iyk)) smoothByRow.set(iyk, []);
+        smoothByRow.get(iyk).push([scx[i2], shw[i2]]);
+      }
     }
+    return smoothByRow;
   }
+  var smoothByRow = buildWidthTracks();
 
   // ---- 2) 行ごとの奥行き(side画像) ----
+  function buildDepthByRow(){
   var depthRows=[]; // [iy, hdFront, hdBack, zc]
   for(var iy2=0; iy2<ny; iy2++){
     var saRow=rowOf1d(sa, saW, spy[iy2]);
@@ -493,14 +501,17 @@ function carveRegion(opts){
       depthRows.push([iy2, hw2, hw2, zc]);
     }
   }
-  // ★2026-07-04(改): 以前は奥行き(hdFront/hdBack/zc)にも行方向trackWin幅の
-  // 中央値フィルタをかけていたが、顎先のような数行分しかない前方突出まで
-  // 均されて消えてしまうため、奥行きは生の行ごとの値をそのまま使う
-  // (幅セグメント側のトラッキング+中央値平滑化は従来通り)。
-  var hdByRow=new Map();
-  for(var j=0;j<depthRows.length;j++){
-    hdByRow.set(depthRows[j][0], [depthRows[j][1], depthRows[j][2], depthRows[j][3]]);
+    // ★2026-07-04(改): 以前は奥行き(hdFront/hdBack/zc)にも行方向trackWin幅の
+    // 中央値フィルタをかけていたが、顎先のような数行分しかない前方突出まで
+    // 均されて消えてしまうため、奥行きは生の行ごとの値をそのまま使う
+    // (幅セグメント側のトラッキング+中央値平滑化は従来通り)。
+    var hdByRow=new Map();
+    for(var j=0;j<depthRows.length;j++){
+      hdByRow.set(depthRows[j][0], [depthRows[j][1], depthRows[j][2], depthRows[j][3]]);
+    }
+    return hdByRow;
   }
+  var hdByRow = buildDepthByRow();
 
   // ---- 2.5) 腕/手の列プロファイル(y軸で太さを測る) ----
   // ★2026-07-04(改3): 腕の太さの測り方を「行スキャンのx幅」から「列スキャンの
@@ -577,6 +588,7 @@ function carveRegion(opts){
 
   // ---- 3) 疑似SDFフィールドを彫る(ローカルbbox最適化) ----
   var strideY=nx*nz, strideX=nz;
+  function carveSdfField(){
   var field=new Float32Array(ny*nx*nz).fill(-1.0);
   // このbboxの外側は必ずval<=-1相当なので無視できる(psqが小さいほどbboxを
   // 広めに取る必要があるため、使用しうる指数のうち最小値で安全側に倒す)
@@ -679,6 +691,9 @@ function carveRegion(opts){
       }
     }
   }
+  return field;
+  }
+  var field = carveSdfField();
 
   var anyPositive=false, cntPos=0;
   for(var i5=0;i5<field.length;i5++){ if(field[i5]>0){ cntPos++; if(cntPos>=8){anyPositive=true;break;} } }
