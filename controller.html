@@ -174,6 +174,8 @@
 <script src="js/vendor/three.min.js"></script>
 <script src="js/vendor/GLTFLoader.js"></script>
 <script src="js/idb.js"></script>
+<script src="maps/manifest.js"></script>
+<script src="maps/shrine.js"></script>
 <script>
 (function(){
 "use strict";
@@ -264,75 +266,6 @@ keyLight.position.set(2,4,1.5);
 scene.add(keyLight);
 
 
-// --- 地面(Phase 1: 平坦な仮地面。神社の造形/砂利テクスチャはPhase 2) ---
-// 単色ベタ塗りだと霧が同色の背景へ溶けるだけで濃淡が全く見えず「急に埋もれる」
-// ように見えるため、フォグの滲みが視認できる程度の簡易な砂利風テクスチャを敷く。
-function makeGroundTexture(){
-  const c=document.createElement('canvas'); c.width=256; c.height=256;
-  const ctx=c.getContext('2d');
-  ctx.fillStyle='#262b31'; ctx.fillRect(0,0,256,256);
-  for(let i=0;i<2200;i++){
-    const x=Math.random()*256, y=Math.random()*256, r=0.6+Math.random()*1.4;
-    const v=Math.random()<0.5? 18+Math.random()*14 : -1*(14+Math.random()*12);
-    ctx.fillStyle='rgba('+(v>0?255:0)+','+(v>0?255:0)+','+(v>0?255:0)+','+(Math.abs(v)/255)+')';
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-  }
-  const tex=new THREE.CanvasTexture(c);
-  tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(28,28);
-  tex.anisotropy=maxAniso;
-  return tex;
-}
-const groundGeo=new THREE.PlaneGeometry(100,120);
-groundGeo.rotateX(-Math.PI/2);
-groundGeo.translate(0,0,20); // 神社の参道がz=0からz=44付近まで伸びるため、地面も奥へ多めに確保
-const groundMat=new THREE.MeshStandardMaterial({map:makeGroundTexture(),roughness:0.92,metalness:0});
-const ground=new THREE.Mesh(groundGeo,groundMat);
-scene.add(ground);
-
-// --- 移動可能範囲の境界(地面のみ、建物等のコライダーは対象外)に沿って光る線を引く ---
-// corridorBoundsAt(z)がzに応じて返すleft/rightの区分関数を細かくサンプリングし、
-// 値が変化する箇所ごとに区間を区切ることで、将来corridorBoundsAtの形が変わっても
-// 追従できるようにする(ハードコードした座標をここに直接書かない)。
-function addBoundaryLine(x1,z1,x2,z2){
-  const len=Math.hypot(x2-x1,z2-z1);
-  if(len<1e-6)return;
-  const w=0.012; // userフィードバックで太すぎたため1/10に(元は0.12)
-  const geo=new THREE.PlaneGeometry(len,w);
-  geo.rotateX(-Math.PI/2);
-  const mat=new THREE.MeshBasicMaterial({color:0x39ff9e,transparent:true,opacity:0.85,
-    toneMapped:false,depthWrite:false,side:THREE.DoubleSide});
-  const mesh=new THREE.Mesh(geo,mat);
-  mesh.position.set((x1+x2)/2,0.03,(z1+z2)/2);
-  mesh.rotation.y=Math.atan2(-(z2-z1),(x2-x1));
-  scene.add(mesh);
-}
-function buildBoundaryLines(){
-  const STEP=0.05; // 起動時に1回だけ実行するため細かくしても負荷は問題にならない
-  let prev=corridorBoundsAt(PATH_MIN_Z);
-  let leftStart=PATH_MIN_Z, rightStart=PATH_MIN_Z;
-  for(let z=PATH_MIN_Z+STEP;z<=PATH_MAX_Z+1e-6;z+=STEP){
-    const zc=Math.min(z,PATH_MAX_Z);
-    const b=corridorBoundsAt(zc);
-    if(b.left!==prev.left){
-      addBoundaryLine(prev.left,leftStart,prev.left,zc);
-      addBoundaryLine(prev.left,zc,b.left,zc);
-      leftStart=zc;
-    }
-    if(b.right!==prev.right){
-      addBoundaryLine(prev.right,rightStart,prev.right,zc);
-      addBoundaryLine(prev.right,zc,b.right,zc);
-      rightStart=zc;
-    }
-    prev=b;
-  }
-  addBoundaryLine(prev.left,leftStart,prev.left,PATH_MAX_Z);
-  addBoundaryLine(prev.right,rightStart,prev.right,PATH_MAX_Z);
-  // 手前(参道入口)と奥(禁足地側)の端を繋ぐキャップ
-  const bStart=corridorBoundsAt(PATH_MIN_Z), bEnd=corridorBoundsAt(PATH_MAX_Z);
-  addBoundaryLine(bStart.left,PATH_MIN_Z,bStart.right,PATH_MIN_Z);
-  addBoundaryLine(bEnd.left,PATH_MAX_Z,bEnd.right,PATH_MAX_Z);
-}
-
 // --- 空気感演出: ふわふわ浮遊するホコリ状のパーティクル ---
 // キャラクター中心の一定範囲内にパーティクルを配置し、範囲外に出たら反対側へラップさせることで
 // 常にキャラクターの周囲だけを漂っているように見せる(全マップに敷き詰める必要がないため軽量)。
@@ -382,36 +315,10 @@ function updateDust(dt){
   dustGeo.attributes.position.needsUpdate=true;
 }
 
-// --- 神社(Phase 2): 一の鳥居→境内・手水舎→本殿・拝殿→奥の院・禁足地の一直線レイアウト ---
-// 障害物ごとの当たり判定(円/AABB)はcollidersに登録し、resolveCollisionで押し出し解決する。
-const shrineGroup=new THREE.Group();
-scene.add(shrineGroup);
-const colliders=[]; // {type:'circle',x,z,r} | {type:'box',minX,maxX,minZ,maxZ}
-
-function buildToriiProcedural(){
-  const g=new THREE.Group();
-  const pillarMat=new THREE.MeshStandardMaterial({color:0x8a3226,roughness:0.75});
-  const beamMat=new THREE.MeshStandardMaterial({color:0x6e2820,roughness:0.8});
-  const pillarR=0.22, pillarH=4.0, halfSpan=2.6;
-  [-1,1].forEach(side=>{
-    const p=new THREE.Mesh(new THREE.CylinderGeometry(pillarR,pillarR*1.15,pillarH,12),pillarMat);
-    p.position.set(side*halfSpan,pillarH/2,0);
-    g.add(p);
-  });
-  const kasagi=new THREE.Mesh(new THREE.BoxGeometry(halfSpan*2+1.1,0.34,0.5),beamMat);
-  kasagi.position.set(0,pillarH+0.05,0); g.add(kasagi);
-  const shimaki=new THREE.Mesh(new THREE.BoxGeometry(halfSpan*2+0.7,0.2,0.4),beamMat);
-  shimaki.position.set(0,pillarH-0.35,0); g.add(shimaki);
-  const nuki=new THREE.Mesh(new THREE.BoxGeometry(halfSpan*2-0.2,0.22,0.22),beamMat);
-  nuki.position.set(0,pillarH*0.55,0); g.add(nuki);
-  const gakuzuka=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.5,0.24),beamMat);
-  gakuzuka.position.set(0,pillarH-0.1,0); g.add(gakuzuka);
-  return g;
-}
-
-// --- 軽量なフリーモデル(CC0/CC-BY、poly.pizza)を読み込めた場合はそちらを使い、
-// 失敗時はこれまでのプロシージャル形状にフォールバックする。実際に使えたものだけ
-// FREE_MODEL_CREDITSに記録し、configパネル下部のクレジット欄に表示する。
+// --- マップ分離アーキテクチャ(SHRINE_REDESIGN_PLAN.md参照): controller.htmlは
+// レンダラー/キャラクター/カメラ/config等の汎用ホストに徹し、神社固有のジオメトリ・
+// 当たり判定・地面・演出はすべてmaps/shrine.js(GhostMaps.shrine)側に持たせる。
+const colliders=[]; // {type:'circle',x,z,r} | {type:'box',minX,maxX,minZ,maxZ} マップ側がpushする
 const FREE_MODEL_CREDITS=[];
 function refreshCreditsUI(){
   const list=document.getElementById('creditsList'), section=document.getElementById('creditsSection');
@@ -437,300 +344,16 @@ function normalizeToHeight(obj,targetHeight){
   obj.position.y-=box2.min.y;
   return obj;
 }
-
-function placeTorii(z){
-  const halfSpan=2.6;
-  [-1,1].forEach(side=>colliders.push({type:'circle',x:side*halfSpan,z,r:0.3}));
-  const fallback=buildToriiProcedural();
-  fallback.position.z=z;
-  shrineGroup.add(fallback);
-  loadStaticGLB('models/torii_free.glb').then(obj=>{
-    normalizeToHeight(obj,4.3);
-    obj.position.z=z;
-    shrineGroup.remove(fallback);
-    shrineGroup.add(obj);
-    FREE_MODEL_CREDITS.push({name:'Torii Gate',author:'Hattie Stroud',license:'CC-BY 3.0',url:'https://poly.pizza/m/07__lYTDdEH'});
-    refreshCreditsUI();
-    invalidate();
-  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの鳥居のまま */ });
+function pushCredit(entry){
+  // 対で使うアセット(狛犬代替の神狐像+台座など)は左右2回呼ばれるため、同名の重複はまとめる。
+  if(FREE_MODEL_CREDITS.some(c=>c.name===entry.name&&c.author===entry.author))return;
+  FREE_MODEL_CREDITS.push(entry); refreshCreditsUI();
 }
 
-function placeTrees(){
-  loadStaticGLB('models/pine_tree_free.glb').then(template=>{
-    normalizeToHeight(template,7);
-    const count=26;
-    for(let i=0;i<count;i++){
-      const side=i%2===0?-1:1;
-      const t=template.clone(true);
-      const x=side*(8.5+Math.random()*4.5);
-      const z=-2+Math.random()*47;
-      const s=0.8+Math.random()*0.5;
-      t.position.set(x,0,z);
-      t.rotation.y=Math.random()*Math.PI*2;
-      t.scale.multiplyScalar(s);
-      shrineGroup.add(t);
-      // 東側の小広場は境界を張り出させたため木の配置範囲と歩ける範囲が重なる。
-      // 幹に当たり判定を付けておかないとカメラごと枝葉の中に埋まってしまう。
-      colliders.push({type:'circle',x,z,r:0.35*s});
-    }
-    FREE_MODEL_CREDITS.push({name:'Pine Tree',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/gX8WmgkeEm'});
-    refreshCreditsUI();
-    invalidate();
-  }).catch(()=>{ /* 読み込み失敗時は木なし(元々存在しなかったので実害なし) */ });
-}
-
-function buildLantern(x,z,mode){ // mode: 'lit'|'cold'|'dark'
-  const g=new THREE.Group();
-  const stoneMat=new THREE.MeshStandardMaterial({color:0x565b5f,roughness:0.95});
-  const base=new THREE.Mesh(new THREE.CylinderGeometry(0.26,0.3,0.18,10),stoneMat);
-  base.position.y=0.09; g.add(base);
-  const pedestal=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.14,0.55,8),stoneMat);
-  pedestal.position.y=0.18+0.275; g.add(pedestal);
-  const fireBoxY=0.18+0.55+0.17;
-  const fireBox=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.34,0.34),stoneMat);
-  fireBox.position.y=fireBoxY; g.add(fireBox);
-  const roof=new THREE.Mesh(new THREE.ConeGeometry(0.32,0.28,4),stoneMat);
-  roof.rotation.y=Math.PI/4; roof.position.y=fireBoxY+0.17+0.14; g.add(roof);
-  if(mode!=='dark'){
-    const lightColor=mode==='cold'?0x8fd8ff:0xffb066;
-    // 灯籠ごとに本物の点光源を持たせるとライト数が増えすぎるため、実際に周囲を照らす
-    // 点光源は「異様な寒色」の1つだけに絞り、通常の灯りは光る球体だけの見た目にする。
-    if(mode==='cold'){
-      const glow=new THREE.PointLight(lightColor,0.5,4.2,2);
-      glow.position.y=fireBoxY; g.add(glow);
-    }
-    const glowMesh=new THREE.Mesh(new THREE.SphereGeometry(0.08,8,8),
-      new THREE.MeshBasicMaterial({color:lightColor,toneMapped:false}));
-    glowMesh.position.y=fireBoxY; g.add(glowMesh);
-  }
-  g.position.set(x,0,z);
-  shrineGroup.add(g);
-  colliders.push({type:'circle',x,z,r:0.32});
-}
-
-let basinBulb=null, basinSwingT=0;
-function buildBasin(x,z){
-  const g=new THREE.Group();
-  const woodMat=new THREE.MeshStandardMaterial({color:0x3a2c22,roughness:0.85});
-  const stoneMat=new THREE.MeshStandardMaterial({color:0x565b5f,roughness:0.95});
-  const postH=2.2, halfW=1.0, halfD=0.75;
-  [[-halfW,-halfD],[halfW,-halfD],[-halfW,halfD],[halfW,halfD]].forEach(([px,pz])=>{
-    const post=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,postH,8),woodMat);
-    post.position.set(px,postH/2,pz); g.add(post);
-  });
-  const roof=new THREE.Mesh(new THREE.ConeGeometry(1.5,0.6,4),woodMat);
-  roof.rotation.y=Math.PI/4; roof.position.y=postH+0.3; g.add(roof);
-  const basin=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.45,0.4,12),stoneMat);
-  basin.position.y=0.2; g.add(basin);
-  g.position.set(x,0,z);
-  shrineGroup.add(g);
-  colliders.push({type:'circle',x,z,r:0.55});
-  // センサーライトの電球は見た目のモデルに関わらず同じ位置に独立して置く(placeMainHallの引き戸と同じ扱い)
-  const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8),
-    new THREE.MeshBasicMaterial({color:0xffe9b0,toneMapped:false}));
-  bulb.position.set(x,postH-0.5,z);
-  shrineGroup.add(bulb);
-  const bulbLight=new THREE.PointLight(0xffdca0,0.7,5,2);
-  bulb.add(bulbLight);
-  basinBulb=bulb;
-  loadStaticGLB('models/chouzuya_free.glb').then(obj=>{
-    normalizeToHeight(obj,postH+0.6);
-    obj.position.set(x,0,z);
-    // honden(placeMainHall)と同じ屋根瓦素材(yane)を共有しており、そのままだと
-    // このシーンの控えめな照明下でほぼ真っ黒に潰れるため、同じ明度の底上げをかける。
-    const _hsl={h:0,s:0,l:0};
-    obj.traverse(o=>{ if(o.isMesh&&o.material&&o.material.color){
-      o.material.color.getHSL(_hsl);
-      o.material.color.setHSL(_hsl.h,Math.min(1,_hsl.s*1.1),Math.max(_hsl.l,0.42));
-    }});
-    shrineGroup.remove(g);
-    shrineGroup.add(obj);
-    FREE_MODEL_CREDITS.push({name:'手水舎',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://shoshinshaworks.booth.pm/items/2660016'});
-    refreshCreditsUI();
-    invalidate();
-  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの手水舎のまま */ });
-}
-
-let sensorLight=null, sensorLightOn=false, hallFrontZ=0;
-function buildMainHallProcedural(){
-  const g=new THREE.Group();
-  const platformMat=new THREE.MeshStandardMaterial({color:0x4a4540,roughness:0.9});
-  const wallMat=new THREE.MeshStandardMaterial({color:0x2b2320,roughness:0.85});
-  const roofMat=new THREE.MeshStandardMaterial({color:0x1c1815,roughness:0.7});
-  const halfW=3.4, halfD=2.6, wallH=3.0;
-  const platform=new THREE.Mesh(new THREE.BoxGeometry(halfW*2+0.8,0.4,halfD*2+0.8),platformMat);
-  platform.position.y=0.2; g.add(platform);
-  const walls=new THREE.Mesh(new THREE.BoxGeometry(halfW*2,wallH,halfD*2),wallMat);
-  walls.position.y=0.4+wallH/2; g.add(walls);
-  const roof=new THREE.Mesh(new THREE.ConeGeometry(halfW*1.55,1.6,4),roofMat);
-  roof.rotation.y=Math.PI/4; roof.position.y=0.4+wallH+0.8; g.add(roof);
-  return g;
-}
-
-function placeMainHall(z){
-  const halfW=3.4, halfD=2.6;
-  colliders.push({type:'box',minX:-halfW-0.4,maxX:halfW+0.4,minZ:z-halfD-0.4,maxZ:z+halfD+0.4});
-
-  const fallback=buildMainHallProcedural();
-  fallback.position.set(0,0,z);
-  shrineGroup.add(fallback);
-  loadStaticGLB('models/honden_free.glb').then(obj=>{
-    normalizeToHeight(obj,4.4);
-    obj.position.set(0,0,z);
-    // 元モデルの素材がかなり暗く、このシーンの控えめな照明だと明度を掛け算しただけでは
-    // ほぼ真っ黒に潰れてディテールが見えないため、HSLの明度に下限を設けて底上げする
-    // (色味・彩度はそのまま活かす)。
-    const _hsl={h:0,s:0,l:0};
-    obj.traverse(o=>{ if(o.isMesh&&o.material&&o.material.color){
-      o.material.color.getHSL(_hsl);
-      o.material.color.setHSL(_hsl.h,Math.min(1,_hsl.s*1.1),Math.max(_hsl.l,0.42));
-    }});
-    shrineGroup.remove(fallback);
-    shrineGroup.add(obj);
-    FREE_MODEL_CREDITS.push({name:'Shrine(本殿)',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://booth.pm/ja/items/2659982'});
-    refreshCreditsUI();
-    invalidate();
-  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの本殿のまま */ });
-
-  // 隙間から覗く純黒の引き戸(光の影響を受けない黒=MeshBasicMaterial)。見た目のモデルに関わらず
-  // 参道側の同じ位置に重ねて置く(フリーモデルは旧プロシージャル版より小柄なので、戸も
-  // 建物に対して控えめなアクセントに見える程度のサイズに縮小する)。
-  const door=new THREE.Mesh(new THREE.PlaneGeometry(0.5,1.1),
-    new THREE.MeshBasicMaterial({color:0x000000,side:THREE.DoubleSide}));
-  door.position.set(0,1.0,z-halfD-0.01);
-  door.rotation.y=Math.PI;
-  shrineGroup.add(door);
-
-  // 人感センサーライト: 普段は消灯、参道側から近づくと点灯するハロゲン風の光。
-  sensorLight=new THREE.SpotLight(0xfff0d0,0,11,THREE.MathUtils.degToRad(48),0.4,1.2);
-  sensorLight.position.set(0,3.3,z-halfD-0.3);
-  sensorLight.target.position.set(0,0,z-halfD-4.5);
-  scene.add(sensorLight); scene.add(sensorLight.target);
-  hallFrontZ=z-halfD-0.3;
-}
-
-function buildStatueProcedural(){
-  const g=new THREE.Group();
-  const stoneMat=new THREE.MeshStandardMaterial({color:0x4f5458,roughness:0.95});
-  const pedestal=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.4,0.4),stoneMat);
-  pedestal.position.y=0.2; g.add(pedestal);
-  const body=new THREE.Mesh(new THREE.SphereGeometry(0.32,10,8),stoneMat);
-  body.scale.set(1,1.3,0.85);
-  body.position.y=0.4+0.32*1.3*0.8; g.add(body);
-  return g;
-}
-
-function placeStatues(z){
-  const halfSpan=2.2;
-  [-1,1].forEach(side=>colliders.push({type:'circle',x:side*halfSpan,z,r:0.4}));
-  const fallbacks=[-1,1].map(side=>{
-    const f=buildStatueProcedural(); f.position.set(side*halfSpan,0,z); shrineGroup.add(f); return f;
-  });
-  loadStaticGLB('models/statue_free.glb').then(template=>{
-    normalizeToHeight(template,1.5);
-    fallbacks.forEach(f=>shrineGroup.remove(f));
-    [-1,1].forEach(side=>{
-      const t=template.clone(true);
-      t.position.set(side*halfSpan,0,z);
-      shrineGroup.add(t);
-    });
-    FREE_MODEL_CREDITS.push({name:'Statue(狛犬代替)',author:'Zsky',license:'CC-BY',url:'https://poly.pizza/m/VerAznL5lK'});
-    refreshCreditsUI();
-    invalidate();
-  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの石像のまま */ });
-}
-
-function scatterProps(url,count,minDist,maxDist,zMin,zMax,targetHeight,opts){
-  opts=opts||{};
-  loadStaticGLB(url).then(template=>{
-    normalizeToHeight(template,targetHeight);
-    for(let i=0;i<count;i++){
-      const side=Math.random()<0.5?-1:1;
-      const x=side*(minDist+Math.random()*(maxDist-minDist));
-      const z=zMin+Math.random()*(zMax-zMin);
-      const t=template.clone(true);
-      const s=(opts.scaleMin||0.8)+Math.random()*((opts.scaleMax||1.3)-(opts.scaleMin||0.8));
-      t.position.set(x,0,z);
-      t.rotation.y=Math.random()*Math.PI*2;
-      t.scale.multiplyScalar(s);
-      shrineGroup.add(t);
-      if(opts.collider)colliders.push({type:'circle',x,z,r:(opts.colliderR||0.4)*s});
-    }
-    if(opts.credit){ FREE_MODEL_CREDITS.push(opts.credit); refreshCreditsUI(); }
-    invalidate();
-  }).catch(()=>{ /* 読み込み失敗時はそのプロップなし(元々存在しなかったので実害なし) */ });
-}
-
-function buildForbiddenBoundary(z,halfW){
-  const g=new THREE.Group();
-  const stakeMat=new THREE.MeshStandardMaterial({color:0x2e2015,roughness:0.9});
-  const ropeMat=new THREE.MeshStandardMaterial({color:0xcfc29a,roughness:0.95});
-  const shideMat=new THREE.MeshBasicMaterial({color:0xf2efe6,side:THREE.DoubleSide});
-  const stakeCount=6, stakeH=1.1, xs=[];
-  for(let i=0;i<stakeCount;i++){
-    const x=-halfW+(halfW*2)*(i/(stakeCount-1));
-    xs.push(x);
-    const stake=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.07,stakeH,8),stakeMat);
-    stake.position.set(x,stakeH/2,0); g.add(stake);
-  }
-  for(let i=0;i<xs.length-1;i++){
-    const x0=xs[i],x1=xs[i+1],midX=(x0+x1)/2,len=Math.abs(x1-x0),sag=0.05,ropeY=stakeH*0.82-sag;
-    const rope=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,len,6),ropeMat);
-    rope.rotation.z=Math.PI/2; rope.position.set(midX,ropeY,0); g.add(rope);
-    const shide=new THREE.Mesh(new THREE.PlaneGeometry(0.12,0.3),shideMat);
-    shide.position.set(midX,ropeY-0.18,0); g.add(shide);
-  }
-  g.position.z=z;
-  shrineGroup.add(g);
-  colliders.push({type:'box',minX:-halfW,maxX:halfW,minZ:z-0.15,maxZ:z+0.3});
-}
-
-let entranceLight=null, entranceFlickerT=0;
-function buildEntranceLight(z){
-  entranceLight=new THREE.PointLight(0xfff0c0,1.0,7,2);
-  entranceLight.position.set(0,3.6,z);
-  scene.add(entranceLight);
-}
-
-buildEntranceLight(4);
-placeTorii(6);
-placeTrees();
-buildLantern(-2.6,11,'lit');
-buildLantern(2.6,11,'dark');
-buildLantern(-2.4,15.5,'dark');
-buildLantern(2.4,15.5,'cold');
-buildLantern(-2.8,21,'dark');
-buildLantern(2.8,21,'lit');
-buildLantern(10.5,15,'lit'); // 東側の小広場にひっそり佇む灯籠
-buildBasin(4.4,17.5);
-placeMainHall(30);
-placeStatues(27);
-buildForbiddenBoundary(44,6.5);
-
-// 岩・茂みで地面のディテールを増やす(参道の際・境内・東側の小広場に散布)
-scatterProps('models/rock_free.glb',16,6.0,13,-2,44,0.9,{collider:true,colliderR:0.45,scaleMin:0.7,scaleMax:1.6,
-  credit:{name:'Rock',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/4MUaQTcDdc'}});
-scatterProps('models/bush_free.glb',12,6.5,12.5,-1,44,1.1,{collider:false,scaleMin:0.8,scaleMax:1.4,
-  credit:{name:'Flower Bushes',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/1X06RgvSr6'}});
-
-function updateShrineEffects(dt){
-  if(entranceLight){
-    entranceFlickerT+=dt;
-    let v=0.85+Math.sin(entranceFlickerT*9)*0.08+Math.sin(entranceFlickerT*23)*0.05;
-    if(Math.random()<0.015)v*=0.25;
-    entranceLight.intensity=Math.max(0,v);
-  }
-  if(basinBulb){
-    basinSwingT+=dt;
-    basinBulb.position.x=Math.sin(basinSwingT*1.3)*0.035;
-    basinBulb.position.z=Math.cos(basinSwingT*0.9)*0.025;
-  }
-  if(sensorLight){
-    const d=Math.hypot(charPos.x,charPos.z-hallFrontZ);
-    sensorLightOn=d<5.5;
-    sensorLight.intensity+=((sensorLightOn?1.7:0)-sensorLight.intensity)*Math.min(1,10*dt);
-  }
-}
+// マップは現状「神社」1つのみなので、マニフェストの選択UIは設けず決め打ちで読み込む
+// (2個目以降のマップを追加する際は、maps/<新マップ>.jsを同じインターフェースで書いて
+// manifest.jsに登録すればよい設計にしてある。詳細はSHRINE_REDESIGN_PLAN.md参照)。
+const currentMap=GhostMaps.shrine.build({scene,colliders,loadStaticGLB,normalizeToHeight,pushCredit});
 
 // --- キャラクター ---
 const characterRoot=new THREE.Group();
@@ -989,10 +612,9 @@ addEventListener('resize',resize); resize();
 // 位置し+Z(鳥居の方)を向くようπにする。こうしないと既定状態でWキーが参道と逆に進んでしまう。
 let orbitYaw=Math.PI, orbitPitch=0.35;
 let camDist=3.6; const CAM_DIST_MIN=1.6, CAM_DIST_MAX=8.0;
-let charYaw=0;
-const charPos=new THREE.Vector3(0,0,0);
+let charYaw=currentMap.spawnPoint.yaw;
+const charPos=new THREE.Vector3(currentMap.spawnPoint.x,currentMap.groundHeightAt(currentMap.spawnPoint.x,currentMap.spawnPoint.z),currentMap.spawnPoint.z);
 const MOVE_SPEED=3.2, YAW_LERP=12, BLEND_LERP=8, CHAR_R=0.3;
-const CORRIDOR_HALF_W=7.5, PATH_MIN_Z=-3, PATH_MAX_Z=43;
 let currentBlend=0;
 
 function lerpAngle(a,b,t){
@@ -1076,15 +698,10 @@ cvs.addEventListener('wheel',e=>{
   invalidate();
 },{passive:false});
 
-// 境内(z=12〜19)だけ東側(+X)の境界を張り出させ、木立の奥に隠れた小さな広場を作る。
-function corridorBoundsAt(z){
-  if(z>=12&&z<=19)return {left:-CORRIDOR_HALF_W,right:14};
-  return {left:-CORRIDOR_HALF_W,right:CORRIDOR_HALF_W};
-}
 function resolveCollision(pos){
-  const b=corridorBoundsAt(pos.z);
+  const b=currentMap.corridorBoundsAt(pos.z);
   pos.x=Math.max(b.left+CHAR_R,Math.min(b.right-CHAR_R,pos.x));
-  pos.z=Math.max(PATH_MIN_Z+CHAR_R,Math.min(PATH_MAX_Z-CHAR_R,pos.z));
+  pos.z=Math.max(currentMap.zMin+CHAR_R,Math.min(currentMap.zMax-CHAR_R,pos.z));
   colliders.forEach(c=>{
     if(c.type==='circle'){
       const dx=pos.x-c.x, dz=pos.z-c.z, d=Math.hypot(dx,dz), minD=c.r+CHAR_R;
@@ -1120,7 +737,7 @@ function updateCamera(dt){
   // 手前で遮られていたらそこで止める(見た目上の"カメラが茂みの中に埋まる"問題を防ぐ)。
   _camDir.copy(_camOffset); const desiredDist=_camDir.length(); _camDir.normalize();
   _camRaycaster.set(_camTarget,_camDir); _camRaycaster.near=0.1; _camRaycaster.far=desiredDist;
-  const hits=_camRaycaster.intersectObject(shrineGroup,true);
+  const hits=_camRaycaster.intersectObject(currentMap.group,true);
   const dist=hits.length?Math.max(0.6,hits[0].distance-0.3):desiredDist;
   _camDesired.copy(_camTarget).addScaledVector(_camDir,dist);
 
@@ -1148,9 +765,9 @@ const clock=new THREE.Clock();
 window.__ghostController={ get charPos(){return charPos;}, get charYaw(){return charYaw;},
   get orbitYaw(){return orbitYaw;}, get orbitPitch(){return orbitPitch;}, get camDist(){return camDist;},
   get currentBlend(){return currentBlend;}, get model(){return model;}, get scene(){return scene;},
-  get ground(){return ground;}, get charHeight(){return charHeight;}, get charCenterY(){return charCenterY;},
-  get sensorLightOn(){return sensorLightOn;},
-  setCharPos(x,z){ charPos.set(x,0,z); resolveCollision(charPos); invalidate(); } };
+  get charHeight(){return charHeight;}, get charCenterY(){return charCenterY;}, get currentMap(){return currentMap;},
+  get camPosition(){return cam.position;}, get camTarget(){return _camTarget;},
+  setCharPos(x,z){ charPos.set(x,0,z); resolveCollision(charPos); charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z); invalidate(); } };
 
 function tick(){
   requestAnimationFrame(tick);
@@ -1168,7 +785,7 @@ function tick(){
   }
 }
 function frame(dt){
-  updateShrineEffects(dt);
+  currentMap.update(dt,charPos);
   updateDust(dt);
   updateNoise();
   invalidate(); // 点滅灯・吊り電球の揺れ・ホコリの浮遊は常時アニメーションするため毎フレーム再描画
@@ -1197,7 +814,8 @@ function frame(dt){
       charPos.add(disp);
       resolveCollision(charPos);
     }
-    characterRoot.position.set(charPos.x,0,charPos.z);
+    charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z);
+    characterRoot.position.set(charPos.x,charPos.y,charPos.z);
 
     updateFlashlight();
     updatePipCameras();
@@ -1253,7 +871,6 @@ applyBrightness(+document.getElementById('cfgBrightness').value);
 applyCharBrightness(+document.getElementById('cfgCharBrightness').value);
 applyNoise(+document.getElementById('cfgNoise').value);
 applyFpsLimit(document.getElementById('cfgFpsLimit').value);
-buildBoundaryLines(); // corridorBoundsAt/PATH_MIN_Z/PATH_MAX_Zの宣言が済んだ後でないと呼べない
 tick();
 })();
 </script>
