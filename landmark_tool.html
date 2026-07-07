@@ -375,7 +375,6 @@ let imgs={front:null,side:null,back:null};
 let curView="front";
 function curImg(){return imgs[curView];}
 let accessories=[], pendingAcc=null, pendingAccEditIdx=null, pendingAccEditOriginal=null;
-const SEAM_DEFAULT_DEG=45;
 const BONE_JP={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
   clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
   clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
@@ -721,11 +720,11 @@ const NORMAL_SESSION_KEY="3dtoolJS_normal_session_v1";
 const SAMPLE_SESSION_KEY="3dtoolJS_sample_session_v1";
 function saveNormalSession(){
   try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(buildJson())); }
-  catch(e){ console.warn("セッション保存に失敗しました:", e); }
+  catch(e){ console.warn("セッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
 }
 function saveSampleSession(){
   try{ localStorage.setItem(SAMPLE_SESSION_KEY, JSON.stringify(buildJson())); }
-  catch(e){ console.warn("サンプルセッション保存に失敗しました:", e); }
+  catch(e){ console.warn("サンプルセッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
 }
 function imageElementToBlob(imgEl,w,h){
   return new Promise(res=>{
@@ -741,7 +740,7 @@ async function saveNormalSessionImages(){
     if(im) blobs[slot]=await imageElementToBlob(im.el,im.w,im.h);
   }
   try{ await P3D.saveNormalSessionImages(blobs); }
-  catch(e){ console.warn("画像セッション保存に失敗しました:", e); }
+  catch(e){ console.warn("画像セッション保存に失敗しました:", e); setMsg("画像の自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
 }
 
 // ★常時オートセーブ: 以前は「モデル生成」完了時にしか保存されず、生成前に閉じると
@@ -933,8 +932,8 @@ function computeBonePivots(){
   if(!analysis||!points) return null;
   try{
     const derivedBase=deriveFromPoints(points,analysis);
-    const LM=P3D.buildDerivedLandmarks(points,analysis,derivedBase);
-    return P3D.computePivots(analysis.mask,analysis.W,analysis.H,analysis.ytop,analysis.ybot,analysis.cx,LM);
+    const derivedLandmarks=P3D.buildDerivedLandmarks(points,analysis,derivedBase);
+    return P3D.computePivots(analysis.mask,analysis.W,analysis.H,analysis.ytop,analysis.ybot,analysis.cx,derivedLandmarks);
   }catch(e){ console.error("computeBonePivots failed",e); return null; }
 }
 function drawBoneOverlay(x,sc){
@@ -1092,17 +1091,23 @@ function draw(){
 /* ---------- ファイル読み込み ---------- */
 function loadImg(file,slot){
   const r=new FileReader();
-  r.onload=()=>{const el=new Image();el.onload=()=>{
-    imgs[slot]={el,w:el.naturalWidth,h:el.naturalHeight};
-    $("slot"+slot[0].toUpperCase()+slot.slice(1)).classList.add("on");
-    $("slot"+slot[0].toUpperCase()+slot.slice(1)).querySelector("small").textContent="✓ 読込済";
-    previewCache={key:null,view:null,canvas:null,w:0,h:0};
-    syncViewBtns();
-    // 正面だけで編集画面(editor)に遷移すると側面/背面を読み込む前に画面が
-    // 切り替わってしまう(「生成」には結局3枚とも必須)。3枚とも読込済みに
-    // なってから初めて自動仮配置して編集画面へ進む。
-    if(imgs.front&&imgs.side&&imgs.back)runAnalyze();
-  };el.src=r.result;};
+  r.onload=()=>{
+    const el=new Image();
+    el.onload=()=>{
+      imgs[slot]={el,w:el.naturalWidth,h:el.naturalHeight};
+      $("slot"+slot[0].toUpperCase()+slot.slice(1)).classList.add("on");
+      $("slot"+slot[0].toUpperCase()+slot.slice(1)).querySelector("small").textContent="✓ 読込済";
+      previewCache={key:null,view:null,canvas:null,w:0,h:0};
+      syncViewBtns();
+      // 正面だけで編集画面(editor)に遷移すると側面/背面を読み込む前に画面が
+      // 切り替わってしまう(「生成」には結局3枚とも必須)。3枚とも読込済みに
+      // なってから初めて自動仮配置して編集画面へ進む。
+      if(imgs.front&&imgs.side&&imgs.back)runAnalyze();
+    };
+    el.onerror=()=>{ setMsg("画像の読込に失敗しました("+slot+")。別のファイルをお試しください。"); };
+    el.src=r.result;
+  };
+  r.onerror=()=>{ setMsg("ファイルの読込に失敗しました("+slot+")。"); };
   r.readAsDataURL(file);
 }
 function runAnalyze(){
@@ -1110,7 +1115,7 @@ function runAnalyze(){
   if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
   analysis=A;points=placeAll(A);sel=null;curView="front";
   $("editor").classList.remove("hidden");$("hint").classList.add("hidden");
-  renderAcList();renderSeamList();syncViewBtns();
+  renderAcList();syncViewBtns();
   resyncAnalysisToProfile();
   draw();
   setMsg("前処理OK  shoulder v="+A.shoulder_v.toFixed(3)+"(det="+A.shoulder_detected+") waist v="+A.waist_v.toFixed(3)+" hip v="+A.hip_v.toFixed(3));
@@ -1223,7 +1228,7 @@ function exUndoLast(){
   if(last.view===curView)draw();
   setMsg(VIEWJP[last.view]+"の除外操作を1つ元に戻しました(残り"+exUndo.length+"回分)。");
 }
-const ptrs=new Map(); let mode=null,lastX=0,lastY=0,pinchD=0;
+const ptrs=new Map(); let ptrMode=null,lastX=0,lastY=0,pinchD=0;
 let pointsLocked=false; // trueの間は画像上のタップ/ドラッグが常にパンになり、
                         // 点には触れない(拡大/縮小・位置合わせ中に誤って
                         // 点を動かしてしまう事故を防ぐ)。
@@ -1237,13 +1242,13 @@ cvs.addEventListener("pointerdown",e=>{
     if(curTab==="ex"&&!pointsLocked){
       const p=toImg(e), px=Math.round(p[0]), py=Math.round(p[1]);
       if(exMode==="brush"){
-        mode="paint";
+        ptrMode="paint";
         brushCursor=[px,py];
         exSnapshot(curView); // ひとストローク単位で1回だけ記録
         paintBrush(curView,px,py,parseInt($("exSlider").value,10),exAction==="add");
         draw();
       }else{
-        mode=null;
+        ptrMode=null;
         const s=floodFillSelect(curView,px,py,parseInt($("exSlider").value,10));
         if(s){exSnapshot(curView);applyExcludeSelection(curView,s,exAction==="add");}
         else setMsg("シルエットの外をタップしました。キャラクターの上をタップしてください。");
@@ -1258,14 +1263,14 @@ cvs.addEventListener("pointerdown",e=>{
       pts.forEach(pp=>{const dd=Math.hypot(pp.pos[0]-p[0],pp.pos[1]-p[1]);if(dd<nd){nd=dd;near=pp;}});
     }
     const sc=((wrap.clientWidth||360)/curImg().w)*view.z;
-    if(near&&nd<20/sc){mode="point";dragPoint=near;sel=near.key;syncChips();draw();}
-    else{mode="pan";lastX=e.clientX;lastY=e.clientY;}
-  }else if(ptrs.size===2){mode="pinch";pinchD=_dist();dragPoint=null;}
+    if(near&&nd<20/sc){ptrMode="point";dragPoint=near;sel=near.key;syncChips();draw();}
+    else{ptrMode="pan";lastX=e.clientX;lastY=e.clientY;}
+  }else if(ptrs.size===2){ptrMode="pinch";pinchD=_dist();dragPoint=null;}
 });
 cvs.addEventListener("pointermove",e=>{
   if(!ptrs.has(e.pointerId))return;
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
-  if(mode==="pinch"&&ptrs.size>=2){
+  if(ptrMode==="pinch"&&ptrs.size>=2){
     const d=_dist();
     if(pinchD>0){const rc=cvs.getBoundingClientRect(),m=_mid();
       const mx=(m[0]-rc.left)*(cvs.width/rc.width),my=(m[1]-rc.top)*(cvs.height/rc.height);
@@ -1273,21 +1278,21 @@ cvs.addEventListener("pointermove",e=>{
       const imx=(mx-view.ox)/(base*z0),imy=(my-view.oy)/(base*z0);
       view.z=z1;view.ox=mx-imx*base*z1;view.oy=my-imy*base*z1;draw();}
     pinchD=d;
-  }else if(mode==="paint"){
+  }else if(ptrMode==="paint"){
     const p=toImg(e);
     brushCursor=[Math.round(p[0]),Math.round(p[1])];
     paintBrush(curView,brushCursor[0],brushCursor[1],parseInt($("exSlider").value,10),exAction==="add");
     draw();
-  }else if(mode==="point"&&dragPoint){
+  }else if(ptrMode==="point"&&dragPoint){
     const p=toImg(e);dragPoint.set([Math.round(p[0]),Math.round(p[1])]);draw();
-  }else if(mode==="pan"){
+  }else if(ptrMode==="pan"){
     view.ox+=(e.clientX-lastX);view.oy+=(e.clientY-lastY);lastX=e.clientX;lastY=e.clientY;draw();
   }
 });
 function endPtr(e){ptrs.delete(e.pointerId);
-  if(ptrs.size===0){ mode=null;dragPoint=null;
+  if(ptrs.size===0){ ptrMode=null;dragPoint=null;
     if(brushCursor){brushCursor=null;draw();} }
-  else if(ptrs.size===1){const v=[...ptrs.values()][0];mode="pan";lastX=v.x;lastY=v.y;}
+  else if(ptrs.size===1){const v=[...ptrs.values()][0];ptrMode="pan";lastX=v.x;lastY=v.y;}
   else if(ptrs.size>=2){pinchD=_dist();}}
 cvs.addEventListener("pointerup",endPtr);
 cvs.addEventListener("pointercancel",endPtr);
@@ -1318,10 +1323,15 @@ function buildJson(){
 }
 function exportJson(){
   if(!points||!analysis)return;
-  const str=JSON.stringify(buildJson(),null,1),blob=new Blob([str],{type:"application/json"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="landmarks_ai.json";
-  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-  setMsg("landmarks_ai.json を書き出しました。失敗する場合は「コピー」を使ってください。");
+  try{
+    const str=JSON.stringify(buildJson(),null,1),blob=new Blob([str],{type:"application/json"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="landmarks_ai.json";
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    setMsg("landmarks_ai.json を書き出しました。失敗する場合は「コピー」を使ってください。");
+  }catch(e){
+    console.warn("landmarks_ai.json の書き出しに失敗しました:", e);
+    setMsg("書き出しに失敗しました。「コピー」をお試しください。");
+  }
 }
 async function copyJson(){
   if(!points||!analysis)return;
@@ -1373,7 +1383,7 @@ function applyLoadedJson(d){
     im.src=masks[v];
   });
   sel=null;pendingAcc=null;
-  syncChips();renderAcList();renderSeamList();syncViewBtns();draw();
+  syncChips();renderAcList();syncViewBtns();draw();
   setMsg("landmarks_ai.json を読み込みました(正面/側面/背面画像は別途読み込み済みのものを使います)。");
 }
 function loadJsonFile(file){
@@ -1587,7 +1597,6 @@ function renderAcList(){
       if(oldKey!==newKey && seamAngles[oldKey]!==undefined){
         seamAngles[newKey]=seamAngles[oldKey];delete seamAngles[oldKey];
       }
-      renderSeamList();
     };
   });
   [].forEach.call(el.querySelectorAll(".ed"),s=>{
@@ -1604,7 +1613,7 @@ function renderAcList(){
       setMsg("アクセサリーを編集中です。各点を調整して保存してください。");
     };
   });
-  [].forEach.call(el.querySelectorAll(".rm"),s=>{s.onclick=()=>{accessories.splice(+s.dataset.i,1);renderAcList();renderSeamList();draw();};});
+  [].forEach.call(el.querySelectorAll(".rm"),s=>{s.onclick=()=>{accessories.splice(+s.dataset.i,1);renderAcList();draw();};});
 }
 function imgYExtent(view){
   // その面(side/back)の画像自身のシルエット上端/下端(px)を求め、img
@@ -1653,87 +1662,6 @@ function anchorFrontPos(joint){
     return{cx:p1[0]+dx*0.35,cy:p1[1]+dy*0.35,angle:Math.atan2(dy,dx)*180/Math.PI,len:Math.hypot(dx,dy)*0.5};
   }
   return null;
-}
-let seamGroupOpen={}; // 境目角度アコーディオンの開閉状態(既定は全部閉じる)
-function seamRowHtml(label,key,v,ns,rangeAttr){
-  return '<div class="acitem"><span class="nm">'+label+'</span>'+
-    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-seam-range="'+key+'" style="flex:1;min-width:50px">'+
-    '<input type="number" min="1" max="89" step="1" value="'+v+'" '+rangeAttr+'="'+key+'" style="width:48px">°'+
-    '<label style="font-size:11px;color:var(--mut);margin-left:6px;white-space:nowrap">'+
-    '<input type="checkbox" data-seam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面画像を使う</label>'+
-    '</div>';
-}
-function seamGroupChanged(bones){
-  return bones.some(b=>seamAngles[b]!==undefined||seamNoSide[b]);
-}
-function renderSeamList(){
-  // ★Task3: 「画像境界」タブのUI(#seamList)自体を削除したため、この関数は
-  // 何もしない(seamAngles/seamNoSideのデータ自体はbuildJson()/applyLoadedJson()
-  // 等で引き続き読み書きされる。呼び出し箇所は互換のため残してある)。
-  const el=$("seamList");
-  if(!el) return;
-  const boneGroupsHtml=BONE_GROUPS.map(grp=>{
-    const rows=grp.bones.map(b=>{
-      const v=(seamAngles[b]!==undefined)?seamAngles[b]:SEAM_DEFAULT_DEG;
-      return seamRowHtml(BONE_JP[b]||b,b,v,!!seamNoSide[b],"data-seam-bone");
-    }).join("");
-    const changed=seamGroupChanged(grp.bones), isOpen=!!seamGroupOpen[grp.label];
-    return '<details class="accgroup" data-seamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
-      '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
-      '<span>'+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span>'+
-      '</summary><div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
-  }).join("");
-  let accHtml="";
-  if(accessories.length){
-    const keys=accessories.map(a=>"acc:"+(a.name||"accessory"));
-    const rows=accessories.map(a=>{
-      const key="acc:"+(a.name||"accessory");
-      const v=(seamAngles[key]!==undefined)?seamAngles[key]:SEAM_DEFAULT_DEG;
-      return seamRowHtml(a.name||"(無名)",key,v,!!seamNoSide[key],"data-seam-acc");
-    }).join("");
-    const changed=seamGroupChanged(keys), isOpen=!!seamGroupOpen["アクセサリー"];
-    accHtml='<details class="accgroup" data-seamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
-      '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
-      '<span>アクセサリー個別</span><span class="accCount">'+keys.length+'項目</span>'+
-      '</summary><div class="accbody"><p style="font-size:10.5px;color:var(--mut);margin:0 0 8px">'+
-      '未設定はパーツの角度に従います。</p><div class="aclist">'+rows+'</div></div></details>';
-  }
-  el.innerHTML=boneGroupsHtml+accHtml;
-  function wireAngle(sel,attr,onSet){
-    [].forEach.call(el.querySelectorAll(sel),inp=>{
-      inp.oninput=()=>{
-        const key=inp.dataset[attr], n=parseInt(inp.value,10);
-        onSet(key,n);
-        const rangeEl=el.querySelector('[data-seam-range="'+key+'"]');
-        const numEl=el.querySelector('[data-seam-bone="'+key+'"],[data-seam-acc="'+key+'"]');
-        if(rangeEl && isFinite(n)) rangeEl.value=n;
-        if(numEl && numEl!==inp && isFinite(n)) numEl.value=n;
-      };
-    });
-  }
-  wireAngle("[data-seam-bone]","seamBone",(b,n)=>{
-    if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[b]; else seamAngles[b]=n;
-  });
-  wireAngle("[data-seam-acc]","seamAcc",(key,n)=>{
-    if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[key]; else seamAngles[key]=n;
-  });
-  [].forEach.call(el.querySelectorAll("[data-seam-range]"),rg=>{
-    rg.oninput=()=>{
-      const key=rg.dataset.seamRange, n=parseInt(rg.value,10);
-      if(!isFinite(n)||n<1||n>89||n===SEAM_DEFAULT_DEG) delete seamAngles[key]; else seamAngles[key]=n;
-      const numEl=el.querySelector('[data-seam-bone="'+key+'"],[data-seam-acc="'+key+'"]');
-      if(numEl)numEl.value=n;
-    };
-  });
-  [].forEach.call(el.querySelectorAll("[data-seam-side]"),cb=>{
-    cb.onchange=()=>{
-      const key=cb.dataset.seamSide;
-      if(cb.checked) delete seamNoSide[key]; else seamNoSide[key]=true;
-    };
-  });
-  [].forEach.call(el.querySelectorAll("details[data-seamgroup]"),d=>{
-    d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.seamgroup]=d.open; });
-  });
 }
 /* ---------- 凡例チップ ---------- */
 function buildLegend(){
@@ -1966,7 +1894,6 @@ function wireBoneToggle(overlayId,regionId){
 wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
 wireBoneToggle("boneOverlayToggleAC","boneRegionToggleAC");
 buildLegend();
-renderSeamList();
 renderParamsPanel();
 renderOutlinePanel();
 (function(){
