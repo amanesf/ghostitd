@@ -95,6 +95,14 @@
     background:#161a1f;color:var(--txt);font-size:11.5px;padding:0 6px}
   .pitem .punit{color:var(--mut);font-size:10px;flex:0 0 auto}
   #genPanelStatus{font-size:11px;color:var(--mint);min-height:14px}
+  /* Task1: 継ぎ目角度(seamAngles/seamNoSide)のボーン別一覧。landmark_tool.htmlの
+     .aclist/.acitemを移植 */
+  .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
+  .acitem{display:flex;align-items:center;gap:8px;font-size:11.5px;background:rgba(255,255,255,.04);
+    border:1px solid var(--line);border-radius:9px;padding:6px 8px}
+  .acitem .nm{flex:0 0 52px;color:var(--txt)}
+  .acitem input[type=number]{width:44px;height:26px;border-radius:6px;border:1px solid var(--line);
+    background:#161a1f;color:var(--txt);font-size:11px;padding:0 4px}
 </style></head>
 <body>
 <canvas id="c"></canvas>
@@ -193,6 +201,8 @@
   <div class="vtabpanel" data-vtabpanel="gen" id="genPanel">
     <div id="genPanelStatus"></div>
     <div id="genParamsPanel"></div>
+    <!-- Task1: ボーン別の継ぎ目角度(seamAngles)/側面画像使用有無(seamNoSide) -->
+    <div id="genSeamPanel"></div>
     <!-- フェーズ3: 現在のライブ調整状態からの最終出力 -->
     <div class="row">
       <button class="btn mint" id="exportGlbBtn">GLB書き出し</button>
@@ -554,6 +564,10 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 let currentPackage=null; // フェーズ2のライブパラメータ編集用に保持しておく
 let liveGP=null;         // currentPackage.gen_paramsのコピー。パネル操作で更新する
 let liveSeamSmoothIters=null, liveColorGradWidth=null;
+// ★追加課題5の対応: seamAngles/seamNoSide(ボーン別の継ぎ目角度・側面画像
+// 不使用フラグ)もビューアでライブ編集できるようにする(landmark_tool.htmlの
+// 「境目角度」タブと同じBONE_GROUPS/seamRowHtmlパターンを移植)。
+let liveSeamAngles=null, liveSeamNoSide=null;
 document.getElementById('err').textContent='';
 (async function(){
   try{
@@ -564,9 +578,11 @@ document.getElementById('err').textContent='';
       liveGP = Object.assign({}, pkg.gen_params);
       liveSeamSmoothIters = pkg.seam_smooth_iters;
       liveColorGradWidth = pkg.color_grad_width;
+      liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
+      liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
       document.getElementById('err').textContent='モデルを構築中…';
       const glb = await P3D.finishFromIntermediate(pkg, {
-        gp: liveGP, seamAngles: pkg.seam_angles, seamNoSide: pkg.seam_no_side,
+        gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
         seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
       }, (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
       document.getElementById('err').textContent='';
@@ -574,6 +590,7 @@ document.getElementById('err').textContent='';
       loadGLB(glb,loadMotionClips);
       document.getElementById('genTabBtn').style.display='';
       renderGenParamsPanel();
+      renderSeamPanel();
       return;
     }
   }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル構築に失敗しました: '+((e&&e.message)||e); }
@@ -662,6 +679,86 @@ function renderGenParamsPanel(){
     };
   });
 }
+/* ---------- Task1: seamAngles/seamNoSideのボーン別ライブ編集 ---------- */
+// landmark_tool.htmlのBONE_GROUPS/BONE_JP/seamRowHtmlパターンをそのまま移植。
+const SEAM_DEFAULT_DEG=45;
+const BONE_JP_V={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
+  clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
+  clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
+  thigh_L:"腿L",shin_L:"すねL",foot_L:"足L",toe_L:"つま先L",
+  thigh_R:"腿R",shin_R:"すねR",foot_R:"足R",toe_R:"つま先R"};
+const BONE_GROUPS_V=[
+  {label:"体幹", bones:["hips","torso","chest","neck","head"]},
+  {label:"左腕", bones:["clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L"]},
+  {label:"右腕", bones:["clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R"]},
+  {label:"左脚", bones:["thigh_L","shin_L","foot_L","toe_L"]},
+  {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
+];
+let seamGroupOpen={};
+function seamRowHtmlV(label,key,v,ns){
+  return '<div class="acitem"><span class="nm">'+label+'</span>'+
+    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-vseam-range="'+key+'" style="flex:1;min-width:40px">'+
+    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-vseam-key="'+key+'" style="width:44px">°'+
+    '<label style="font-size:10.5px;color:var(--mut);margin-left:4px;white-space:nowrap">'+
+    '<input type="checkbox" data-vseam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面</label>'+
+    '</div>';
+}
+function renderSeamPanel(){
+  const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
+  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  const boneGroupsHtml=BONE_GROUPS_V.map(grp=>{
+    const rows=grp.bones.map(b=>{
+      const v=(liveSeamAngles[b]!==undefined)?liveSeamAngles[b]:SEAM_DEFAULT_DEG;
+      return seamRowHtmlV(BONE_JP_V[b]||b,b,v,!!liveSeamNoSide[b]);
+    }).join("");
+    const isOpen=!!seamGroupOpen[grp.label];
+    return '<details class="accgroup" data-vseamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }).join("");
+  let accHtml="";
+  if(accKeys.length){
+    const rows=accKeys.map(key=>{
+      const v=(liveSeamAngles[key]!==undefined)?liveSeamAngles[key]:SEAM_DEFAULT_DEG;
+      return seamRowHtmlV(key.replace(/^acc:/,""),key,v,!!liveSeamNoSide[key]);
+    }).join("");
+    const isOpen=!!seamGroupOpen["アクセサリー"];
+    accHtml='<details class="accgroup" data-vseamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }
+  el.innerHTML=boneGroupsHtml+accHtml;
+  [].forEach.call(el.querySelectorAll("details[data-vseamgroup]"),d=>{
+    d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.vseamgroup]=d.open; });
+  });
+  function setAngle(key,n){
+    if(!isFinite(n)||n<1||n>89) return;
+    liveSeamAngles[key]=n;
+  }
+  [].forEach.call(el.querySelectorAll("[data-vseam-key]"),inp=>{
+    inp.onchange=()=>{
+      const key=inp.dataset.vseamKey, n=parseInt(inp.value,10);
+      setAngle(key,n);
+      const rg=el.querySelector('[data-vseam-range="'+key+'"]'); if(rg)rg.value=inp.value;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-vseam-range]"),rg=>{
+    rg.oninput=()=>{
+      const key=rg.dataset.vseamRange, n=parseInt(rg.value,10);
+      setAngle(key,n);
+      const numEl=el.querySelector('[data-vseam-key="'+key+'"]'); if(numEl)numEl.value=rg.value;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-vseam-side]"),cb=>{
+    cb.onchange=()=>{
+      const key=cb.dataset.vseamSide;
+      if(cb.checked) delete liveSeamNoSide[key]; else liveSeamNoSide[key]=true;
+      scheduleGenRecompute();
+    };
+  });
+}
 let genRecomputeTimer=null, genRecomputeBusy=false, genRecomputeQueued=false;
 function scheduleGenRecompute(){
   clearTimeout(genRecomputeTimer);
@@ -675,7 +772,7 @@ async function doGenRecompute(){
   try{
     statusEl.textContent='更新中…';
     const glb=await P3D.finishFromIntermediate(currentPackage, {
-      gp: liveGP, seamAngles: currentPackage.seam_angles, seamNoSide: currentPackage.seam_no_side,
+      gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
       seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
     }, (label)=>{ statusEl.textContent='更新中: '+label; });
     lastModelBuf=glb;
@@ -701,7 +798,7 @@ document.getElementById('exportGlbBtn').onclick=async()=>{
   try{
     statusEl.textContent='GLBを書き出し中…';
     const glb=await P3D.finishFromIntermediate(currentPackage, {
-      gp: liveGP, seamAngles: currentPackage.seam_angles, seamNoSide: currentPackage.seam_no_side,
+      gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
       seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
     }, (label)=>{ statusEl.textContent='書き出し中: '+label; });
     lastModelBuf=glb;
@@ -728,6 +825,8 @@ function buildLiveJson(){
     gen_params: Object.assign({}, base.gen_params||{}, liveGP),
     seam_smooth_iters: liveSeamSmoothIters,
     color_grad_width: liveColorGradWidth,
+    seam_angles: Object.assign({}, liveSeamAngles),
+    seam_no_side: Object.assign({}, liveSeamNoSide),
   });
 }
 document.getElementById('exportJsonBtn').onclick=()=>{
