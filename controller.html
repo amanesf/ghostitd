@@ -137,13 +137,13 @@
     <input type="range" id="cfgBrightness" min="0" max="100" value="10">
   </label></div>
   <div class="cfgRow"><label>キャラの明るさ
-    <input type="range" id="cfgCharBrightness" min="20" max="150" value="50">
+    <input type="range" id="cfgCharBrightness" min="20" max="150" value="85">
   </label></div>
   <div class="cfgRow"><label>ノイズ(高感度)
     <input type="range" id="cfgNoise" min="0" max="100" value="18">
   </label></div>
   <div class="cfgRow"><label>彩度
-    <input type="range" id="cfgSaturation" min="0" max="100" value="33">
+    <input type="range" id="cfgSaturation" min="0" max="100" value="70">
   </label></div>
   <div class="cfgRow"><label>FPS上限
     <select id="cfgFpsLimit">
@@ -365,7 +365,7 @@ let model=null, mixer=null, idleAction=null, runAction=null, handBone=null, head
 let flashLight=null, flashProp=null, flashOn=true;
 let charHeight=1.7, charCenterY=0.9; // モデル読込後にバウンディングボックスから実測して上書き
 let characterMaterials=[]; // キャラのMeshBasicMaterial一覧。configの「キャラの明るさ」で色を一括調整するために保持
-let charBrightnessPct=100; // configパネルの現在値。モデル差し替え時にも新しいマテリアルへ再適用する
+let charBrightnessPct=85; // configパネルの現在値。モデル差し替え時にも新しいマテリアルへ再適用する
 
 function clearCharacter(){
   if(model){ characterRoot.remove(model); model=null; }
