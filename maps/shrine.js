@@ -215,9 +215,27 @@ build(env){
     addBoundaryLine(bS.left,PATH_MIN_Z,bS.right,PATH_MIN_Z);
     addBoundaryLine(bE.left,PATH_MAX_Z,bE.right,PATH_MAX_Z);
   }
-  // 生け垣(bush_free.glb)はuser指摘により撤去(水草のように見える浮遊バグの元だった)。
-  // 敷地境界は光る線(addBoundaryLine)のみで表現する。生け垣を復活させる場合は
-  // 別の(バグの無い)植生モデルをStep3で調達してから検討する。
+  // 生け垣(hedge_straight_free.glb、Isa Lousberg/CC0)を境界に沿って並べる。旧bush_free.glb
+  // (水草のように見える浮遊バグの元)は撤去済みで、three.jsプレビューで実際に「密でずんぐりした
+  // 丸みのある植え込み」と目視確認できたモデルに差し替えた(threejsプレビューで確認済み、
+  // 名前だけで採用しない方針を徹底)。
+  function buildHedge(){
+    const STEP=3.4;
+    loadStaticGLB('models/hedge_straight_free.glb').then(template=>{
+      centerXZ(template);
+      for(let z=PATH_MIN_Z+2;z<=PATH_MAX_Z-2;z+=STEP){
+        const b=corridorBoundsAt(z);
+        [b.left-0.5,b.right+0.5].forEach(x=>{
+          const t=template.clone(true);
+          normalizeToHeight(t,0.85+Math.random()*0.25);
+          t.rotation.y=Math.PI/2;
+          placeOnGround(t,x,z);
+          group.add(t);
+        });
+      }
+      pushCredit(CREDIT_HEDGE);
+    }).catch(()=>{});
+  }
 
   // ================= 設置物 =================
   function placeStatic(url,x,z,targetHeight,opts){
@@ -235,30 +253,122 @@ build(env){
     }).catch(()=>console.warn('[shrine] failed to load',url));
   }
 
-  const CREDIT_TORII_HERO={name:'Japanese Torii',author:'Jacques Fourie',license:'CC-BY',url:'https://poly.pizza/m/cXyQGUwmlA5'};
   const CREDIT_LANTERN={name:'Toro',author:'Matt Newell',license:'CC-BY',url:'https://poly.pizza/m/0SguM8o_PMc'};
   const CREDIT_LANTERN_ALT={name:'Japanese Stone Lamp',author:'Flopsi',license:'CC-BY 3.0',url:'https://poly.pizza/m/5gZfOZIW92k'};
   const CREDIT_SHRINE1={name:'Shrine',author:'Kay Lousberg',license:'CC0',url:'https://poly.pizza/m/Qq8M5LSXQ2'};
   const CREDIT_SHRINE2={name:'Shrine(石柱)',author:'Kay Lousberg',license:'CC0',url:'https://poly.pizza/m/tFxdxO5clk'};
   const CREDIT_PINE={name:'Pine Tree',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/gX8WmgkeEm'};
   const CREDIT_ROCK={name:'Rock',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/4MUaQTcDdc'};
+  const CREDIT_BUSH_LARGE={name:'Bush Large',author:'Isa Lousberg',license:'CC0',url:'https://poly.pizza/m/VKKkva9Whj'};
+  const CREDIT_HEDGE={name:'Hedge Straight Long',author:'Isa Lousberg',license:'CC0',url:'https://poly.pizza/m/So5EAOMoNy'};
   const CREDIT_BRIDGE={name:'Small Bridge',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/j4KsIuJYnq'};
   const CREDIT_FENCE={name:'Fence',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/r0n40F7FKx'};
   const CREDIT_SIGNPOST={name:'Signpost',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/3U2lj1gpeH'};
   const CREDIT_HONDEN={name:'Shrine(本殿)',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://booth.pm/ja/items/2659982'};
   const CREDIT_CHOUZUYA={name:'手水舎',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://shoshinshaworks.booth.pm/items/2660016'};
 
-  // --- 一の鳥居(参道入口)。大型鳥居は一の鳥居/二の鳥居の2基のみ。
-  //     現行のtorii_hero_free(Jacques Fourie、提灯付き)は暫定続投だが、Step4で
-  //     プロシージャル自作の明神鳥居に置き換え予定(提灯も撤去)。 ---
+  // --- 鳥居(プロシージャル自作、明神鳥居)。フリーモデル(角ばったsugamo版・
+  //     変な提灯付きのJacques Fourie版)はすべて不採用とし、笠木の反り・島木・貫・
+  //     額束・台輪・亀腹まで再現した専用ジェネレータで生成する(SHRINE_REDESIGN_PLAN.md
+  //     第11弾Step4参照)。大型鳥居は一の鳥居/二の鳥居の2基のみ、摂社前には
+  //     縮小版のミニ鳥居を置く(いずれも同じジェネレータを使い回す)。
+  const TORII_RED=0xa8301f, TORII_BLACK=0x1b1917, TORII_WHITE=0xe4dfd0;
+  function buildCurvedBeam(halfLen,thick,depth,riseAmount,color,segments){
+    segments=segments||10;
+    const g=new THREE.Group();
+    const mat=new THREE.MeshStandardMaterial({color,roughness:0.55,metalness:0.05});
+    const segLen=(halfLen*2)/segments;
+    function yAt(x){ const xn=x/halfLen; return riseAmount*Math.pow(Math.abs(xn),4); }
+    for(let i=0;i<segments;i++){
+      const x0=-halfLen+i*segLen, x1=x0+segLen;
+      const y0=yAt(x0), y1=yAt(x1);
+      const cx=(x0+x1)/2, cy=(y0+y1)/2;
+      const dx=x1-x0, dy=y1-y0;
+      const segLength=Math.hypot(dx,dy);
+      const box=new THREE.Mesh(new THREE.BoxGeometry(segLength*1.04,thick,depth),mat);
+      box.position.set(cx,cy,0);
+      box.rotation.z=Math.atan2(dy,dx);
+      g.add(box);
+    }
+    return g;
+  }
+  function buildToriiProcedural(H){
+    const g=new THREE.Group();
+    const redMat=new THREE.MeshStandardMaterial({color:TORII_RED,roughness:0.55,metalness:0.05});
+    const blackMat=new THREE.MeshStandardMaterial({color:TORII_BLACK,roughness:0.5,metalness:0.1});
+    const whiteMat=new THREE.MeshStandardMaterial({color:TORII_WHITE,roughness:0.85});
+
+    const pillarR=H*0.032, pillarH=H*0.72, hw=H*0.3; // user指摘: 幅が広すぎたため半分に
+    const kamegoeriH=H*0.045, kamegoeriR=pillarR*1.7;
+
+    [-1,1].forEach(side=>{
+      const x=side*hw;
+      // 亀腹(柱脚の白い基壇)
+      const base=new THREE.Mesh(new THREE.CylinderGeometry(kamegoeriR,kamegoeriR*1.15,kamegoeriH,16),whiteMat);
+      base.position.set(x,kamegoeriH/2,0);
+      g.add(base);
+      // 柱(下端をわずかに太くしてエンタシスを表現)
+      const pillar=new THREE.Mesh(new THREE.CylinderGeometry(pillarR*0.92,pillarR,pillarH,16),redMat);
+      pillar.position.set(x,kamegoeriH+pillarH/2,0);
+      g.add(pillar);
+    });
+
+    // 貫(柱を貫通する横木)
+    const nukiThick=H*0.045, nukiDepth=H*0.05;
+    const nukiY=kamegoeriH+pillarH*0.56;
+    const nuki=new THREE.Mesh(new THREE.BoxGeometry(hw*2+H*0.05,nukiThick,nukiDepth),redMat);
+    nuki.position.set(0,nukiY,0);
+    g.add(nuki);
+
+    // 額束(中央の束柱、貫〜台輪の間)
+    const gakuzukaW=H*0.045;
+    const pillarTopY=kamegoeriH+pillarH;
+    const gakuzukaH=Math.max(0.01,pillarTopY-(nukiY+nukiThick/2));
+    const gakuzuka=new THREE.Mesh(new THREE.BoxGeometry(gakuzukaW,gakuzukaH,gakuzukaW*1.2),redMat);
+    gakuzuka.position.set(0,nukiY+nukiThick/2+gakuzukaH/2,0);
+    g.add(gakuzuka);
+
+    // 台輪(柱・額束の頭を繋ぐ黒い受け木、笠木の下地)
+    const daiwaThick=H*0.03;
+    const daiwa=new THREE.Mesh(new THREE.BoxGeometry(hw*2+H*0.08,daiwaThick,H*0.065),blackMat);
+    daiwa.position.set(0,pillarTopY+daiwaThick/2,0);
+    g.add(daiwa);
+
+    // 笠木(最上部、両端が反り上がる朱色の曲がり梁)
+    const kasagiThick=H*0.058, kasagiHalfLen=hw+H*0.14;
+    const kasagi=buildCurvedBeam(kasagiHalfLen,kasagiThick,H*0.082,H*0.085,TORII_RED,12);
+    kasagi.position.y=pillarTopY+daiwaThick+kasagiThick/2;
+    g.add(kasagi);
+
+    // 島木(笠木の上に乗る黒い屋根、笠木より一回り大きく・軒のように張り出す)
+    const shimagiThick=H*0.048, shimagiHalfLen=kasagiHalfLen+H*0.03;
+    const shimagi=buildCurvedBeam(shimagiHalfLen,shimagiThick,H*0.1,H*0.09,TORII_BLACK,12);
+    shimagi.position.y=pillarTopY+daiwaThick+kasagiThick+shimagiThick/2;
+    g.add(shimagi);
+
+    return {group:g,hw,pillarR};
+  }
+  function placeToriiProcedural(x,z,H,rotY){
+    const {group:torii,hw,pillarR}=buildToriiProcedural(H);
+    torii.position.set(x,groundHeightAt(x,z),z);
+    if(rotY)torii.rotation.y=rotY;
+    group.add(torii);
+    const cos=Math.cos(rotY||0), sin=Math.sin(rotY||0);
+    [-1,1].forEach(side=>{
+      const lx=side*hw, lz=0;
+      const wx=x+lx*cos-lz*sin, wz=z+lx*sin+lz*cos;
+      colliders.push({type:'circle',x:wx,z:wz,r:pillarR*1.8});
+    });
+    return torii;
+  }
+
+  // --- 一の鳥居(参道入口) ---
   const Z_ICHI_TORII=0;
-  colliders.push({type:'circle',x:-2.9,z:Z_ICHI_TORII,r:0.3},{type:'circle',x:2.9,z:Z_ICHI_TORII,r:0.3});
-  placeStatic('models/torii_hero_free.glb',0,Z_ICHI_TORII,5.6,{credit:CREDIT_TORII_HERO});
+  placeToriiProcedural(0,Z_ICHI_TORII,5.6,0);
 
   // --- 二の鳥居(坂を上りきった、本殿区画の入口) ---
   const Z_NI_TORII=Z_SLOPE2_E+1;
-  colliders.push({type:'circle',x:-3.0,z:Z_NI_TORII,r:0.3},{type:'circle',x:3.0,z:Z_NI_TORII,r:0.3});
-  placeStatic('models/torii_hero_free.glb',0,Z_NI_TORII,5.0,{});
+  placeToriiProcedural(0,Z_NI_TORII,5.0,0);
 
   // 石段の装飾オブジェクトは完全廃止(user指示: 浮き/めり込みバグの温床だったため)。
   // 昇り降りは地面自体の線形勾配(groundHeightAt)だけで表現する、装飾のない坂にする。
@@ -342,8 +452,7 @@ build(env){
   // --- 摂社/末社セット(祠+ミニ鳥居+ミニ灯籠2基、境内広場の2箇所にまとめて配置) ---
   function placeSubShrineSet(x,z,shrineUrl,shrineH){
     placeStatic(shrineUrl,x,z,shrineH,{collider:true,colliderR:0.5});
-    colliders.push({type:'circle',x,z:z-1.6,r:0.25});
-    placeStatic('models/torii_row_free.glb',x,z-1.6,2.6,{});
+    placeToriiProcedural(x,z-1.6,1.9,0); // 同じジェネレータの縮小版ミニ鳥居
     [[-0.7,0],[0.7,0]].forEach(([ox,oz])=>{
       placeLantern(x+ox,z-0.8+oz,'dark',true);
     });
@@ -483,8 +592,10 @@ build(env){
   }
   scatterProps('models/pine_tree_free.glb',52,7.5,17,-1,Z_BOUNDARY-4,7,{collider:true,colliderR:0.35,scaleMin:0.8,scaleMax:1.5,credit:CREDIT_PINE});
   scatterProps('models/rock_free.glb',30,5.5,17,-1,Z_BOUNDARY-4,0.9,{collider:true,colliderR:0.45,scaleMin:0.7,scaleMax:1.6,credit:CREDIT_ROCK});
+  scatterProps('models/bush_large_free.glb',24,6,17,-1,Z_BOUNDARY-4,1.0,{collider:false,scaleMin:0.7,scaleMax:1.3,centerXZ:true,credit:CREDIT_BUSH_LARGE});
 
   buildBoundaryLines();
+  buildHedge();
 
   // ================= 毎フレーム更新 =================
   function update(dt,charPos){
