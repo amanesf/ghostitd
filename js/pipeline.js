@@ -101,22 +101,16 @@ P3D.buildDerivedLandmarks = buildDerivedLandmarks;
  *   genParams: landmark_tool.htmlのgenParams
  * }
  * onProgress(stageLabel): 各ステージ開始時に呼ばれる(UIの経過秒数表示用)
- * 戻り値: Promise<ArrayBuffer> (GLBファイル全体)
- */
-/**
- * フェーズ1: 中間データ契約。runPipeline()の前半(prep〜accessories、重い
- * marching cubesまで)だけを実行し、GLBを作らずに以下を返す:
- *   - rawBody: {V,F} (visual_hullの彫刻直後・平滑化/間引き前メッシュ)
- *   - rawAccessories: [{name,mode,bones,V,F}, ...] (アクセサリー別、平滑化/間引き前)
- *   - bledCanvases: {front,back,side} (prep+bleed済みcanvas。atlas_bakeの入力用)
- *   - pivots: スキン計算/atlas継ぎ目判定に必要な骨格ピボット(モデル座標)
- *   - calib: {SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF} (atlas_bake/finishFromIntermediateで再利用)
- * ビューア(character_3d.html)側はこの中間データ+gen_paramsの一部を使って
- * finishFromIntermediate()を呼べば、再彫刻なしにモデルを再構築できる。
+ *
+ * prep(背景除去)〜accessories(アクセサリーcarving)までを実行する(重い
+ * marching cubesまでを含む)。GLBは作らず、以下を返す:
+ *   - sizes,prof,core,SCALE,pivots: キャリブレーション/骨格ピボット
+ *   - bledCanvas: {front,back,side} (prep+bleed済みcanvas。atlas_bakeの入力用)
+ *   - body: P3D.stageVisualHull()の戻り値(V,N,F,J,W,rawV,rawF)
+ *   - acc: P3D.stageAccessories()の戻り値、またはnull(アクセサリー未定義時)
  * 戻り値: Promise<object>
  */
-async function runToIntermediate(state, onProgress){
-  function report(label){ console.log("=== stage:", label, "==="); if(onProgress) onProgress(label); }
+async function runCarvingStages(state, report){
   var gp = state.genParams;
 
   report("prep(背景除去)");
@@ -150,6 +144,12 @@ async function runToIntermediate(state, onProgress){
     ctx.putImageData(id,0,0);
     return c;
   }
+  // ★bleedEdgesはRGBを実画像内容の最近傍色でキャンバス全域まで拡張済みだが、
+  // アルファはalpha_dilate分の膨張マスク外で0のまま返す。このアルファ0領域を
+  // 透明としてアトラスに合成しJPEG化(アルファ非対応)すると、browserが黒で
+  // 塗りつぶしてしまい、bleed margin をわずかに超えて張り出す細いアクセサリー
+  // (髪・裾等)で黒い裂け目に見える。アトラス用キャンバスは既に画像ベースで
+  // 拡張済みのRGBをそのまま使うべきなので、アルファは全域255に強制する。
   var bledCanvas={};
   views.forEach(function(v){
     var rgba=bledRgba[v];
@@ -164,6 +164,7 @@ async function runToIntermediate(state, onProgress){
   var prof = P3D.stageProfile(alphaFull.front, sizes.front.w, sizes.front.h, alphaFull.side, sizes.side.w, sizes.side.h);
   var core = P3D.stageCore(alphaFull.side, sizes.side.w, sizes.side.h, prof.YTOP, prof.YBOT);
   var SCALE = prof.YBOT-prof.YTOP;
+  console.log("  profile: CX",prof.CX,"YTOP",prof.YTOP,"YBOT",prof.YBOT,"SIDE_REF",core.SIDE_REF);
   await tick();
 
   report("skeleton(骨格ピボット計算)");
@@ -171,6 +172,7 @@ async function runToIntermediate(state, onProgress){
   var LM = buildDerivedLandmarks(state.points, state.analysis, derivedBase);
   var pivRes = P3D.computePivots(alphaFull.front, sizes.front.w, sizes.front.h, prof.YTOP, prof.YBOT, prof.CX, LM);
   var pivots = Object.assign({}, pivRes.pivots, pivRes.extraPivots);
+  console.log("  skeleton: pivots for", Object.keys(pivRes.pivots).length, "bones +", Object.keys(pivRes.extraPivots).length, "extra");
   await tick();
 
   var frontAlpha = alphaFull.front.slice();
@@ -211,17 +213,39 @@ async function runToIntermediate(state, onProgress){
       frontCont:frontCont, backCont:backCont, sideCont:sideCont,
       pivots:pivots, gp:gp,
     });
+  }else{
+    console.log("  accessories: 定義なし、スキップ");
   }
   await tick();
+
+  return {sizes:sizes, prof:prof, core:core, SCALE:SCALE, pivots:pivots, bledCanvas:bledCanvas, body:body, acc:acc};
+}
+
+/**
+ * フェーズ1: 中間データ契約。runCarvingStages()(prep〜accessories、重い
+ * marching cubesまで)だけを実行し、GLBを作らずに以下を返す:
+ *   - rawBody: {V,F} (visual_hullの彫刻直後・平滑化/間引き前メッシュ)
+ *   - rawAccessories: [{name,mode,bones,V,F}, ...] (アクセサリー別、平滑化/間引き前)
+ *   - bledCanvases: {front,back,side} (prep+bleed済みcanvas。atlas_bakeの入力用)
+ *   - pivots: スキン計算/atlas継ぎ目判定に必要な骨格ピボット(モデル座標)
+ *   - calib: {SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF} (atlas_bake/finishFromIntermediateで再利用)
+ * ビューア(character_3d.html)側はこの中間データ+gen_paramsの一部を使って
+ * finishFromIntermediate()を呼べば、再彫刻なしにモデルを再構築できる。
+ * 戻り値: Promise<object>
+ */
+async function runToIntermediate(state, onProgress){
+  function report(label){ console.log("=== stage:", label, "==="); if(onProgress) onProgress(label); }
+  var staged = await runCarvingStages(state, report);
+  var body=staged.body, acc=staged.acc, prof=staged.prof, core=staged.core;
 
   return {
     rawBody: {V: body.rawV, F: body.rawF},
     rawAccessories: (acc && acc.rawParts) ? acc.rawParts.map(function(p){
       return {name:p.name, mode:p.mode, bones:p.bones, V:p.rawV, F:p.rawF};
     }) : [],
-    bledCanvases: bledCanvas,
-    pivots: pivots,
-    calib: {SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF},
+    bledCanvases: staged.bledCanvas,
+    pivots: staged.pivots,
+    calib: {SCALE:staged.SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF},
   };
 }
 P3D.runToIntermediate = runToIntermediate;
@@ -238,8 +262,8 @@ P3D.runToIntermediate = runToIntermediate;
  * ★フェーズ2追加課題6の対応(段階的キャッシュ): どのパラメータ層(Tier1〜3)が
  * 実際に変わったかに応じて、変化のなかった段の再計算を省略する。
  * 段の依存関係と実際の処理順(このinter._stageCacheのみで完結する話であり、
- * P3D.finishBodyMesh/finishAccessoryMesh(runPipeline側で使う共有関数、
- * 平滑化→間引きの順)には手を入れていない。ここでは
+ * P3D.finishBodyMesh/finishAccessoryMesh(stageVisualHull/stageAccessories内部で
+ * 平滑化→間引きの順に呼ばれる関数)には手を入れていない。ここでは
  * キャッシュを効かせるため意図的に「間引き→平滑化」の順に組み替えている
  * (間引きはTier2のみに依存させ、Tier1(平滑化回数等)だけを変えた時に
  * 間引き結果を再利用できるようにするための設計変更。数式的な最終結果は
@@ -393,156 +417,5 @@ async function finishFromIntermediate(inter, opts, onProgress){
   return glb;
 }
 P3D.finishFromIntermediate = finishFromIntermediate;
-
-async function runPipeline(state, onProgress){
-  function report(label){ console.log("=== stage:", label, "==="); if(onProgress) onProgress(label); }
-  var gp = state.genParams;
-
-  // ---------- prep: 背景除去 ----------
-  report("prep(背景除去)");
-  var views=['front','side','back'];
-  var rgbaFull={}, alphaFull={}, sizes={};
-  views.forEach(function(v){
-    var img = state.imgs[v].el;
-    var w = state.imgs[v].w, h = state.imgs[v].h;
-    var id = P3D.imageToImageData(img, w, h);
-    rgbaFull[v] = id.data;
-    sizes[v] = {w:w,h:h};
-  });
-  var excludeBool = {};
-  views.forEach(function(v){ excludeBool[v] = excludeMaskToBool(state.excludeMask[v], sizes[v].w, sizes[v].h); });
-  views.forEach(function(v){
-    var img = state.imgs[v].el;
-    var res = P3D.loadRgbaRemoveWhite(img, gp.white_thr, excludeBool[v]);
-    alphaFull[v] = res.alpha;
-  });
-  await tick();
-
-  // ---------- bleed: 縁の色にじみ(アトラステクスチャ用) ----------
-  report("bleed(縁の色にじみ)");
-  var bledRgba={};
-  views.forEach(function(v){
-    bledRgba[v] = P3D.bleedEdges(rgbaFull[v], sizes[v].w, sizes[v].h, alphaFull[v], gp.alpha_dilate);
-  });
-  function toCanvas(rgba,w,h){
-    var c=document.createElement('canvas'); c.width=w; c.height=h;
-    var ctx=c.getContext('2d');
-    var id=new ImageData(new Uint8ClampedArray(rgba.buffer.slice(0)), w, h);
-    ctx.putImageData(id,0,0);
-    return c;
-  }
-  // ★bleedEdgesはRGBを実画像内容の最近傍色でキャンバス全域まで拡張済みだが、
-  // アルファはalpha_dilate分の膨張マスク外で0のまま返す。このアルファ0領域を
-  // 透明としてアトラスに合成しJPEG化(アルファ非対応)すると、browserが黒で
-  // 塗りつぶしてしまい、bleed margin をわずかに超えて張り出す細いアクセサリー
-  // (髪・裾等)で黒い裂け目に見える。アトラス用キャンバスは既に画像ベースで
-  // 拡張済みのRGBをそのまま使うべきなので、アルファは全域255に強制する。
-  var bledCanvas={};
-  views.forEach(function(v){
-    var rgba=bledRgba[v];
-    var opaque=new Uint8ClampedArray(rgba.length);
-    opaque.set(rgba);
-    for(var a=3; a<opaque.length; a+=4) opaque[a]=255;
-    bledCanvas[v]=toCanvas(opaque, sizes[v].w, sizes[v].h);
-  });
-  await tick();
-
-  // ---------- profile/core ----------
-  report("profile/core(キャリブレーション)");
-  var prof = P3D.stageProfile(alphaFull.front, sizes.front.w, sizes.front.h, alphaFull.side, sizes.side.w, sizes.side.h);
-  var core = P3D.stageCore(alphaFull.side, sizes.side.w, sizes.side.h, prof.YTOP, prof.YBOT);
-  var SCALE = prof.YBOT-prof.YTOP;
-  console.log("  profile: CX",prof.CX,"YTOP",prof.YTOP,"YBOT",prof.YBOT,"SIDE_REF",core.SIDE_REF);
-  await tick();
-
-  // ---------- landmarks/skeleton ----------
-  report("skeleton(骨格ピボット計算)");
-  var derivedBase = state.deriveFromPoints(state.points, state.analysis);
-  var LM = buildDerivedLandmarks(state.points, state.analysis, derivedBase);
-  var pivRes = P3D.computePivots(alphaFull.front, sizes.front.w, sizes.front.h, prof.YTOP, prof.YBOT, prof.CX, LM);
-  var pivots = Object.assign({}, pivRes.pivots, pivRes.extraPivots);
-  console.log("  skeleton: pivots for", Object.keys(pivRes.pivots).length, "bones +", Object.keys(pivRes.extraPivots).length, "extra");
-  await tick();
-
-  // ---------- exclude mask AND-out(visual_hull用、front/back/side個別) ----------
-  var frontAlpha = alphaFull.front.slice();
-  var backAlpha = alphaFull.back.slice();
-  var sideAlpha = alphaFull.side.slice();
-  if(excludeBool.front) for(var i=0;i<frontAlpha.length;i++){ if(excludeBool.front[i]) frontAlpha[i]=0; }
-  if(excludeBool.back) for(var i2=0;i2<backAlpha.length;i2++){ if(excludeBool.back[i2]) backAlpha[i2]=0; }
-  if(excludeBool.side) for(var i3=0;i3<sideAlpha.length;i3++){ if(excludeBool.side[i3]) sideAlpha[i3]=0; }
-
-  function contArray(rgba){
-    var n=rgba.length/4;
-    var out=new Float32Array(n);
-    for(var i=0;i<n;i++){ out[i]=Math.min(rgba[i*4],rgba[i*4+1],rgba[i*4+2]); }
-    return out;
-  }
-  var frontCont = gp.subpixel ? contArray(rgbaFull.front) : null;
-  var backCont = gp.subpixel ? contArray(rgbaFull.back) : null;
-  var sideCont = gp.subpixel ? contArray(rgbaFull.side) : null;
-
-  // ---------- visual_hull(全身) ----------
-  report("visual_hull(全身のvisual hull carving)");
-  var body = P3D.stageVisualHull({
-    frontAlpha:frontAlpha, backAlpha:backAlpha, sideAlpha:sideAlpha,
-    faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
-    frontCont:frontCont, backCont:backCont, sideCont:sideCont,
-    SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
-    pivots:pivots, gp:gp,
-  });
-  await tick();
-
-  // ---------- accessories ----------
-  report("accessories(アクセサリーのcarving)");
-  var acc = null;
-  if(state.accessories && state.accessories.length){
-    acc = P3D.stageAccessories({
-      accs: state.accessories,
-      frontRgba: rgbaFull.front, backRgba: rgbaFull.back, sideRgba: rgbaFull.side,
-      W: sizes.front.w, H: sizes.front.h,
-      SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
-      frontCont:frontCont, backCont:backCont, sideCont:sideCont,
-      pivots:pivots, gp:gp,
-    });
-  }else{
-    console.log("  accessories: 定義なし、スキップ");
-  }
-  await tick();
-
-  // ---------- atlas_bake ----------
-  // ★colorGradWidth>0のときstageAtlasBakeがbledCanvas.front/back/sideのピクセルを
-  // 直接書き換えて継ぎ目をブレンドするため、その結果を拾えるようbuildAtlasCanvas
-  // より先にstageAtlasBakeを呼ぶ(以前はbuildAtlasCanvasが先だった)。
-  report("atlas_bake(テクスチャベイク)");
-  var bake = P3D.stageAtlasBake({
-    W:sizes.front.w, H:sizes.front.h, SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT,
-    SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
-    backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
-    sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
-    bodyV:body.V, bodyN:body.N, bodyF:body.F, bodyJ:body.J, bodyW:body.W,
-    accV: acc?acc.V:null, accN: acc?acc.N:null, accF: acc?acc.F:null,
-    accJ: acc?acc.J:null, accW: acc?acc.W:null, accNF: acc?acc.NF:null,
-    accName: acc?acc.accName:null,
-    seamAngles: state.seamAngles,
-    seamNoSide: state.seamNoSide,
-    seamSmoothIters: state.seamSmoothIters,
-    colorGradWidth: state.colorGradWidth,
-    frontCanvas: bledCanvas.front, backCanvas: bledCanvas.back, sideCanvas: bledCanvas.side,
-  });
-  var atlasCanvas = P3D.buildAtlasCanvas(bledCanvas.front, bledCanvas.back, bledCanvas.side);
-  await tick();
-
-  // ---------- model_glb ----------
-  report("model_glb(GLB書き出し)");
-  var tex = await P3D.compressAtlas(atlasCanvas, gp.kb_per_face);
-  var glb = P3D.buildGLB({
-    V: bake.restV, N: bake.norm, UV: bake.UV, J: bake.J, W: bake.W, F: bake.F,
-    pivots: pivots, atlasTexBuffer: tex.buffer, atlasMime: tex.mime,
-  });
-  console.log("DONE -> glb bytes:", glb.byteLength);
-  return glb;
-}
-P3D.runPipeline = runPipeline;
 
 })(window);
