@@ -9,6 +9,12 @@ var P3D = global.P3D = global.P3D || {};
 
 function tick(){ return new Promise(function(r){ setTimeout(r, 0); }); }
 
+function cloneCanvasEl(src){
+  var c=document.createElement('canvas'); c.width=src.width; c.height=src.height;
+  c.getContext('2d').drawImage(src,0,0);
+  return c;
+}
+
 function excludeMaskToBool(ecObj, w, h){
   // ecObj: {canvas, ctx} (landmark_tool.htmlのexcludeMask[view]) または null
   if(!ecObj) return null;
@@ -346,13 +352,25 @@ async function finishFromIntermediate(inter, opts, onProgress){
   }
   await tick();
 
-  var bledCanvas = inter.bled_canvases;
+  var origBled = inter.bled_canvases;
   var bakeSig = meshSig+"|"+sig({sa:opts.seamAngles, sns:opts.seamNoSide, ssi:opts.seamSmoothIters, cgw:opts.colorGradWidth});
   var bake, atlasCanvas;
   if(cache.bakeSig===bakeSig && cache.bake){
     bake = cache.bake; atlasCanvas = cache.atlasCanvas;
   }else{
     report("atlas_bake(テクスチャベイク)");
+    // ★colorGradWidth>0のときstageAtlasBakeは渡したcanvasのピクセルを直接
+    // 書き換える(atlas_bake段のコメント参照)。inter.bled_canvasesは
+    // このfinishFromIntermediate()がライブパラメータ変更のたびに何度も
+    // 呼ばれる間ずっと使い回される「元データ」なので、直接渡すと呼ぶたびに
+    // 前回のブレンド結果の上にさらにブレンドが重なり、スライダーを動かす
+    // たびにどんどん画像がぼやけていくバグになっていた。毎回複製してから
+    // stageAtlasBakeに渡すことで、常に元のprep/bleed画像から計算し直す。
+    var bledCanvas = {
+      front: cloneCanvasEl(origBled.front),
+      back: cloneCanvasEl(origBled.back),
+      side: cloneCanvasEl(origBled.side),
+    };
     var bodyV=meshFinished.bodyV, bodyF=meshFinished.bodyF, bodyN=meshFinished.bodyN, bodySkin=meshFinished.bodySkin, acc=meshFinished.acc;
     bake = P3D.stageAtlasBake({
       W: bledCanvas.front.width, H: bledCanvas.front.height, SCALE:inter.calib.SCALE, CX:inter.calib.CX, YBOT:inter.calib.YBOT,

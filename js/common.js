@@ -410,4 +410,33 @@ function removeSilhouetteOutline(rgba, w, h, alpha, bandPx, darkThr){
 }
 P3D.removeSilhouetteOutline = removeSilhouetteOutline;
 
+// ---- スライダー(<input type=range>)をつまみ(thumb)付近でのみ操作可能にする ----
+// ネイティブのrange inputは、つまみ以外のトラック部分をタップしただけでも
+// 即座にその位置へ値がジャンプする仕様のため、誤操作(意図せずパラメータが
+// 変わってしまう)が起きやすい。つまみの現在位置に十分近い場所から操作を
+// 開始した場合のみ許可し、それ以外はpointerdownを無視(preventDefault)する。
+// landmark_tool.html/character_3d.html両方が本ファイルを読み込むため、ここに
+// documentへの委譲リスナーとして実装することで全range inputに一括で効かせる。
+document.addEventListener('pointerdown', function(e){
+  var el = e.target;
+  if(!el || el.tagName!=='INPUT' || el.type!=='range') return;
+  var rect = el.getBoundingClientRect();
+  if(rect.width<=0) return;
+  var min=parseFloat(el.min), max=parseFloat(el.max), val=parseFloat(el.value);
+  if(!isFinite(min)) min=0;
+  if(!isFinite(max)) max=100;
+  if(!isFinite(val)) val=min;
+  var frac = max>min ? (val-min)/(max-min) : 0;
+  frac = Math.max(0, Math.min(1, frac));
+  // ブラウザ既定のrange thumb幅(Chromium系の実測値。本プロジェクトはCSSで
+  // thumbの見た目を変更していないため既定サイズを前提にできる)。
+  var thumbW = 16;
+  var usable = Math.max(1, rect.width - thumbW);
+  var thumbCenterX = rect.left + thumbW/2 + frac*usable;
+  var tolerance = 14; // つまみ中心からこの範囲内なら「つまみに触れた」とみなす
+  if(Math.abs(e.clientX - thumbCenterX) > tolerance){
+    e.preventDefault();
+  }
+}, {capture:true, passive:false});
+
 })(window);

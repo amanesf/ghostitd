@@ -708,6 +708,51 @@ function seamRowHtmlV(label,key,v,ns){
     '<input type="checkbox" data-vseam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面</label>'+
     '</div>';
 }
+// ★ユーザー指摘2026-07-07:「側面画像利用は元々一括変更機能があったのに
+// なくなった」への対応。landmark_tool.htmlの旧「画像境界」タブにあった
+// 「一括設定」(全パーツ角度一括適用/側面画像を使う一括ON-OFF)をビューアの
+// 継ぎ目パネルにも移植する(Task1でボーン別の個別リストは移植済みだったが、
+// 一括操作部分が抜けていた)。
+let seamBulkOpen=false;
+function renderSeamBulkHtml(){
+  return '<details class="accgroup" data-vseamgroup="一括設定"'+(seamBulkOpen?" open":"")+'>'+
+    '<summary><span>一括設定</span><span class="accCount">2項目</span></summary>'+
+    '<div class="accbody">'+
+    '<div class="acitem" style="margin-bottom:8px">'+
+    '<span class="nm">全パーツ一括</span>'+
+    '<input type="number" id="vSeamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°'+
+    '<button class="btn sm mint" id="vSeamBulkApply">全パーツに適用</button>'+
+    '</div>'+
+    '<div class="acitem" style="flex-wrap:wrap;row-gap:6px">'+
+    '<span class="nm" style="flex:1 1 100%">側面画像を使う(一括)</span>'+
+    '<button class="btn sm mint" id="vSeamSideAllOn" style="flex:1 1 auto">全パーツON</button>'+
+    '<button class="btn sm" id="vSeamSideAllOff" style="flex:1 1 auto">全パーツOFF</button>'+
+    '</div></div></details>';
+}
+function wireSeamBulkHtml(el){
+  const bulkDetails=el.querySelector('details[data-vseamgroup="一括設定"]');
+  if(bulkDetails) bulkDetails.addEventListener("toggle",()=>{ seamBulkOpen=bulkDetails.open; });
+  const statusEl=document.getElementById('genPanelStatus');
+  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  document.getElementById('vSeamBulkApply').onclick=()=>{
+    const v=parseInt(document.getElementById('vSeamBulkVal').value,10);
+    if(!isFinite(v)||v<1||v>89){ if(statusEl)statusEl.textContent='角度は1〜89の範囲で入力してください。'; return; }
+    P3D.BONES.forEach(b=>{ if(v===SEAM_DEFAULT_DEG) delete liveSeamAngles[b]; else liveSeamAngles[b]=v; });
+    renderSeamPanel();
+    scheduleGenRecompute();
+  };
+  document.getElementById('vSeamSideAllOn').onclick=()=>{
+    liveSeamNoSide={};
+    renderSeamPanel();
+    scheduleGenRecompute();
+  };
+  document.getElementById('vSeamSideAllOff').onclick=()=>{
+    P3D.BONES.forEach(b=>{ liveSeamNoSide[b]=true; });
+    accKeys.forEach(k=>{ liveSeamNoSide[k]=true; });
+    renderSeamPanel();
+    scheduleGenRecompute();
+  };
+}
 function renderSeamPanel(){
   const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
   const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
@@ -732,8 +777,9 @@ function renderSeamPanel(){
       '<summary><span>継ぎ目: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
       '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
   }
-  el.innerHTML=boneGroupsHtml+accHtml;
-  [].forEach.call(el.querySelectorAll("details[data-vseamgroup]"),d=>{
+  el.innerHTML=renderSeamBulkHtml()+boneGroupsHtml+accHtml;
+  wireSeamBulkHtml(el);
+  [].forEach.call(el.querySelectorAll("details[data-vseamgroup]:not([data-vseamgroup='一括設定'])"),d=>{
     d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.vseamgroup]=d.open; });
   });
   function setAngle(key,n){

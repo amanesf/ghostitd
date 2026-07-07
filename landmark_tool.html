@@ -294,7 +294,10 @@
     <p style="font-size:12.5px;color:var(--mut);margin:0 0 12px;text-align:center">モードを選んでください</p>
     <div class="modeCard mint" id="modeSampleBtn">
       <b>サンプルモードで開く</b>
-      <span>同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。</span>
+      <span id="modeSampleDesc">同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。</span>
+      <span id="modeSampleResetRow" class="hidden" style="margin-top:6px">
+        <button type="button" class="btn sm" id="modeSampleReset" style="flex:0 0 auto;height:28px;font-size:11px">前回のサンプル編集を破棄して初期状態に戻す</button>
+      </span>
     </div>
     <div class="modeCard" id="modeNewBtn">
       <b>新規作成</b>
@@ -698,20 +701,27 @@ const cvs=$("cvs"), wrap=$("wrap");
 function setMsg(t){ $("msg").textContent=t; }
 
 // 「新規作成」/「サンプルモードで開く」のどちらで今のセッションが始まったか。
-// generateBtn押下時、通常モード(新規作成/前回の続きどちらでも)の場合だけ
-// セッションを保存する(サンプルモードは常に同梱データからの決定的な状態
-// なので保存不要、かつ通常モードの保存と混ざらないようにするため)。
 let currentMode=null; // "sample" | "normal"
 
 // ★ビューア(character_3d.html)と行き来しても編集中のデータを失わないための
 // セッション保存(localStorage)。「モデル生成」でビューアへ移る直前に
-// buildJson()と同じ内容を保存し、モード選択画面の「前回の続き」で復元する
-// (通常モード専用。サンプルモードでは保存しない=サンプルと通常で保存先を
-// 分けることで、片方の作業がもう片方を上書きしないようにする)。
+// buildJson()と同じ内容を保存し、モード選択画面の「前回の続き」(通常モード)
+// /次回の「サンプルモードで開く」(サンプルモード)で復元する。通常/サンプルで
+// 保存先キーを分け、片方の作業がもう片方を上書きしないようにする。
+// ★2026-07-07: 以前はサンプルモードを「常に同梱データに戻る決定的な状態」
+// として保存対象外にしていたが、サンプルモードで試行錯誤したパラメータ/
+// ランドマーク編集がビューア往復で消えてしまうのは不便との指摘を受け、
+// サンプルモードも自動保存の対象にした(画像本体は常に同梱のimages/*.pngを
+// 使う決定的なものなので保存不要。JSON相当の編集内容のみ保存する)。
 const NORMAL_SESSION_KEY="3dtoolJS_normal_session_v1";
+const SAMPLE_SESSION_KEY="3dtoolJS_sample_session_v1";
 function saveNormalSession(){
   try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(buildJson())); }
   catch(e){ console.warn("セッション保存に失敗しました:", e); }
+}
+function saveSampleSession(){
+  try{ localStorage.setItem(SAMPLE_SESSION_KEY, JSON.stringify(buildJson())); }
+  catch(e){ console.warn("サンプルセッション保存に失敗しました:", e); }
 }
 function imageElementToBlob(imgEl,w,h){
   return new Promise(res=>{
@@ -738,12 +748,16 @@ let autosaveInterval=null, lastAutosaveJson=null;
 function startAutosaveLoop(){
   if(autosaveInterval)return;
   autosaveInterval=setInterval(()=>{
-    if(currentMode!=="normal"||!points)return;
+    if(!points||(currentMode!=="normal"&&currentMode!=="sample"))return;
     const json=JSON.stringify(buildJson());
     if(json===lastAutosaveJson)return;
     lastAutosaveJson=json;
-    saveNormalSession();
-    saveNormalSessionImages();
+    if(currentMode==="normal"){
+      saveNormalSession();
+      saveNormalSessionImages();
+    }else{
+      saveSampleSession(); // 画像は同梱の固定アセットなので保存不要
+    }
   },4000);
 }
 
@@ -863,6 +877,13 @@ function drawLabel(x,text,px,py,color){
   x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.75)";x.strokeText(text,px,py);
   x.fillStyle=color;x.fillText(text,px,py);
 }
+// アクセサリーごとに枠線/点の色を変える(全パーツ同色だと見分けが付かない
+// との指摘のため)。パレットを順番に割り当て、編集中(pendingAcc)は
+// 選択ハイライトと同じ色で常に区別できるようにする。
+const ACC_COLOR_PALETTE=["#7aa2ff","#ff6ad5","#52e0c4","#ffb454","#ff8a8a","#b48cff","#8cffb4","#5be6ff"];
+const ACC_PENDING_COLOR="#ffe14d";
+function accColorFor(idx){ return ACC_COLOR_PALETTE[idx % ACC_COLOR_PALETTE.length]; }
+
 /* ---------- 汎用「操作可能な点」レジストリ ----------
    19個の解剖学的ランドマーク(front専用)・アクセサリー範囲(可変N点多角形)を、
    タップ選択/ドラッグ/十字キー微調整という同じ操作で扱えるように統一する。 */
@@ -876,31 +897,31 @@ function getInteractivePoints(view){
       out.push({key:"lm:"+d.k, pos:p, set:np=>{points[d.k]=np;}, color:GCOL[d.g], label:d.jp});});
   }
   if(curTab==="ac"){
-    const pushRegionPts=(regions,prefix,name)=>{
+    const pushRegionPts=(regions,prefix,name,color)=>{
       Object.keys(regions).forEach(v=>{if(v!==view)return;
         const r=regions[v];
         r.points.forEach((p,i)=>{
-          out.push({key:prefix+":"+v+":"+i, pos:p, set:np=>{r.points[i]=np;}, color:"#7aa2ff", label:name+"-"+(i+1)});
+          out.push({key:prefix+":"+v+":"+i, pos:p, set:np=>{r.points[i]=np;}, color, label:name+"-"+(i+1)});
         });});
     };
-    if(pendingAcc)pushRegionPts(pendingAcc.regions,"pend","新規");
-    accessories.forEach((a,i)=>pushRegionPts(a.regions,"acc"+i,a.name||"?"));
+    if(pendingAcc)pushRegionPts(pendingAcc.regions,"pend","新規",ACC_PENDING_COLOR);
+    accessories.forEach((a,i)=>pushRegionPts(a.regions,"acc"+i,a.name||"?",accColorFor(i)));
   }
   return out;
 }
 function drawRegionOutlines(x,sc){
   const toPx=p=>[p[0]*sc+view.ox, p[1]*sc+view.oy];
-  const drawRegions=regions=>{
+  const drawRegions=(regions,color)=>{
     Object.keys(regions).forEach(v=>{if(v!==curView)return;
       const pts=regions[v].points; if(!pts||pts.length<2)return;
-      x.save();x.lineWidth=2;x.strokeStyle="#7aa2ff";x.beginPath();
+      x.save();x.lineWidth=2;x.strokeStyle=color;x.beginPath();
       const p0=toPx(pts[0]);x.moveTo(p0[0],p0[1]);
       for(let i=1;i<pts.length;i++){const p=toPx(pts[i]);x.lineTo(p[0],p[1]);}
       x.closePath();x.stroke();x.restore();
     });
   };
-  if(pendingAcc)drawRegions(pendingAcc.regions);
-  accessories.forEach(a=>drawRegions(a.regions));
+  if(pendingAcc)drawRegions(pendingAcc.regions,ACC_PENDING_COLOR);
+  accessories.forEach((a,i)=>drawRegions(a.regions,accColorFor(i)));
 }
 // ボーンタブ用: 現在のランドマークからP3D.computePivots()を呼び、
 // 生成時と同じロジックでボーン位置(モデル座標)を求める(表示のみ、調整不可)。
@@ -1817,6 +1838,8 @@ $("generateBtn").onclick=async()=>{
     if(currentMode==="normal"){
       saveNormalSession();
       await saveNormalSessionImages();
+    }else if(currentMode==="sample"){
+      saveSampleSession();
     }
     genOverlayHide();
     location.href="character_3d.html?source=generated";
@@ -1966,6 +1989,16 @@ renderOutlinePanel();
       }).then(function(blob){ return loadImageBlobIntoSlot(slot,blob); });
     })).then(function(){
       runAnalyze();syncViewBtns();
+      // ★2026-07-07: サンプルモードも自動保存の対象になったため、前回
+      // サンプルモードで編集した内容(ランドマーク/パラメータ/アクセサリー等)
+      // があればそれを復元する。保存が無ければ従来通り同梱のlandmarks_ai.json
+      // (初期状態)を読み込む。画像自体は常にimages/*.pngの同梱アセットを使う。
+      let savedRaw=null;
+      try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY); }catch(e){}
+      if(savedRaw){
+        try{ applyLoadedJson(JSON.parse(savedRaw)); return; }
+        catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
+      }
       return fetch("landmarks_ai.json").then(function(r){ if(!r.ok)throw 0; return r.json(); })
         .then(function(d){ applyLoadedJson(d); }).catch(function(){});
     });
@@ -1986,8 +2019,23 @@ renderOutlinePanel();
       :"前回保存した通常モードの作業がまだありません(新規作成で3枚の画像を読み込むと、以後は自動保存されます)。";
     return ok;
   }
+  function refreshSampleModeCard(){
+    let hasSaved=null;
+    try{ hasSaved=localStorage.getItem(SAMPLE_SESSION_KEY); }catch(e){}
+    $("modeSampleDesc").textContent = hasSaved
+      ? "前回サンプルモードで編集した内容(ランドマーク/パラメータ等)を読み込んで再開します。"
+      : "同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。";
+    $("modeSampleResetRow").classList.toggle("hidden", !hasSaved);
+  }
+  $("modeSampleReset").onclick=(e)=>{
+    e.stopPropagation();
+    try{ localStorage.removeItem(SAMPLE_SESSION_KEY); }catch(err){}
+    refreshSampleModeCard();
+    setMsg("サンプルの編集内容を破棄しました。");
+  };
   function showModeChoice(){
     checkContinueAvailable();
+    refreshSampleModeCard();
     $("modeChoice").classList.remove("hidden");
   }
   function startSampleMode(){

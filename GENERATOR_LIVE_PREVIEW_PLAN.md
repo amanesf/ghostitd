@@ -393,3 +393,52 @@ GLB+JSONを読み込む機能を追加する際にさらに混乱する)との�
 - 混乱防止のため、ビューアのモード選択画面(`#modeChoice`)に「このビューアは
   完成したモデルの表示専用で、生成調整タブはここでは使えない。パラメータ調整は
   ジェネレータの「モデル生成してビューアで見る」から」という趣旨の案内文を追加した。
+
+## バグ修正・追加要望(2026-07-07、ユーザー報告分)
+
+10. **【バグ】ビューアの継ぎ目ブレンド(colorGradWidth)を動かし続けると
+    どんどんぼやける**: `js/pipeline.js`の`finishFromIntermediate()`が
+    `inter.bled_canvases`(prep/bleed済みの元画像)を複製せず直接
+    `P3D.stageAtlasBake()`に渡していた。`stageAtlasBake`は`colorGradWidth>0`
+    のとき渡されたcanvasのピクセルを`putImageData`で直接書き換える仕様
+    (既存コードのコメントに明記されていた)のため、ライブ編集でパラメータを
+    変えるたびに前回のブレンド結果の上にさらにブレンドが重なり、値を往復
+    させるだけでもどんどん画質が劣化していた。`cloneCanvasEl()`を追加し、
+    atlas_bake再計算のたびに`inter.bled_canvases`を複製してから渡すよう修正
+    (元データは常に不変に保たれる)。他のメッシュ処理関数(`decimateMesh`/
+    `laplacianSmooth`/`computeNormalsFixWinding`/`nearestBoneSegmentSkin`/
+    `rigidSkin`)は入力配列を複製してから処理し新しい配列を返す設計になって
+    おり、同種の累積バグが無いことも確認済み。Playwright確認: 同じ値
+    (20→5→20→5→20)を繰り返し設定してもスクリーンショットのMD5ハッシュが
+    往復前後で完全一致することを確認した。
+11. **スライダーはつまみでのみ操作可能にする**: ネイティブ`<input type=range>`
+    はトラックをタップしただけでその位置にジャンプする仕様で誤操作の元に
+    なっていたため、`js/common.js`(landmark_tool.html/character_3d.html
+    両方が読み込み済み)に`pointerdown`のcapture-phase委譲リスナーを追加し、
+    現在のつまみ位置から一定距離(14px、つまみ幅16pxを基準)以上離れた場所
+    からの操作は`preventDefault()`で無視するようにした。Playwright確認:
+    トラック端をクリックしても値が変化しないこと、つまみ位置をつかんで
+    ドラッグすると正しく値が変わることの両方を確認した。
+12. **パーツ＋の枠線を全パーツ同色から色分けへ**: `landmark_tool.html`に
+    `ACC_COLOR_PALETTE`(8色)と`accColorFor(idx)`を追加し、
+    `drawRegionOutlines()`/`getInteractivePoints()`の枠線・点の色を
+    アクセサリーごとに変えた。編集中(pendingAcc)は既存の選択ハイライトと
+    同じ黄色(`#ffe14d`)で常に区別できるようにした。
+13. **ビューアの継ぎ目パネルに一括設定が無い**: `landmark_tool.html`の旧
+    「画像境界」タブにあった「一括設定」(全パーツ角度一括適用/側面画像
+    ON-OFF一括)がビューア移植時(追加課題5)に抜けていたため、
+    `character_3d.html`の`renderSeamPanel()`に`renderSeamBulkHtml()`/
+    `wireSeamBulkHtml()`として同等機能を追加した(`vSeamBulkApply`/
+    `vSeamSideAllOn`/`vSeamSideAllOff`)。
+14. **サンプルモードでの編集がビューア往復で保存されない**: 従来は仕様として
+    意図的にサンプルモードを自動保存の対象外にしていた(「サンプルモードは
+    常に同梱データからの決定的な状態」という設計)が、ユーザーが実際に
+    サンプルモードで試行錯誤する運用が多いことが分かったため、ユーザーの
+    希望を確認のうえサンプルモードも自動保存の対象にした。`SAMPLE_SESSION_KEY`
+    (通常モードの`NORMAL_SESSION_KEY`とは別キー)にJSON相当の編集内容
+    (画像本体は同梱の固定アセットなので保存不要)を保存し、次回「サンプル
+    モードで開く」時に自動復元する。モード選択画面のサンプルカードに
+    「前回のサンプル編集を破棄して初期状態に戻す」ボタンを追加し、
+    いつでも同梱の初期状態に戻せるようにした。Playwright確認: パラメータ
+    変更→自動保存(4秒ポーリング)→リロード→サンプルモードで再度開くと
+    変更値が復元されること、リセットボタンで既定値に戻ることを確認した。
