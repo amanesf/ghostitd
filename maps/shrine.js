@@ -40,14 +40,18 @@ build(env){
   const POND_CX=11, POND_CZ=48, POND_RX=5, POND_RZ=6, POND_DEPTH=0.8;
   const POND_EAST_RIGHT=HALFW_KEIDAI+5, POND_Z0=42, POND_Z1=54;
 
-  function smoothstep(a,b,z){ const t=Math.max(0,Math.min(1,(z-a)/(b-a))); return t*t*(3-2*t); }
+  // 自己レビューでの是正: 段差区間はsmoothstep(S字カーブ)ではなく線形補間にする。
+  // 石段の装飾モデルは物理的にまっすぐな直線状の階段形状であり、S字カーブの地面と
+  // 組み合わせると区間の上下端でモデルと地面の傾斜が食い違って浮き/めり込みが生じ、
+  // 「階段が変」に見える原因になっていた。線形にすることで実際の階段と同じ一定勾配になる。
+  function lerpClamped(a,b,z){ const t=Math.max(0,Math.min(1,(z-a)/(b-a))); return t; }
   function tierY(z){
     if(z<Z_SLOPE1_S)return 0;
-    if(z<Z_SLOPE1_E)return Y_TIER1*smoothstep(Z_SLOPE1_S,Z_SLOPE1_E,z);
+    if(z<Z_SLOPE1_E)return Y_TIER1*lerpClamped(Z_SLOPE1_S,Z_SLOPE1_E,z);
     if(z<Z_SLOPE2_S)return Y_TIER1;
-    if(z<Z_SLOPE2_E)return Y_TIER1+(Y_TIER2-Y_TIER1)*smoothstep(Z_SLOPE2_S,Z_SLOPE2_E,z);
+    if(z<Z_SLOPE2_E)return Y_TIER1+(Y_TIER2-Y_TIER1)*lerpClamped(Z_SLOPE2_S,Z_SLOPE2_E,z);
     if(z<Z_SLOPE3_S)return Y_TIER2;
-    if(z<Z_SLOPE3_E)return Y_TIER2+(Y_TIER15-Y_TIER2)*smoothstep(Z_SLOPE3_S,Z_SLOPE3_E,z);
+    if(z<Z_SLOPE3_E)return Y_TIER2+(Y_TIER15-Y_TIER2)*lerpClamped(Z_SLOPE3_S,Z_SLOPE3_E,z);
     return Y_TIER15;
   }
   function groundHeightAt(x,z){
@@ -216,6 +220,26 @@ build(env){
     addBoundaryLine(bS.left,PATH_MIN_Z,bS.right,PATH_MIN_Z);
     addBoundaryLine(bE.left,PATH_MAX_Z,bE.right,PATH_MAX_Z);
   }
+  // 敷地の境界(移動可能範囲の縁)に沿って生け垣(茂み)を並べ、光る線だけの無機質な
+  // 境界を緩和する。corridorBoundsAtの左右境界のすぐ外側に一定間隔で配置する(user要望)。
+  function buildHedge(){
+    const STEP=4, OUTSET=0.5;
+    loadStaticGLB('models/bush_free.glb').then(template=>{
+      centerXZ(template);
+      for(let z=PATH_MIN_Z+2;z<=PATH_MAX_Z-2;z+=STEP){
+        const b=corridorBoundsAt(z);
+        if(inSlopeBand(z))continue; // 石段区間は柵・視界の妨げになるため間引く
+        [b.left-OUTSET,b.right+OUTSET].forEach(x=>{
+          const t=template.clone(true);
+          normalizeToHeight(t,0.85+Math.random()*0.5);
+          t.rotation.y=Math.random()*Math.PI*2;
+          placeOnGround(t,x,z+(Math.random()-0.5)*1.2);
+          group.add(t);
+        });
+      }
+      pushCredit(CREDIT_BUSH);
+    }).catch(()=>{});
+  }
 
   // ================= 設置物 =================
   function placeStatic(url,x,z,targetHeight,opts){
@@ -279,7 +303,14 @@ build(env){
       const curWidth=Math.max(0.01,box0.max.x-box0.min.x);
       const desiredWidth=halfW*1.8;
       obj.scale.z*=desiredWidth/curWidth;
-      placeOnGround(obj,0,(zFrom+zTo)/2);
+      // 自己レビューでの是正: 中間点(mid z)の地面高さでbboxの最下点をスナップすると、
+      // モデルの実際の最下点(登り口=zFrom側)とはズレた基準になり、区間の上端 or 下端で
+      // 地面から浮く/めり込むズレが出ていた。最下点は登り口側にあると想定し、zFromの
+      // 地面高さを基準にスナップする(線形勾配化と合わせて上端もほぼ一致するはず)。
+      obj.position.x=0; obj.position.z=(zFrom+zTo)/2;
+      obj.updateMatrixWorld(true);
+      const box1=new THREE.Box3().setFromObject(obj);
+      obj.position.y+=groundHeightAt(0,zFrom)-box1.min.y;
       group.add(obj);
     }).catch(()=>{});
   }
@@ -463,13 +494,9 @@ build(env){
     }).catch(()=>console.warn('[shrine] failed to load honden_free.glb'));
 
     hallFrontZ=Z_HONDEN-halfD;
-    loadStaticGLB('models/shoji_door_free.glb').then(obj=>{
-      normalizeToHeight(obj,2.1);
-      centerXZ(obj);
-      placeOnGround(obj,0,hallFrontZ+0.03);
-      group.add(obj);
-      pushCredit(CREDIT_DOOR);
-    }).catch(()=>{});
+    // 自己レビューで撤去: shoji_door_freeを本殿の正面に壁なしで単独設置していたため、
+    // 「謎の格子が本殿手前に浮いている」ように見えるバグだった。honden_free.glb自体に
+    // 引き戸は含まれているため、この単独オブジェクトは不要と判断し削除する。
 
     sensorLight=new THREE.SpotLight(0xfff0d0,0,11,THREE.MathUtils.degToRad(48),0.4,1.2);
     sensorLight.position.set(0,groundHeightAt(0,hallFrontZ)+3.3,hallFrontZ-0.3);
@@ -542,6 +569,7 @@ build(env){
   scatterProps('models/bush_free.glb',16,6,16,0,Z_BOUNDARY-4,1.1,{collider:false,scaleMin:0.6,scaleMax:1.0,centerXZ:true,credit:CREDIT_BUSH});
 
   buildBoundaryLines();
+  buildHedge();
 
   // ================= 毎フレーム更新 =================
   function update(dt,charPos){
