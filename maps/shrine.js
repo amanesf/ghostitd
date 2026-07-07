@@ -315,7 +315,7 @@ build(env){
 
     // 貫(柱を貫通する横木)
     const nukiThick=H*0.045, nukiDepth=H*0.05;
-    const nukiY=kamegoeriH+pillarH*0.56;
+    const nukiY=kamegoeriH+pillarH*0.84; // user指摘: 貫は柱の8〜9割の高さになければおかしい
     const nuki=new THREE.Mesh(new THREE.BoxGeometry(hw*2+H*0.05,nukiThick,nukiDepth),redMat);
     nuki.position.set(0,nukiY,0);
     g.add(nuki);
