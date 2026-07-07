@@ -266,6 +266,19 @@ build(env){
   const CREDIT_SIGNPOST={name:'Signpost',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/3U2lj1gpeH'};
   const CREDIT_HONDEN={name:'Shrine(本殿)',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://booth.pm/ja/items/2659982'};
   const CREDIT_CHOUZUYA={name:'手水舎',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://shoshinshaworks.booth.pm/items/2660016'};
+  // Step3で新規調達(第11弾): いずれもthree.jsプレビューで実際にレンダリングして目視確認済み
+  const CREDIT_CAR={name:'Broken Car',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/Y67erogmR9'};
+  const CREDIT_VENDING={name:'Vending Machine',author:'dook',license:'CC-BY',url:'https://poly.pizza/m/yNG4vqWVq0'};
+  const CREDIT_SIGNPOST_STONE={name:'Gravestone(社号標代用)',author:'Kay Lousberg',license:'CC0',url:'https://poly.pizza/m/lrEHKjTy29'};
+  const CREDIT_NOTICEBOARD={name:'Park Info Board',author:'J-Toastie',license:'CC-BY',url:'https://poly.pizza/m/KUjDbhPG3K'};
+  const CREDIT_WELL={name:'Well',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/QlqncKYxXb'};
+  const CREDIT_HORSE={name:'Horse Statue(神馬)',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/AK9CmjFnL6'};
+  const CREDIT_BRAZIER={name:'Campfire(篝火代用)',author:'Poly by Google',license:'CC-BY',url:'https://poly.pizza/m/0vzzmM-t8CP'};
+  const CREDIT_RACK={name:'Fence Frame(絵馬掛け代用)',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/Mjct0iRdmb'};
+  const CREDIT_BOULDER={name:'Rock Large(磐座)',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/d2VWOdthtR'};
+  const CREDIT_BAMBOO={name:'Bamboo',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/xBPj13w3JQ'};
+  const CREDIT_MAPLE={name:'Autumn Tree',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/2lRubrT6Na'};
+  const CREDIT_JIZO={name:'Statue(地蔵代用)',author:'Zsky',license:'CC-BY',url:'https://poly.pizza/m/YMO2Qq75Nh'};
 
   // --- 鳥居(プロシージャル自作、明神鳥居)。フリーモデル(角ばったsugamo版・
   //     変な提灯付きのJacques Fourie版)はすべて不採用とし、笠木の反り・島木・貫・
@@ -373,9 +386,11 @@ build(env){
   // 石段の装飾オブジェクトは完全廃止(user指示: 浮き/めり込みバグの温床だったため)。
   // 昇り降りは地面自体の線形勾配(groundHeightAt)だけで表現する、装飾のない坂にする。
 
-  // TODO(Step3素材調達後に実装): 狛犬(現状は無地の坂のまま。以前はfox_statue_freeを
-  // 代用していたが「狛犬のような狐で気持ち悪い」との指摘で撤去した。ちゃんとした
-  // 狛犬モデルが見つかるまでは何も置かない)。
+  // 狛犬: 現状は無地の坂のまま。以前はfox_statue_freeを代用していたが「狛犬のような狐で
+  // 気持ち悪い」との指摘で撤去した。Step3でpoly.pizza等を広く再捜索したが、実際に
+  // レンダリングして目視確認した候補はいずれも「普通の犬」「山羊」「リアルな獅子」で、
+  // 狛犬(様式化された獅子・狛犬像)らしく見えるCC0/CC-BYモデルが見つからなかったため、
+  // 誤った代用は繰り返さずに何も置かない方針を継続する。
 
   // --- 手水舎(参道の坂を上りきってすぐ) ---
   let basinBulb=null, basinSwingT=0;
@@ -480,9 +495,12 @@ build(env){
     }).catch(()=>{});
   }
 
-  // TODO(Step3素材調達後に実装): 社務所/授与所、絵馬掛け所、おみくじ結び所、神馬の銅像、
-  // 蔵/井戸、篝火、提灯スタンド、駐車場の放置車・自動販売機・社号標・掲示板、正式な狛犬。
-  // いずれも本レイアウトの各ゾーン内に配置スペースは確保済み(境内広場の外周・駐車場ゾーン等)。
+  // TODO(未調達、Step3で継続捜索): 社務所/授与所・蔵/倉庫は、poly.pizza/quaternius.com/
+  // opengameart.orgを広く探したが「西洋のお城やファンタジー塔」「和室の室内シーンのみ」
+  // 「アメリカの納屋」しか見つからず、実在の和風建築に見えるCC0/CC-BYモデルが無かったため
+  // 見送り(名前だけで採用しない方針を徹底した結果)。正式な狛犬も同様に、実際に石像の
+  // 狛犬らしく見える候補が見つからなかったため見送り(フォックス代用の再発防止)。
+  // おみくじ結び所・提灯スタンドは優先度が低いため未着手。
 
   // --- 本殿参道: 玉垣(低い柵)で囲われた区画 ---
   // user指摘で本殿手前のキツネの神使像+台座を撤去(全体的に狐系の像を減らす方針)。
@@ -562,6 +580,105 @@ build(env){
   entranceLight.position.set(0,3.6,-8);
   scene.add(entranceLight);
 
+  // --- 駐車場の現代小物(user承認済み: 放置車・自販機・掲示板・社号標) ---
+  placeStatic('models/car_old_free.glb',-6,-9,1.35,{rotY:0.4,collider:true,colliderR:1.9,credit:CREDIT_CAR});
+  let vendingGlow=null;
+  loadStaticGLB('models/vending_machine_free.glb').then(obj=>{
+    normalizeToHeight(obj,2.0);
+    placeOnGround(obj,7,-5);
+    group.add(obj);
+    colliders.push({type:'circle',x:7,z:-5,r:0.6});
+    const glow=new THREE.Mesh(new THREE.PlaneGeometry(0.7,1.1),new THREE.MeshBasicMaterial({color:0xfff6c8,toneMapped:false,transparent:true,opacity:0.85}));
+    glow.position.set(7,groundHeightAt(7,-5)+1.1,-5.35);
+    group.add(glow);
+    const light=new THREE.PointLight(0xfff2c0,1.1,4.5,2);
+    light.position.set(7,groundHeightAt(7,-5)+1.1,-5.2);
+    group.add(light);
+    vendingGlow=light;
+    pushCredit(CREDIT_VENDING);
+  }).catch(()=>{});
+  placeStatic('models/noticeboard_free.glb',-9,-3,1.6,{rotY:Math.PI*0.15,collider:true,colliderR:0.7,credit:CREDIT_NOTICEBOARD});
+  // 社号標(「〜神社」の石柱、参道口の目印。Gravestoneモデルを流用しているため
+  // 表面に彫刻文字は入っていないが、シルエットは石柱として自然)
+  placeStatic('models/signpost_stone_free.glb',4.5,-2.6,1.3,{rotY:-0.2,collider:true,colliderR:0.4,credit:CREDIT_SIGNPOST_STONE});
+
+  // --- 井戸(境内広場、屋根付き) ---
+  placeStatic('models/well_free.glb',-15,44,1.5,{collider:true,colliderR:0.9,credit:CREDIT_WELL});
+
+  // --- 神馬(しんめ)の銅像+台座(境内広場、ブロンズ色に塗り替え) ---
+  {
+    const x=-5, z=50;
+    colliders.push({type:'circle',x,z,r:0.7});
+    placeStatic('models/pedestal_free.glb',x,z,0.35,{centerXZ:true});
+    loadStaticGLB('models/horse_free.glb').then(obj=>{
+      normalizeToHeight(obj,1.7);
+      obj.traverse(o=>{ if(o.isMesh&&o.material){
+        o.material=o.material.clone();
+        o.material.color.set(0x8a6a3a);
+        o.material.metalness=0.65; o.material.roughness=0.4;
+      }});
+      obj.position.x=x; obj.position.z=z;
+      obj.position.y+=groundHeightAt(x,z)+0.35;
+      group.add(obj);
+      pushCredit(CREDIT_HORSE);
+    }).catch(()=>{});
+  }
+
+  // --- 篝火(境内広場、火影がちらつく) ---
+  let brazierLight=null, brazierFlickerT=0;
+  {
+    const x=8,z=42;
+    placeStatic('models/brazier_free.glb',x,z,0.9,{collider:true,colliderR:0.6,credit:CREDIT_BRAZIER});
+    brazierLight=new THREE.PointLight(0xff9a44,1.4,6,2);
+    brazierLight.position.set(x,groundHeightAt(x,z)+0.6,z);
+    group.add(brazierLight);
+  }
+
+  // --- 絵馬掛け所(木枠、Kenney Fence Frameを流用) ---
+  placeStatic('models/rack_free.glb',-6,18,1.5,{rotY:Math.PI/2,collider:true,colliderR:0.6,credit:CREDIT_RACK});
+
+  // --- 磐座(いわくら): 奥の院の巨岩+しめ縄+紙垂 ---
+  {
+    const x=-3, z=82;
+    colliders.push({type:'circle',x,z,r:1.3});
+    loadStaticGLB('models/boulder_free.glb').then(obj=>{
+      normalizeToHeight(obj,3.2);
+      placeOnGround(obj,x,z);
+      group.add(obj);
+      const ropeMat=new THREE.MeshStandardMaterial({color:0xcfc29a,roughness:0.95});
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(0.75,0.06,8,20),ropeMat);
+      ring.rotation.x=Math.PI/2;
+      ring.position.set(x,groundHeightAt(x,z)+1.8,z);
+      group.add(ring);
+      const shideMat=new THREE.MeshBasicMaterial({color:0xf2efe6,side:THREE.DoubleSide});
+      for(let a=0;a<3;a++){
+        const ang=a*Math.PI*2/3;
+        const shide=new THREE.Mesh(new THREE.PlaneGeometry(0.16,0.36),shideMat);
+        shide.position.set(x+Math.cos(ang)*0.75,groundHeightAt(x,z)+1.55,z+Math.sin(ang)*0.75);
+        shide.rotation.y=-ang;
+        group.add(shide);
+      }
+      pushCredit(CREDIT_BOULDER);
+    }).catch(()=>{});
+  }
+
+  // --- 竹林(奥の院、密集配置で通り抜ける小径) ---
+  scatterProps('models/bamboo_free.glb',18,1.5,5.8,78,86,3.2,{collider:true,colliderR:0.15,scaleMin:0.8,scaleMax:1.3,credit:CREDIT_BAMBOO});
+
+  // --- 朽ちた地蔵(奥の院、荒廃の演出。石像らしく灰色に塗り替え) ---
+  loadStaticGLB('models/jizo_free.glb').then(obj=>{
+    normalizeToHeight(obj,0.75);
+    obj.traverse(o=>{ if(o.isMesh&&o.material){
+      o.material=o.material.clone();
+      o.material.color.set(0x8f8d85);
+      o.material.metalness=0; o.material.roughness=0.95;
+    }});
+    placeOnGround(obj,4,84);
+    group.add(obj);
+    colliders.push({type:'circle',x:4,z:84,r:0.4});
+    pushCredit(CREDIT_JIZO);
+  }).catch(()=>{});
+
   // --- 杉の木・岩・茂み(駐車場〜奥の院まで散布。密度を増量し、坂の区間も除外せず
   //     生やす。個々のオブジェクトはplaceOnGroundで自分の(x,z)ごとに接地するため、
   //     線形勾配の坂であれば浮遊は起きない) ---
@@ -590,7 +707,8 @@ build(env){
       if(opts.credit)pushCredit(opts.credit);
     }).catch(()=>{});
   }
-  scatterProps('models/pine_tree_free.glb',52,7.5,17,-1,Z_BOUNDARY-4,7,{collider:true,colliderR:0.35,scaleMin:0.8,scaleMax:1.5,credit:CREDIT_PINE});
+  scatterProps('models/pine_tree_free.glb',40,7.5,17,-1,Z_BOUNDARY-4,7,{collider:true,colliderR:0.35,scaleMin:0.8,scaleMax:1.5,credit:CREDIT_PINE});
+  scatterProps('models/maple_tree_free.glb',16,7.5,17,-1,Z_BOUNDARY-4,6,{collider:true,colliderR:0.35,scaleMin:0.8,scaleMax:1.4,credit:CREDIT_MAPLE});
   scatterProps('models/rock_free.glb',30,5.5,17,-1,Z_BOUNDARY-4,0.9,{collider:true,colliderR:0.45,scaleMin:0.7,scaleMax:1.6,credit:CREDIT_ROCK});
   scatterProps('models/bush_large_free.glb',24,6,17,-1,Z_BOUNDARY-4,1.0,{collider:false,scaleMin:0.7,scaleMax:1.3,centerXZ:true,credit:CREDIT_BUSH_LARGE});
 
@@ -613,6 +731,14 @@ build(env){
     const d=Math.hypot(charPos.x,charPos.z-hallFrontZ);
     sensorLightOn=d<6;
     sensorLight.intensity+=((sensorLightOn?1.7:0)-sensorLight.intensity)*Math.min(1,10*dt);
+
+    if(vendingGlow){
+      vendingGlow.intensity=1.0+Math.sin(entranceFlickerT*14)*0.08+(Math.random()<0.01?-0.6:0);
+    }
+    if(brazierLight){
+      brazierFlickerT+=dt;
+      brazierLight.intensity=1.4+Math.sin(brazierFlickerT*11)*0.25+Math.sin(brazierFlickerT*27)*0.15;
+    }
   }
 
   return {
