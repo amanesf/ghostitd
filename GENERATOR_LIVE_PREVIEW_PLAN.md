@@ -260,21 +260,67 @@ Playwrightでの確認(chromium): サンプル画像から「生成」→ビュ�
 
 ## 追加課題(運用ルール4に基づく追記)
 
-5. フェーズ2で`seamAngles`/`seamNoSide`(ボーン別の継ぎ目角度/側面画像不使用
-   フラグの上書き辞書)はビューアのライブ編集対象から外し、生成時点の値を
-   据え置きにした。これらを編集したい場合は現状ジェネレータ
-   (`landmark_tool.html`)の「境目角度」タブに戻って再生成する必要がある。
-   将来的にビューア側でも編集したい場合は、ボーン別リストUIの追加実装が
-   必要(工数が本フェーズの他項目より大きいため意図的に見送った)。
-6. `P3D.finishFromIntermediate()`は現状、どのパラメータが変わったかに
-   関わらず常にsmooth→decimate→skin→atlas_bake→model_glbの全段を再計算する。
-   Tier1のパラメータ(平滑化回数等)だけを変えた場合でも間引き
-   (decimateMesh)やatlas焼き込みをやり直しており、彫刻(marching cubes)の
-   再実行は避けられているものの、更に細かい「変更のあった段以降だけ
-   再計算する」差分キャッシュは未実装。パラメータ数・メッシュ規模次第では
-   1回の調整で数百ms〜数秒かかることがある(Playwright確認時、間引き目標
-   頂点数の変更でSimplifyModifierが失敗し頂点クラスタリングにフォール
-   バックするケースがあり、その場合は特に時間がかかる)。
+5. 【解決済み・2026-07-07】フェーズ2で`seamAngles`/`seamNoSide`(ボーン別の
+   継ぎ目角度/側面画像不使用フラグの上書き辞書)はビューアのライブ編集対象
+   から外し、生成時点の値を据え置きにしていた。`character_3d.html`の
+   「生成調整」タブに`landmark_tool.html`の`BONE_GROUPS`/`seamRowHtml`と
+   同じパターンのボーン別アコーディオンリスト(`renderSeamPanel()`、
+   `#genSeamPanel`)を追加し、`liveSeamAngles`/`liveSeamNoSide`という新しい
+   ライブ状態変数を介して編集できるようにした。変更は他のTier3パラメータ
+   同様`scheduleGenRecompute()`経由でatlas_bakeの再実行をトリガーする。
+   Playwrightで`hips`ボーンの角度を45→30に変更し、コンソールエラー0件で
+   atlas_bake+model_glbのみが再実行されること、JSON書き出し結果の
+   `seam_angles.hips===30`になることを確認した。パネルを開いても
+   `#bar`の高さは50vh(900px viewportで450px)以内に収まり、`#c`(3Dビュー)の
+   topは0のまま(画面上部が隠れない)ことも確認済み。
+6. 【解決済み・2026-07-07】`P3D.finishFromIntermediate()`は従来、どの
+   パラメータが変わったかに関わらず常にsmooth→decimate→skin→atlas_bake→
+   model_glbの全段を再計算していた。`js/pipeline.js`に段階的キャッシュを
+   実装し、`inter._stageCache`に前回の入力シグネチャ(JSON文字列)と結果を
+   保持することで、変化のなかった段をスキップするようにした。
+   キャッシュを効かせるため、内部処理順を「間引き(decimate)→平滑化
+   (smooth)」に組み替えた(従来のfinishBodyMesh/finishAccessoryMeshは
+   「平滑化→間引き」の順のままrunPipeline側で温存、finishFromIntermediate
+   専用に新設したdecimateStage()/meshFinishStage()がこの新しい順で処理する)。
+   これにより:
+   - decimate段はTier2(body_decimate/body_target_verts/acc_decimate/
+     acc_target_verts)にのみ依存し、Tier1/Tier3だけの変更ではスキップされる。
+   - mesh_finish段(平滑化+スキニング)はdecimate段の出力+Tier1
+     (body_smooth_iters/acc_smooth_iters/rigid_soft_width)に依存し、Tier3
+     だけの変更ではスキップされる。
+   - atlas_bake段はmesh_finish段の出力+Tier3(seamAngles/seamNoSide/
+     seamSmoothIters/colorGradWidth)に依存する。
+   - model_glb段(テクスチャ圧縮+GLB書き出し)は軽量なため常に実行する。
+   Playwrightでconsole.logのステージ名を計測し、Tier1のみの変更では
+   `decimate`ステージのログが出ないこと(`mesh_finish`→`atlas_bake`→
+   `model_glb`のみ)、Tier3(ボーン別`seamAngles`含む)のみの変更では
+   `mesh_finish`も`decimate`も出ず`atlas_bake`→`model_glb`のみになること、
+   Tier2(`body_target_verts`)の変更では`decimate`ステージのログが実際に
+   出ること(頂点数99646から頂点クラスタリングへのフォールバックログも含め)
+   を確認した。一連の操作でコンソールエラーは0件。
+
+## Task3実施メモ(2026-07-07、GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7)
+
+7. `landmark_tool.html`の「設定値」タブ(`PARAM_META`)から、上記5・6により
+   ビューア側でライブ編集可能になったTier1〜3の12キー(`body_smooth_iters`,
+   `acc_smooth_iters`, `rigid_soft_width`, `kb_per_face`, `body_decimate`,
+   `body_target_verts`, `acc_decimate`, `acc_target_verts`)の編集UI行を
+   削除した(`seamAngles`/`seamNoSide`/`seamSmoothIters`/`colorGradWidth`は
+   元々「画像境界」タブ側)。「画像境界」タブ自体(タブバーのボタン+
+   `data-tabpanel="seam"`のパネルHTML+`seamBulkApply`等のイベント配線)も
+   まるごと削除し、`renderSeamList()`は`#seamList`が存在しないため何もしない
+   関数に変更した(呼び出し箇所は互換のため残置)。`genParams`/`seamAngles`/
+   `seamNoSide`/`seamSmoothIters`/`colorGradWidth`という変数自体と、
+   `buildJson()`/`applyLoadedJson()`でのシリアライズ/デシリアライズは
+   変更していない(既定値のままintermediateパッケージに含まれ、ビューアの
+   初期状態として使われる)。Phase0の2Dプレビュー機構・ボーン表示/範囲
+   トグル(「マーク」「パーツ＋」タブ)は影響を受けず、`resyncAnalysisToProfile`
+   等の`white_thr`等の参照もそのまま残っている。
+   Playwrightで確認: 「設定値」タブに`body_vox`等(残す項目)は表示される一方
+   `body_smooth_iters`/`kb_per_face`/`rigid_soft_width`等(削除対象)のラベルは
+   表示されないこと、タブバーに`data-tab="seam"`の残骸ボタンがないこと、
+   `#seamList`がDOMに存在しないこと、サンプルモード→生成→
+   `character_3d.html`遷移までコンソールエラー0件で完走することを確認した。
 
 ## フェーズ3 実施メモ
 
