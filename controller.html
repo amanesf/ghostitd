@@ -132,9 +132,9 @@
   </label></div>
   <div class="cfgRow"><label>FPS上限
     <select id="cfgFpsLimit">
-      <option value="0" selected>無制限(画面のリフレッシュレートに追従)</option>
+      <option value="0">無制限(画面のリフレッシュレートに追従)</option>
       <option value="60">60fps</option>
-      <option value="30">30fps</option>
+      <option value="30" selected>30fps</option>
       <option value="24">24fps</option>
       <option value="15">15fps</option>
     </select>
@@ -142,8 +142,8 @@
   <div class="cfgRow"><label>PIPカメラ画質
     <select id="cfgPipQuality">
       <option value="1" data-label="高(毎フレーム更新)">高(毎フレーム更新)</option>
-      <option value="3" selected data-label="標準">標準</option>
-      <option value="8" data-label="低(軽量)">低(軽量)</option>
+      <option value="2" selected data-label="標準">標準</option>
+      <option value="4" data-label="低(軽量)">低(軽量)</option>
     </select>
   </label></div>
   <div class="cfgRow cfgCheck"><label>
@@ -192,7 +192,7 @@ const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
 // フレームに1回だけ行い、その結果をレンダーターゲット(テクスチャ)に焼き付けておく。
 // 表示自体は毎フレーム、そのテクスチャを画面に貼るだけ(激安)にすることで、
 // 「メインカメラがPIP領域を上書きしてしまい間だけちらつく」問題を避けつつ負荷も抑える。
-let PIP_FRAME_SKIP=3; // configパネルの「PIPカメラ画質」で変更可能
+let PIP_FRAME_SKIP=2; // configパネルの「PIPカメラ画質」の既定値(FPS上限30fps時に約15fps相当)。変更可能
 let pipEnabled=true;
 let frameCount=0;
 const selfieRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
@@ -759,7 +759,7 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
 
 // --- 描画設定パネル ---
-let TARGET_FPS=0; // 0=無制限(画面のリフレッシュレートに追従)。configの「FPS上限」で変更
+let TARGET_FPS=30; // configの「FPS上限」の既定値(30fps)。0=無制限(画面のリフレッシュレートに追従)
 let _fpsAccum=0; // TARGET_FPS>0の時、tick()で経過時間を貯めて間引くためのアキュムレータ
 function applyFogDensity(pct){ scene.fog.density=0.02+(pct/100)*0.10; invalidate(); }
 function applyBrightness(pct){
@@ -1070,7 +1070,7 @@ function frame(dt){
 // それらの宣言が済んだ最後にまとめて実行する)
 applyFogDensity(+document.getElementById('cfgFog').value);
 applyBrightness(+document.getElementById('cfgBrightness').value);
-refreshPipQualityLabels();
+applyFpsLimit(document.getElementById('cfgFpsLimit').value);
 tick();
 })();
 </script>
