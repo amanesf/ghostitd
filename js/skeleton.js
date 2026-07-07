@@ -347,7 +347,11 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k, rigidSoftWidth){
   var RIGID_LOW = Math.max(0, RIGID_DOM_CENTER - rigidSoftWidth/2);
   var RIGID_HIGH = Math.min(1, RIGID_DOM_CENTER + rigidSoftWidth/2);
   var RIGID_SHAFT_BONES = {thigh_L:1,thigh_R:1,shin_L:1,shin_R:1,upperarm_L:1,upperarm_R:1,forearm_L:1,forearm_R:1};
-  for(var v=0; v<n; v++){
+  // 頂点1個分のk近傍ウェイト計算+各種補正(股関節/肩ゾーンマスク、親ボーンへの
+  // 付け替え、首/頭・手足シャフトの剛体化)。上で組み立てたdists/A/Bp/AB/L2/
+  // joints/idxmap/parentIdxOf等をクロージャでそのまま参照する(distsは全頂点で
+  // 使い回す共有バッファなので、ここで新しく確保し直さないこと)。
+  function skinVertex(v){
     var vx=V[v*3], vy=V[v*3+1], vz=V[v*3+2];
     for(var i2=0;i2<m;i2++){
       var d;
@@ -440,6 +444,7 @@ function nearestBoneSegmentSkin(V, pivots, boneSubset, k, rigidSoftWidth){
       }
     }
   }
+  for(var v=0; v<n; v++) skinVertex(v);
   return {J:J, W:W};
 }
 P3D.nearestBoneSegmentSkin = nearestBoneSegmentSkin;
