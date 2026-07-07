@@ -593,10 +593,9 @@ function renderOutlinePanel(){
 function paramGroupChanged(g){
   return PARAM_META.some(m=>m.group===g && genParams[m.key]!==DEFAULT_GEN_PARAMS[m.key]);
 }
-function renderParamsPanel(){
-  const el=$("paramsPanel"); if(!el)return;
+function buildParamsPanelHtml(){
   const groups=[]; PARAM_META.forEach(m=>{if(!groups.includes(m.group))groups.push(m.group);});
-  el.innerHTML=groups.map(g=>{
+  return groups.map(g=>{
     const itemList=PARAM_META.filter(m=>m.group===g);
     const items=itemList.map(m=>{
       const dv=DEFAULT_GEN_PARAMS[m.key];
@@ -629,6 +628,8 @@ function renderParamsPanel(){
       '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
       '</summary><div class="accbody">'+items+'</div></details>';
   }).join("");
+}
+function wireParamsPanelEvents(el){
   [].forEach.call(el.querySelectorAll("[data-param]"),inp=>{
     const key=inp.dataset.param;
     const sync=()=>{
@@ -687,6 +688,11 @@ function renderParamsPanel(){
       }
     });
   });
+}
+function renderParamsPanel(){
+  const el=$("paramsPanel"); if(!el)return;
+  el.innerHTML=buildParamsPanelHtml();
+  wireParamsPanelEvents(el);
 }
 // 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲を
 // 塗ったオフスクリーンcanvas)。キャラのシルエットに紛れ込む前髪等を
@@ -1015,6 +1021,75 @@ function drawBoneRegionOverlay(x,sc,bp){
   }
   x.restore();
 }
+// フェーズ0: パラメータタブでの2Dプレビュー。展開中のグループ(または輪郭線
+// 除去プレビュー)に応じて、背景除去+縁の色にじみ(+輪郭線除去)を適用した
+// 加工後の画像を代わりに表示する。
+function drawPreviewLayer(x,sc,el,w,h){
+  const pv=previewTargetView();
+  let offX=0,offY=0;
+  if(pv==="back"){offX=genParams.back_offset_x||0;offY=genParams.back_offset_y||0;}
+  if(pv==="side"){offX=genParams.side_offset_x||0;offY=genParams.side_offset_y||0;}
+  const pc=buildPreviewCanvas(pv);
+  if(pc){
+    x.drawImage(pc.canvas,0,0,pc.w,pc.h, view.ox+offX*sc,view.oy+offY*sc, pc.w*sc, pc.h*sc);
+  }else{
+    x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  }
+  if(previewActiveGroup==="アクセサリーの背景除去"){
+    // band_h/band_overlapの帯の切れ目を目安線として重ねる(実際の
+    // アクセサリー背景除去は個別パーツ単位の帯分割処理だが、ここでは
+    // 「どの高さで帯が切り替わるか」だけを可視化する簡易プレビュー)。
+    const bandH=Math.max(10,genParams.band_h||220), overlap=Math.min(genParams.band_overlap||0,bandH-1);
+    const step=Math.max(1,bandH-overlap);
+    x.save();x.setLineDash([6,4]);x.lineWidth=1.5;x.strokeStyle="rgba(122,162,255,.85)";
+    for(let by=0; by<h; by+=step){
+      const py=by*sc+view.oy;
+      x.beginPath();x.moveTo(view.ox,py);x.lineTo(view.ox+w*sc,py);x.stroke();
+    }
+    x.restore();
+  }
+  x.save();x.font="bold 11px sans-serif";x.fillStyle="#39ff9e";x.textAlign="left";
+  x.fillText("プレビュー中: "+(previewActiveGroup||"輪郭線除去")+"("+VIEWJP[pv]+")",8,16);
+  x.restore();
+}
+// 除外マスクの赤い塗りは「領域」タブでの作業対象なので、そのタブでのみ見せる
+// (他タブで常に赤く覆われていると、そのタブ本来の要素の邪魔になるため)。
+function drawExcludeMaskOverlay(x,sc,w,h){
+  const ec=excludeMask[curView];
+  if(!ec||curTab!=="ex")return;
+  x.save();x.globalAlpha=0.45;
+  x.drawImage(ec.canvas,0,0,ec.canvas.width,ec.canvas.height, view.ox,view.oy, w*sc, h*sc);
+  x.restore();
+}
+// マーク/パーツ＋タブそれぞれの専門の点だけをgetInteractivePoints側で絞っている。
+// 領域(除外)タブでは何も重ねない。
+function drawLandmarkPoints(x,sc){
+  if(curTab==="ac")drawRegionOutlines(x,sc);
+  getInteractivePoints(curView).forEach(p=>{
+    const px=p.pos[0]*sc+view.ox, py=p.pos[1]*sc+view.oy, on=sel===p.key;
+    drawCross(x,px,py,on,p.color);
+    drawLabel(x,p.label,px,py-13,on?"#ffe14d":p.color);
+  });
+}
+// 「マーク」「パーツ＋」タブ用のボーン表示/範囲トグル(既存のボーン専用
+// タブに切り替えなくても、ランドマーク/アクセサリー配置中に確認できる)。
+function drawBoneOverlaysIfEnabled(x,sc){
+  if((curTab!=="lm"&&curTab!=="ac")||curView!=="front")return;
+  // 両方ONの場合にcomputeBonePivots()を2回計算しないよう、1回だけ求めて共有する
+  // (ドラッグ中はdraw()が毎pointermoveで呼ばれるため、二重計算の削減効果が大きい)。
+  const sharedBp=(boneOverlayOn||boneRegionOn)?computeBonePivots():null;
+  if(boneOverlayOn)drawBoneOverlay(x,sc,sharedBp);
+  if(boneRegionOn)drawBoneRegionOverlay(x,sc,sharedBp);
+}
+function drawBrushCursorIfActive(x,sc){
+  if(!brushCursor||curTab!=="ex"||exMode!=="brush")return;
+  const bx=brushCursor[0]*sc+view.ox, by=brushCursor[1]*sc+view.oy;
+  const br=parseInt($("exSlider").value,10)*sc;
+  x.save();x.beginPath();x.arc(bx,by,br,0,Math.PI*2);
+  x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.65)";x.stroke();
+  x.lineWidth=1.5;x.strokeStyle="#ffe14d";x.stroke();
+  x.restore();
+}
 function draw(){
   const previewOn=previewModeActive();
   const CI=previewOn?imgs[previewTargetView()]:curImg();
@@ -1023,72 +1098,12 @@ function draw(){
   cvs.width=cw; cvs.height=Math.round(h*base);
   const x=cvs.getContext("2d"); x.clearRect(0,0,cvs.width,cvs.height);
   const sc=base*view.z;
-  if(previewOn){
-    // フェーズ0: パラメータタブでの2Dプレビュー。展開中のグループ(または
-    // 輪郭線除去プレビュー)に応じて、背景除去+縁の色にじみ(+輪郭線除去)を
-    // 適用した加工後の画像を代わりに表示する。
-    const pv=previewTargetView();
-    let offX=0,offY=0;
-    if(pv==="back"){offX=genParams.back_offset_x||0;offY=genParams.back_offset_y||0;}
-    if(pv==="side"){offX=genParams.side_offset_x||0;offY=genParams.side_offset_y||0;}
-    const pc=buildPreviewCanvas(pv);
-    if(pc){
-      x.drawImage(pc.canvas,0,0,pc.w,pc.h, view.ox+offX*sc,view.oy+offY*sc, pc.w*sc, pc.h*sc);
-    }else{
-      x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
-    }
-    if(previewActiveGroup==="アクセサリーの背景除去"){
-      // band_h/band_overlapの帯の切れ目を目安線として重ねる(実際の
-      // アクセサリー背景除去は個別パーツ単位の帯分割処理だが、ここでは
-      // 「どの高さで帯が切り替わるか」だけを可視化する簡易プレビュー)。
-      const bandH=Math.max(10,genParams.band_h||220), overlap=Math.min(genParams.band_overlap||0,bandH-1);
-      const step=Math.max(1,bandH-overlap);
-      x.save();x.setLineDash([6,4]);x.lineWidth=1.5;x.strokeStyle="rgba(122,162,255,.85)";
-      for(let by=0; by<h; by+=step){
-        const py=by*sc+view.oy;
-        x.beginPath();x.moveTo(view.ox,py);x.lineTo(view.ox+w*sc,py);x.stroke();
-      }
-      x.restore();
-    }
-    x.save();x.font="bold 11px sans-serif";x.fillStyle="#39ff9e";x.textAlign="left";
-    x.fillText("プレビュー中: "+(previewActiveGroup||"輪郭線除去")+"("+VIEWJP[pv]+")",8,16);
-    x.restore();
-  }else{
-    x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
-  }
-  // 除外マスクの赤い塗りは「領域」タブでの作業対象なので、そのタブでのみ見せる
-  // (他タブで常に赤く覆われていると、そのタブ本来の要素の邪魔になるため)。
-  const ec=excludeMask[curView];
-  if(ec&&curTab==="ex"){x.save();x.globalAlpha=0.45;
-    x.drawImage(ec.canvas,0,0,ec.canvas.width,ec.canvas.height, view.ox,view.oy, w*sc, h*sc);
-    x.restore();}
-  if(!previewOn){
-    // マーク/パーツ＋タブそれぞれの専門の点だけをgetInteractivePoints側で絞っている。
-    // 領域(除外)タブでは何も重ねない。
-    if(curTab==="ac")drawRegionOutlines(x,sc);
-    getInteractivePoints(curView).forEach(p=>{
-      const px=p.pos[0]*sc+view.ox, py=p.pos[1]*sc+view.oy, on=sel===p.key;
-      drawCross(x,px,py,on,p.color);
-      drawLabel(x,p.label,px,py-13,on?"#ffe14d":p.color);
-    });
-  }
-  // 「マーク」「パーツ＋」タブ用のボーン表示/範囲トグル(既存のボーン専用
-  // タブに切り替えなくても、ランドマーク/アクセサリー配置中に確認できる)。
-  if((curTab==="lm"||curTab==="ac")&&curView==="front"){
-    // 両方ONの場合にcomputeBonePivots()を2回計算しないよう、1回だけ求めて共有する
-    // (ドラッグ中はdraw()が毎pointermoveで呼ばれるため、二重計算の削減効果が大きい)。
-    const sharedBp=(boneOverlayOn||boneRegionOn)?computeBonePivots():null;
-    if(boneOverlayOn)drawBoneOverlay(x,sc,sharedBp);
-    if(boneRegionOn)drawBoneRegionOverlay(x,sc,sharedBp);
-  }
-  if(brushCursor&&curTab==="ex"&&exMode==="brush"){
-    const bx=brushCursor[0]*sc+view.ox, by=brushCursor[1]*sc+view.oy;
-    const br=parseInt($("exSlider").value,10)*sc;
-    x.save();x.beginPath();x.arc(bx,by,br,0,Math.PI*2);
-    x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.65)";x.stroke();
-    x.lineWidth=1.5;x.strokeStyle="#ffe14d";x.stroke();
-    x.restore();
-  }
+  if(previewOn) drawPreviewLayer(x,sc,el,w,h);
+  else x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  drawExcludeMaskOverlay(x,sc,w,h);
+  if(!previewOn) drawLandmarkPoints(x,sc);
+  drawBoneOverlaysIfEnabled(x,sc);
+  drawBrushCursorIfActive(x,sc);
 }
 
 /* ---------- ファイル読み込み ---------- */
@@ -1463,9 +1478,7 @@ function defaultAccRegion(view,pointCount,bones){
   }
   return{points:distributeBoxPoints(pointCount,cx0,cy0,halfW,halfH)};
 }
-function renderAcForm(){
-  const el=$("acForm");
-  if(!pendingAcc){el.innerHTML="";return;}
+function buildAcFormHtml(){
   const bonesHtml=BONE_GROUPS.map(grp=>{
     const rowHtml=grp.bones.map(b=>{
       const checked=pendingAcc.bones.includes(b)?"checked":"";
@@ -1488,7 +1501,7 @@ function renderAcForm(){
     }
     selBtns='<div class="row" style="flex-wrap:wrap">'+btns.join("")+'</div>';
   }
-  el.innerHTML='<div class="acform">'+
+  return '<div class="acform">'+
     '<label>名前<input type="text" id="acName" value="'+pendingAcc.name+'" placeholder="例: ヘッドホン"></label>'+
     '<label>取り付け方式</label>'+
     '<div class="row">'+
@@ -1509,6 +1522,8 @@ function renderAcForm(){
     '<button class="btn mint" id="acConfirm"'+(canAdd?"":" disabled")+'>'+(pendingAccEditIdx!==null?"この内容で保存する":"この内容で追加する")+'</button>'+
     '<button class="btn" id="acCancel">キャンセル</button>'+
     '</div></div>';
+}
+function wireAcFormEvents(){
   $("acName").oninput=e=>{pendingAcc.name=e.target.value;};
   [].forEach.call(document.querySelectorAll("#acForm [data-acmode]"),btn=>{
     btn.onclick=()=>{
@@ -1575,6 +1590,12 @@ function renderAcForm(){
     pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
     sel=null;renderAcList();renderAcForm();syncChips();draw();
   };
+}
+function renderAcForm(){
+  const el=$("acForm");
+  if(!pendingAcc){el.innerHTML="";return;}
+  el.innerHTML=buildAcFormHtml();
+  wireAcFormEvents();
 }
 function highlightAcListItem(idx){
   const el=$("acList").children[idx];
