@@ -481,45 +481,55 @@ function loadMotions(){
   });
 }
 
+// キャラクターはシーンのライティングの影響を受けない(常に地の色のまま見える)不透明な
+// マテリアルにする。暗い神社の中でも自撮り/POVカメラで顔がちゃんと見え、光源計算も
+// 不要になる分軽くなる(懐中電灯のビームもキャラの見た目には影響しなくなる)。
+function applyCharacterMaterials(model){
+  model.traverse(o=>{ if(o.isMesh&&o.material){
+    const old=o.material;
+    const smoothMat=new THREE.MeshBasicMaterial({map:old.map||null,
+      transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,
+      toneMapped:false});
+    if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
+    o.material=smoothMat;
+    characterMaterials.push(smoothMat);
+  }});
+}
+// モデル原点(hipsボーン基準)は足裏と一致しないため、バウンディングボックスの
+// 最下点が地面(y=0)にちょうど接するよう補正する(でないと足が地面に埋まる)。
+// 補正後のバウンディングボックスからcharHeight/charCenterYも実測し直す。
+function groundCharacterToFeet(model){
+  model.position.y=0;
+  model.updateMatrixWorld(true);
+  let bbox=new THREE.Box3().setFromObject(model);
+  model.position.y=-bbox.min.y;
+  model.updateMatrixWorld(true);
+  bbox=new THREE.Box3().setFromObject(model);
+  charHeight=Math.max(0.5,bbox.max.y-bbox.min.y);
+  charCenterY=bbox.min.y+charHeight*0.5;
+}
+function resetCharacterUiState(){
+  document.getElementById('modeChoice').classList.add('hide');
+  document.getElementById('drop').classList.add('hide');
+  document.getElementById('joyBase').classList.add('visible');
+  document.getElementById('selfieBox').classList.toggle('visible',pipEnabled);
+  document.getElementById('fpsBox').classList.toggle('visible',pipEnabled);
+  document.getElementById('err').textContent='';
+}
 function loadCharacter(buf,onLoaded){
   new THREE.GLTFLoader().parse(buf,'',function(gltf){
     let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
     if(!hasMesh){ document.getElementById('err').textContent='モデルにメッシュが含まれていません'; return; }
     clearCharacter();
     model=gltf.scene; characterRoot.add(model);
-    model.traverse(o=>{ if(o.isMesh&&o.material){
-      const old=o.material;
-      // キャラクターはシーンのライティングの影響を受けない(常に地の色のまま見える)不透明な
-      // マテリアルにする。暗い神社の中でも自撮り/POVカメラで顔がちゃんと見え、光源計算も
-      // 不要になる分軽くなる(懐中電灯のビームもキャラの見た目には影響しなくなる)。
-      const smoothMat=new THREE.MeshBasicMaterial({map:old.map||null,
-        transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,
-        toneMapped:false});
-      if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
-      o.material=smoothMat;
-      characterMaterials.push(smoothMat);
-    }});
+    applyCharacterMaterials(model);
     applyCharBrightness(charBrightnessPct); // configの現在値を新しいマテリアルにも反映する
     handBone=model.getObjectByName('hand_R')||null;
     headBone=model.getObjectByName('head')||null;
-    model.position.y=0;
-    model.updateMatrixWorld(true);
-    let bbox=new THREE.Box3().setFromObject(model);
-    // モデル原点(hipsボーン基準)は足裏と一致しないため、バウンディングボックスの
-    // 最下点が地面(y=0)にちょうど接するよう補正する(でないと足が地面に埋まる)。
-    model.position.y=-bbox.min.y;
-    model.updateMatrixWorld(true);
-    bbox=new THREE.Box3().setFromObject(model);
-    charHeight=Math.max(0.5,bbox.max.y-bbox.min.y);
-    charCenterY=bbox.min.y+charHeight*0.5;
+    groundCharacterToFeet(model);
     attachFlashlight();
     mixer=new THREE.AnimationMixer(model);
-    document.getElementById('modeChoice').classList.add('hide');
-    document.getElementById('drop').classList.add('hide');
-    document.getElementById('joyBase').classList.add('visible');
-    document.getElementById('selfieBox').classList.toggle('visible',pipEnabled);
-    document.getElementById('fpsBox').classList.toggle('visible',pipEnabled);
-    document.getElementById('err').textContent='';
+    resetCharacterUiState();
     charPos.set(currentMap.spawnPoint.x,0,currentMap.spawnPoint.z);
     charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z);
     charYaw=currentMap.spawnPoint.yaw;
@@ -840,84 +850,89 @@ function tick(){
     frame(rawDt);
   }
 }
+// 入力→移動方向/向き/位置更新、懐中電灯・PIPカメラの追従、待機モーション分の
+// 再描画フラグ立て(idleAction自体が常時動くため)。model読込済みの時のみ呼ばれる。
+function updateCharacterMovement(dt){
+  const inputVec=joyActive?joyVec:keyboardVec();
+  const inputMag=Math.min(1,Math.hypot(inputVec.x,inputVec.y));
+  const camForward=new THREE.Vector3(-Math.sin(orbitYaw),0,-Math.cos(orbitYaw));
+  const camRight=new THREE.Vector3(-camForward.z,0,camForward.x);
+  const dir=camForward.multiplyScalar(inputVec.y).add(camRight.multiplyScalar(inputVec.x));
+  const hasDir=dir.lengthSq()>1e-6;
+  if(hasDir)dir.normalize();
+
+  currentBlend+=(Math.min(1,inputMag)-currentBlend)*Math.min(1,BLEND_LERP*dt);
+  if(idleAction&&runAction){ idleAction.weight=1-currentBlend; runAction.weight=currentBlend; }
+  if(mixer)mixer.update(dt);
+
+  if(hasDir){
+    const targetYaw=Math.atan2(dir.x,dir.z);
+    charYaw=lerpAngle(charYaw,targetYaw,Math.min(1,YAW_LERP*dt));
+  }
+  characterRoot.rotation.y=charYaw;
+
+  if(hasDir&&currentBlend>0.001){
+    const disp=dir.multiplyScalar(MOVE_SPEED*currentBlend*dt);
+    charPos.add(disp);
+    resolveCollision(charPos);
+  }
+  charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z);
+  characterRoot.position.set(charPos.x,charPos.y,charPos.z);
+
+  updateFlashlight();
+  updatePipCameras();
+  invalidate(); // idle待機モーション自体が常に動くため毎フレーム再描画
+}
+// 重いPIPシーン描画はここで間引いて行い、結果をレンダーターゲットに焼き付けるだけ
+// (画面には直接出さない)。表示は下のrenderMainAndPipBlit()で毎フレーム安価に行う。
+function renderPipTargets(){
+  renderer.setScissorTest(false);
+  // PIPカメラはキャラクターのすぐ近くに寄るため、メイン画面と同じ密度のホコリだと
+  // 画面手前で大きく・濃く重なって見えてしまう。PIP描画時だけ薄く/小さくする
+  // (メイン画面の見た目には一切影響しない、このブロックの中だけの一時変更)。
+  const _dustSizeOrig=dustMat.size, _dustOpOrig=dustMat.opacity;
+  dustMat.size=_dustSizeOrig*0.55;
+  dustMat.opacity=_dustOpOrig*0.4;
+  renderer.setRenderTarget(selfieRT);
+  renderer.render(scene,selfieCam);
+  renderer.setRenderTarget(fpsRT);
+  renderer.render(scene,fpsCam);
+  renderer.setRenderTarget(null);
+  dustMat.size=_dustSizeOrig;
+  dustMat.opacity=_dustOpOrig;
+}
+function renderMainAndPipBlit(){
+  renderer.setScissorTest(false);
+  renderer.setViewport(0,0,innerWidth,innerHeight);
+  renderer.render(scene,cam);
+  // PIPは毎フレーム、焼き付け済みのテクスチャを該当領域に貼るだけ(激安)にすることで、
+  // メインカメラの描画がPIP領域を上書きしてちらつくのを防ぎつつ、負荷も抑えている。
+  if(model&&pipEnabled){
+    renderer.setScissorTest(true);
+    renderer.setViewport(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
+    renderer.setScissor(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
+    renderer.clearDepth();
+    renderer.render(selfieBlitScene,blitCam);
+    renderer.setViewport(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
+    renderer.setScissor(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
+    renderer.clearDepth();
+    renderer.render(fpsBlitScene,blitCam);
+    renderer.setScissorTest(false);
+  }
+  needsRender=false;
+}
 function frame(dt){
   currentMap.update(dt,charPos);
   updateDust(dt);
   updateNoise();
   invalidate(); // 点滅灯・吊り電球の揺れ・ホコリの浮遊は常時アニメーションするため毎フレーム再描画
 
-  if(model){
-    const inputVec=joyActive?joyVec:keyboardVec();
-    const inputMag=Math.min(1,Math.hypot(inputVec.x,inputVec.y));
-    const camForward=new THREE.Vector3(-Math.sin(orbitYaw),0,-Math.cos(orbitYaw));
-    const camRight=new THREE.Vector3(-camForward.z,0,camForward.x);
-    const dir=camForward.multiplyScalar(inputVec.y).add(camRight.multiplyScalar(inputVec.x));
-    const hasDir=dir.lengthSq()>1e-6;
-    if(hasDir)dir.normalize();
-
-    currentBlend+=(Math.min(1,inputMag)-currentBlend)*Math.min(1,BLEND_LERP*dt);
-    if(idleAction&&runAction){ idleAction.weight=1-currentBlend; runAction.weight=currentBlend; }
-    if(mixer)mixer.update(dt);
-
-    if(hasDir){
-      const targetYaw=Math.atan2(dir.x,dir.z);
-      charYaw=lerpAngle(charYaw,targetYaw,Math.min(1,YAW_LERP*dt));
-    }
-    characterRoot.rotation.y=charYaw;
-
-    if(hasDir&&currentBlend>0.001){
-      const disp=dir.multiplyScalar(MOVE_SPEED*currentBlend*dt);
-      charPos.add(disp);
-      resolveCollision(charPos);
-    }
-    charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z);
-    characterRoot.position.set(charPos.x,charPos.y,charPos.z);
-
-    updateFlashlight();
-    updatePipCameras();
-    invalidate(); // idle待機モーション自体が常に動くため毎フレーム再描画
-  }
+  if(model) updateCharacterMovement(dt);
 
   updateCamera(dt);
   frameCount++;
-  if(model&&pipEnabled&&frameCount%PIP_FRAME_SKIP===0){
-    // 重いPIPシーン描画はここで間引いて行い、結果をレンダーターゲットに焼き付けるだけ
-    // (画面には直接出さない)。表示は下のneedsRenderブロックで毎フレーム安価に行う。
-    renderer.setScissorTest(false);
-    // PIPカメラはキャラクターのすぐ近くに寄るため、メイン画面と同じ密度のホコリだと
-    // 画面手前で大きく・濃く重なって見えてしまう。PIP描画時だけ薄く/小さくする
-    // (メイン画面の見た目には一切影響しない、このブロックの中だけの一時変更)。
-    const _dustSizeOrig=dustMat.size, _dustOpOrig=dustMat.opacity;
-    dustMat.size=_dustSizeOrig*0.55;
-    dustMat.opacity=_dustOpOrig*0.4;
-    renderer.setRenderTarget(selfieRT);
-    renderer.render(scene,selfieCam);
-    renderer.setRenderTarget(fpsRT);
-    renderer.render(scene,fpsCam);
-    renderer.setRenderTarget(null);
-    dustMat.size=_dustSizeOrig;
-    dustMat.opacity=_dustOpOrig;
-  }
-  if(needsRender){
-    renderer.setScissorTest(false);
-    renderer.setViewport(0,0,innerWidth,innerHeight);
-    renderer.render(scene,cam);
-    // PIPは毎フレーム、焼き付け済みのテクスチャを該当領域に貼るだけ(激安)にすることで、
-    // メインカメラの描画がPIP領域を上書きしてちらつくのを防ぎつつ、負荷も抑えている。
-    if(model&&pipEnabled){
-      renderer.setScissorTest(true);
-      renderer.setViewport(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
-      renderer.setScissor(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
-      renderer.clearDepth();
-      renderer.render(selfieBlitScene,blitCam);
-      renderer.setViewport(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
-      renderer.setScissor(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
-      renderer.clearDepth();
-      renderer.render(fpsBlitScene,blitCam);
-      renderer.setScissorTest(false);
-    }
-    needsRender=false;
-  }
+  if(model&&pipEnabled&&frameCount%PIP_FRAME_SKIP===0) renderPipTargets();
+  if(needsRender) renderMainAndPipBlit();
 }
 // configパネルの各スライダー/セレクトのvalue属性(HTML側の初期値)に描画状態を同期させる
 // (needsRender/charPos等、後方で宣言されるletを参照するinvalidate()を呼ぶため、
