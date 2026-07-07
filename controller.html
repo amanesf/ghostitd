@@ -125,16 +125,25 @@
 <div class="drop hide" id="configPanel">
   <h2>描画設定</h2>
   <div class="cfgRow"><label>霧の濃さ
-    <input type="range" id="cfgFog" min="0" max="100" value="50">
+    <input type="range" id="cfgFog" min="0" max="100" value="100">
   </label></div>
   <div class="cfgRow"><label>明るさ
-    <input type="range" id="cfgBrightness" min="50" max="150" value="100">
+    <input type="range" id="cfgBrightness" min="10" max="150" value="50">
+  </label></div>
+  <div class="cfgRow"><label>FPS上限
+    <select id="cfgFpsLimit">
+      <option value="0" selected>無制限(画面のリフレッシュレートに追従)</option>
+      <option value="60">60fps</option>
+      <option value="30">30fps</option>
+      <option value="24">24fps</option>
+      <option value="15">15fps</option>
+    </select>
   </label></div>
   <div class="cfgRow"><label>PIPカメラ画質
     <select id="cfgPipQuality">
-      <option value="1">高(毎フレーム更新)</option>
-      <option value="3" selected>標準</option>
-      <option value="8">低(軽量)</option>
+      <option value="1" data-label="高(毎フレーム更新)">高(毎フレーム更新)</option>
+      <option value="3" selected data-label="標準">標準</option>
+      <option value="8" data-label="低(軽量)">低(軽量)</option>
     </select>
   </label></div>
   <div class="cfgRow cfgCheck"><label>
@@ -750,6 +759,8 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
 
 // --- 描画設定パネル ---
+let TARGET_FPS=0; // 0=無制限(画面のリフレッシュレートに追従)。configの「FPS上限」で変更
+let _fpsAccum=0; // TARGET_FPS>0の時、tick()で経過時間を貯めて間引くためのアキュムレータ
 function applyFogDensity(pct){ scene.fog.density=0.02+(pct/100)*0.10; invalidate(); }
 function applyBrightness(pct){
   const m=pct/100;
@@ -763,11 +774,33 @@ function applyPipEnabled(on){
   document.getElementById('fpsBox').classList.toggle('visible',on&&!!model);
   invalidate();
 }
+// PIPカメラ画質のプルダウンは「毎フレーム更新から何フレームおきに描画するか」の間引き数
+// (PIP_FRAME_SKIP)を選ばせているだけなので、実際の見た目のfpsは
+// 「メインループの実効fps(FPS上限設定 or 無制限時は画面リフレッシュレート想定60fps) / 間引き数」
+// で決まる。選択肢のラベルにその概算fpsを都度書き足して分かりやすくする。
+function pipQualityBaseFps(){ return TARGET_FPS>0?TARGET_FPS:60; }
+function refreshPipQualityLabels(){
+  const base=pipQualityBaseFps();
+  const sel=document.getElementById('cfgPipQuality');
+  for(const opt of sel.options){
+    const skip=+opt.value;
+    const fps=base/skip;
+    const fpsTxt=Number.isInteger(fps)?fps:fps.toFixed(1);
+    opt.textContent=`${opt.dataset.label}: 約${fpsTxt}fps`;
+  }
+}
+function applyFpsLimit(v){
+  TARGET_FPS=+v;
+  _fpsAccum=0;
+  refreshPipQualityLabels();
+  invalidate();
+}
 document.getElementById('configBtn').onclick=()=>{ document.getElementById('configPanel').classList.remove('hide'); };
 document.getElementById('configClose').onclick=()=>{ document.getElementById('configPanel').classList.add('hide'); };
 document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
 document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
-document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; };
+document.getElementById('cfgFpsLimit').onchange=e=>applyFpsLimit(e.target.value);
+document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; refreshPipQualityLabels(); };
 document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
 
 // ============ 三人称カメラ・移動コントローラー ============
@@ -951,8 +984,20 @@ window.__ghostController={ get charPos(){return charPos;}, get charYaw(){return 
 
 function tick(){
   requestAnimationFrame(tick);
-  const dt=Math.min(clock.getDelta(),0.05);
-
+  const rawDt=Math.min(clock.getDelta(),0.05);
+  if(TARGET_FPS>0){
+    // FPS上限が設定されている場合は、経過時間を貯めて1/TARGET_FPS秒に満たない間は
+    // 更新も描画もせずスキップする(requestAnimationFrame自体は毎回呼び続けて次回に備える)。
+    _fpsAccum+=rawDt;
+    const step=1/TARGET_FPS;
+    if(_fpsAccum<step)return;
+    frame(_fpsAccum);
+    _fpsAccum=0;
+  }else{
+    frame(rawDt);
+  }
+}
+function frame(dt){
   updateShrineEffects(dt);
   invalidate(); // 点滅灯・吊り電球の揺れは常時アニメーションするため毎フレーム再描画
 
@@ -1020,6 +1065,12 @@ function tick(){
     needsRender=false;
   }
 }
+// configパネルの各スライダー/セレクトのvalue属性(HTML側の初期値)に描画状態を同期させる
+// (needsRender/charPos等、後方で宣言されるletを参照するinvalidate()を呼ぶため、
+// それらの宣言が済んだ最後にまとめて実行する)
+applyFogDensity(+document.getElementById('cfgFog').value);
+applyBrightness(+document.getElementById('cfgBrightness').value);
+refreshPipQualityLabels();
 tick();
 })();
 </script>
