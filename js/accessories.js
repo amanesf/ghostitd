@@ -148,7 +148,7 @@ function stageAccessories(opts){
       frontPolygon: frontPolygon, backPolygon: backPolygon, sidePolygon: sidePolygon,
       whiteThr: gp.white_thr,
     });
-    if(!result){ console.log("  accessories: carve失敗", name); return; }
+    if(!result){ console.warn("  accessories: carve失敗、このアクセサリーはモデルに含まれません:", name); return; }
     var rawV=result.V, rawF=result.F;
     rawParts.push({name:name, mode:mode, bones:bones.slice(), rawV:rawV, rawF:rawF});
     var finished=finishAccessoryMesh(rawV, rawF, gp);
@@ -174,19 +174,10 @@ function stageAccessories(opts){
   });
 
   if(!allV.length){ console.log("  accessories: 生成できたメッシュなし"); return null; }
-  function concatF32(arrs){
-    var total=0; arrs.forEach(function(a){total+=a.length;});
-    var out=new Float32Array(total); var off=0;
-    arrs.forEach(function(a){ out.set(a,off); off+=a.length; });
-    return out;
-  }
-  var V=concatF32(allV), Nv=concatF32(allN);
+  var V=P3D.concatTypedArrays(Float32Array,allV), Nv=P3D.concatTypedArrays(Float32Array,allN);
   var F=Uint32Array.from(allF);
-  var J=new Uint16Array(allJ.reduce(function(s,a){return s+a.length;},0));
-  var Wt=new Float32Array(allW.reduce(function(s,a){return s+a.length;},0));
-  var jo=0, wo=0;
-  allJ.forEach(function(a){ J.set(a,jo); jo+=a.length; });
-  allW.forEach(function(a){ Wt.set(a,wo); wo+=a.length; });
+  var J=P3D.concatTypedArrays(Uint16Array,allJ);
+  var Wt=P3D.concatTypedArrays(Float32Array,allW);
   var NF=Uint8Array.from(allNF.map(function(b){return b?1:0;}));
   console.log("  accessories: total verts", V.length/3);
   return {V:V, N:Nv, F:F, J:J, W:Wt, NF:NF, accName:allAccName, rawParts:rawParts};

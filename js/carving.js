@@ -7,7 +7,7 @@
 (function(global){
 "use strict";
 var P3D = global.P3D = global.P3D || {};
-var C = P3D.common = P3D; // common.jsの関数はP3D直下にある
+var Common = P3D; // common.jsの関数はP3D直下にあるので、そのままローカル別名として使う
 var EPS = 1e-4;
 
 function medianFilter(vals, win){
@@ -402,8 +402,8 @@ function carveRegion(opts){
   var tracks=[]; // {rows:[],cx:[],hw:[],lastIy,lastCx}
   for(var iy=0; iy<ny; iy++){
     var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, byBack[iy]);
-    var frPx = faCont ? C.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : C.findRuns(faRow);
-    var brPx = baCont ? C.findRunsSubpixel(baRow, rowOf1d(baCont,faW,byBack[iy]), whiteThr) : C.findRuns(baRow);
+    var frPx = faCont ? Common.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : Common.findRuns(faRow);
+    var brPx = baCont ? Common.findRunsSubpixel(baRow, rowOf1d(baCont,faW,byBack[iy]), whiteThr) : Common.findRuns(baRow);
     var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
     var br=brPx.map(function(pq){ return [(faW-pq[1]-CX+backOffsetX)/SCALE, (faW-pq[0]-CX+backOffsetX)/SCALE]; });
     var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
@@ -456,7 +456,7 @@ function carveRegion(opts){
   var depthRows=[]; // [iy, hdFront, hdBack, zc]
   for(var iy2=0; iy2<ny; iy2++){
     var saRow=rowOf1d(sa, saW, spy[iy2]);
-    var saPx = saCont ? C.findRunsSubpixel(saRow, rowOf1d(saCont,saW,spy[iy2]), whiteThr) : C.findRuns(saRow);
+    var saPx = saCont ? Common.findRunsSubpixel(saRow, rowOf1d(saCont,saW,spy[iy2]), whiteThr) : Common.findRuns(saRow);
     var zrunsMz = saPx.map(function(pq){ return [(pq[0]-SIDE_REF-sideOffsetX)/SCALE, (pq[1]-SIDE_REF-sideOffsetX)/SCALE]; });
     zrunsMz = intersectIntervals(zrunsMz, mzLim);
     if(sidePolygon){

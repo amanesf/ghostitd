@@ -117,12 +117,7 @@ function marchingCubes(field, ny, nx, nz, isolevel){
   var verts=[], faces=[];
   // エッジごとに生成済み頂点indexをキャッシュ(同じエッジを共有する隣接セルで
   // 頂点を再利用し、頂点数を減らす)。key = セル(iy,ix,iz)+edge番号。
-  // 3方向(y+,x+,z+)のエッジだけキャッシュすれば全エッジをカバーできる
-  // (各セルのエッジは隣接セルの他のエッジと同一)。
-  var cacheY = new Int32Array(ny*nx*nz).fill(-1); // セル(iy,ix,iz)から(iy+1,ix,iz)への"y方向"エッジ用ではなく、
-  // 実装簡略化のため、キャッシュはエッジ番号ごとに3つ用意する。
-  var cacheX0=new Int32Array(ny*nx*nz).fill(-1); // edge along x at (iy,ix,iz)-(iy,ix+1,iz) は複数種あるため
-  // ↑ 簡略化: 汎用的にMap<string,int>でキャッシュする(コード量優先、速度は後で必要なら最適化)。
+  // 汎用的にMap<string,int>でキャッシュする(コード量優先、速度は後で必要なら最適化)。
   var cache = new Map();
   function vid(iy,ix,iz){ return iy*strideY+ix*strideX+iz; }
   function getVal(iy,ix,iz){ return field[vid(iy,ix,iz)]; }

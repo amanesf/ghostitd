@@ -410,6 +410,19 @@ function removeSilhouetteOutline(rgba, w, h, alpha, bandPx, darkThr){
 }
 P3D.removeSilhouetteOutline = removeSilhouetteOutline;
 
+// ---- 複数のTypedArrayを1本に連結する ----
+// pipeline.js(stageAccessories内)とaccessories.jsで同一の実装(concatF32)が
+// 重複していたため、頂点(V/N)・スキニング(J/W)いずれの連結にも使える形で
+// ここに集約する(Ctorを渡せばFloat32Array/Uint16Array等どれでも使える)。
+function concatTypedArrays(Ctor, arrs){
+  var total = 0;
+  arrs.forEach(function(a){ total += a.length; });
+  var out = new Ctor(total), off = 0;
+  arrs.forEach(function(a){ out.set(a, off); off += a.length; });
+  return out;
+}
+P3D.concatTypedArrays = concatTypedArrays;
+
 // ---- スライダー(<input type=range>)をつまみ(thumb)付近でのみ操作可能にする ----
 // ネイティブのrange inputは、つまみ以外のトラック部分をタップしただけでも
 // 即座にその位置へ値がジャンプする仕様のため、誤操作(意図せずパラメータが

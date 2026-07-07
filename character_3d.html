@@ -641,7 +641,8 @@ document.getElementById('err').textContent='';
       await P3D.clearGeneratedModel();
       document.getElementById('err').textContent='';
       lastModelBuf=glb;
-      loadGLB(glb,loadMotionClips);
+      // 生成直後のモデルは常に同梱の既定motion_<name>.glb(SAMPLES[0]と同じ命名規則)を使う。
+      loadGLB(glb,()=>loadMotionClips(SAMPLES[0]));
       document.getElementById('genTabBtn').style.display='';
       renderGenParamsPanel();
       renderSeamPanel();

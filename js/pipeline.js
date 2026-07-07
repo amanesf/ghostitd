@@ -303,19 +303,10 @@ function meshFinishStage(decimated, gp, pivots){
       for(var i2=0;i2<nv;i2++) allAccName.push(p.name);
       voff+=nv;
     });
-    function concatF32(arrs){
-      var total=0; arrs.forEach(function(a){total+=a.length;});
-      var out=new Float32Array(total); var off=0;
-      arrs.forEach(function(a){ out.set(a,off); off+=a.length; });
-      return out;
-    }
-    var accV=concatF32(allV), accN=concatF32(allN);
+    var accV=P3D.concatTypedArrays(Float32Array,allV), accN=P3D.concatTypedArrays(Float32Array,allN);
     var accF=Uint32Array.from(allF);
-    var accJ=new Uint16Array(allJ.reduce(function(s,a){return s+a.length;},0));
-    var accW=new Float32Array(allW.reduce(function(s,a){return s+a.length;},0));
-    var jo=0,wo=0;
-    allJ.forEach(function(a){ accJ.set(a,jo); jo+=a.length; });
-    allW.forEach(function(a){ accW.set(a,wo); wo+=a.length; });
+    var accJ=P3D.concatTypedArrays(Uint16Array,allJ);
+    var accW=P3D.concatTypedArrays(Float32Array,allW);
     var accNF=Uint8Array.from(allAccName.map(function(){return 0;}));
     acc = {V:accV, N:accN, F:accF, J:accJ, W:accW, NF:accNF, accName:allAccName};
   }
