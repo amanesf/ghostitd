@@ -11,6 +11,11 @@
   /* サイズはJS側(resize())がinnerWidth/innerHeightで管理。PIPカメラのビューポート計算と
      ズレるとPIP映像が枠からはみ出て見えるため、ここでは!importantで固定しない。 */
   #c{position:fixed;inset:0;display:block;touch-action:none}
+  /* 高感度ノイズ: 低解像度のランダムグレースケールをCSSで画面いっぱいに拡大表示するオーバーレイ。
+     #c(3D描画、PIP映像も同じcanvasにビューポート分割で描かれる)の真上、HUD/PIP枠より下のz-indexに
+     置くことで、メイン画面・PIP映像の両方に同時にノイズがかかる(PIP専用に別処理を書く必要がない)。 */
+  #noiseOverlay{position:fixed;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;
+    image-rendering:pixelated;mix-blend-mode:overlay;opacity:0}
   /* 上部HUD(タイトル/戻るボタン)はPIPカメラ映像より上に配置 */
   .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
     text-shadow:0 1px 6px rgba(0,0,0,.7)}
@@ -85,6 +90,7 @@
 </style></head>
 <body>
 <canvas id="c"></canvas>
+<canvas id="noiseOverlay"></canvas>
 <div class="title">ゴーストコントローラー<span class="eng">GHOST CONTROLLER</span></div>
 <div id="topNav">
   <button id="backToIndex" title="トップページに戻る">← トップ</button>
@@ -128,10 +134,13 @@
     <input type="range" id="cfgFog" min="0" max="100" value="80">
   </label></div>
   <div class="cfgRow"><label>明るさ
-    <input type="range" id="cfgBrightness" min="10" max="150" value="50">
+    <input type="range" id="cfgBrightness" min="0" max="100" value="10">
   </label></div>
   <div class="cfgRow"><label>キャラの明るさ
-    <input type="range" id="cfgCharBrightness" min="20" max="150" value="100">
+    <input type="range" id="cfgCharBrightness" min="20" max="150" value="50">
+  </label></div>
+  <div class="cfgRow"><label>ノイズ(高感度)
+    <input type="range" id="cfgNoise" min="0" max="100" value="35">
   </label></div>
   <div class="cfgRow"><label>FPS上限
     <select id="cfgFpsLimit">
@@ -174,6 +183,33 @@ renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
 renderer.outputEncoding=THREE.sRGBEncoding;
 renderer.toneMapping=THREE.NoToneMapping;
 const maxAniso=renderer.capabilities.getMaxAnisotropy();
+
+// --- 高感度ノイズ(画面全体+PIP、config「ノイズ」で強度調整可能) ---
+// 画面解像度の約半分のランダムグレースケールを毎フレーム生成し、CSSでフル画面まで
+// 引き伸ばす(image-rendering:pixelated)ことで、実際の高感度ISOノイズに近い粒状の
+// ちらつきを安価に表現する(フル解像度で毎フレームMath.randomを回すよりも軽い)。
+// #c(PIP映像も同じcanvasに描かれる)の真上に重ねているため、PIPにも自動的にノイズがかかる。
+const noiseCanvas=document.getElementById('noiseOverlay');
+const noiseCtx=noiseCanvas.getContext('2d');
+const NOISE_SCALE=0.5;
+let noiseImgData=null;
+function resizeNoise(){
+  const w=Math.max(1,Math.round(innerWidth*NOISE_SCALE));
+  const h=Math.max(1,Math.round(innerHeight*NOISE_SCALE));
+  noiseCanvas.width=w; noiseCanvas.height=h;
+  noiseImgData=noiseCtx.createImageData(w,h);
+}
+function updateNoise(){
+  const d=noiseImgData.data;
+  for(let i=0;i<d.length;i+=4){
+    const v=(Math.random()*255)|0;
+    d[i]=v; d[i+1]=v; d[i+2]=v; d[i+3]=255;
+  }
+  noiseCtx.putImageData(noiseImgData,0,0);
+}
+function applyNoise(pct){
+  noiseCanvas.style.opacity=(pct/100*0.5).toFixed(3);
+}
 
 // 夜霧の神社マップを見据えた暗く寒色寄りの背景+霧(Phase 1では地面は仮の平面のみ)。
 // フォグ色を背景と同じほぼ黒(0x0a0c10)にしていると、フォグで暗く沈んでいくのか
@@ -931,6 +967,7 @@ document.getElementById('configClose').onclick=()=>{ document.getElementById('co
 document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
 document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
 document.getElementById('cfgCharBrightness').oninput=e=>applyCharBrightness(+e.target.value);
+document.getElementById('cfgNoise').oninput=e=>applyNoise(+e.target.value);
 document.getElementById('cfgFpsLimit').onchange=e=>applyFpsLimit(e.target.value);
 document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; refreshPipQualityLabels(); };
 document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
@@ -943,6 +980,7 @@ function resize(){
   cvs.style.width=innerWidth+'px'; cvs.style.height=innerHeight+'px';
   cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
   layoutPIPs();
+  resizeNoise();
   invalidate();
 }
 addEventListener('resize',resize); resize();
@@ -1132,6 +1170,7 @@ function tick(){
 function frame(dt){
   updateShrineEffects(dt);
   updateDust(dt);
+  updateNoise();
   invalidate(); // 点滅灯・吊り電球の揺れ・ホコリの浮遊は常時アニメーションするため毎フレーム再描画
 
   if(model){
@@ -1212,6 +1251,7 @@ function frame(dt){
 applyFogDensity(+document.getElementById('cfgFog').value);
 applyBrightness(+document.getElementById('cfgBrightness').value);
 applyCharBrightness(+document.getElementById('cfgCharBrightness').value);
+applyNoise(+document.getElementById('cfgNoise').value);
 applyFpsLimit(document.getElementById('cfgFpsLimit').value);
 buildBoundaryLines(); // corridorBoundsAt/PATH_MIN_Z/PATH_MAX_Zの宣言が済んだ後でないと呼べない
 tick();
