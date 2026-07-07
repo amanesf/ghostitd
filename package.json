@@ -1,0 +1,19 @@
+{
+  "name": "ghostitd",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3DtoolJS - ブラウザ完結のキャラクター生成/ビューア/コントローラー",
+  "scripts": {
+    "test": "node tests/run-all.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:41729/git/amanesf/ghostitd"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}
