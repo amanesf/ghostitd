@@ -486,15 +486,26 @@ function buildBasin(x,z){
   roof.rotation.y=Math.PI/4; roof.position.y=postH+0.3; g.add(roof);
   const basin=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.45,0.4,12),stoneMat);
   basin.position.y=0.2; g.add(basin);
-  const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8),
-    new THREE.MeshBasicMaterial({color:0xffe9b0,toneMapped:false}));
-  bulb.position.y=postH-0.5; g.add(bulb);
-  const bulbLight=new THREE.PointLight(0xffdca0,0.7,5,2);
-  bulb.add(bulbLight);
   g.position.set(x,0,z);
   shrineGroup.add(g);
-  basinBulb=bulb;
   colliders.push({type:'circle',x,z,r:0.55});
+  // センサーライトの電球は見た目のモデルに関わらず同じ位置に独立して置く(placeMainHallの引き戸と同じ扱い)
+  const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8),
+    new THREE.MeshBasicMaterial({color:0xffe9b0,toneMapped:false}));
+  bulb.position.set(x,postH-0.5,z);
+  shrineGroup.add(bulb);
+  const bulbLight=new THREE.PointLight(0xffdca0,0.7,5,2);
+  bulb.add(bulbLight);
+  basinBulb=bulb;
+  loadStaticGLB('models/chouzuya_free.glb').then(obj=>{
+    normalizeToHeight(obj,postH+0.6);
+    obj.position.set(x,0,z);
+    shrineGroup.remove(g);
+    shrineGroup.add(obj);
+    FREE_MODEL_CREDITS.push({name:'手水舎',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://shoshinshaworks.booth.pm/items/2660016'});
+    refreshCreditsUI();
+    invalidate();
+  }).catch(()=>{ /* 読み込み失敗時はプロシージャルの手水舎のまま */ });
 }
 
 let sensorLight=null, sensorLightOn=false, hallFrontZ=0;
@@ -520,7 +531,7 @@ function placeMainHall(z){
   const fallback=buildMainHallProcedural();
   fallback.position.set(0,0,z);
   shrineGroup.add(fallback);
-  loadStaticGLB('models/shrine_hall_free.glb').then(obj=>{
+  loadStaticGLB('models/honden_free.glb').then(obj=>{
     normalizeToHeight(obj,4.4);
     obj.position.set(0,0,z);
     // 元モデルの素材がかなり暗く、このシーンの控えめな照明だと明度を掛け算しただけでは
@@ -533,7 +544,7 @@ function placeMainHall(z){
     }});
     shrineGroup.remove(fallback);
     shrineGroup.add(obj);
-    FREE_MODEL_CREDITS.push({name:'Shrine(本殿)',author:'Aidan K McLaughlin',license:'CC-BY',url:'https://poly.pizza/m/a68qNnAC4m-'});
+    FREE_MODEL_CREDITS.push({name:'Shrine(本殿)',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://booth.pm/ja/items/2659982'});
     refreshCreditsUI();
     invalidate();
   }).catch(()=>{ /* 読み込み失敗時はプロシージャルの本殿のまま */ });
