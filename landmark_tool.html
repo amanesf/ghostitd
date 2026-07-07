@@ -314,7 +314,7 @@
   </div>
 
   <div id="uploadArea" class="hidden">
-    <p class="hint" id="hint">まず「正面 front」を読み込むと自動で全点を仮配置します。</p>
+    <p class="hint" id="hint">正面/側面/背面の3枚すべてを読み込むと自動で全点を仮配置し、編集画面に進みます。</p>
 
     <div class="slots">
       <label class="slot" id="slotFront"><b>正面 front</b><small>タップで選択</small>
@@ -1098,7 +1098,10 @@ function loadImg(file,slot){
     $("slot"+slot[0].toUpperCase()+slot.slice(1)).querySelector("small").textContent="✓ 読込済";
     previewCache={key:null,view:null,canvas:null,w:0,h:0};
     syncViewBtns();
-    if(slot==="front")runAnalyze();
+    // 正面だけで編集画面(editor)に遷移すると側面/背面を読み込む前に画面が
+    // 切り替わってしまう(「生成」には結局3枚とも必須)。3枚とも読込済みに
+    // なってから初めて自動仮配置して編集画面へ進む。
+    if(imgs.front&&imgs.side&&imgs.back)runAnalyze();
   };el.src=r.result;};
   r.readAsDataURL(file);
 }
