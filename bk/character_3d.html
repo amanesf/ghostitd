@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴーストビューア</title>
+<style>
+  :root{--bg:#07080a;--panel:rgba(20,24,29,.92);--line:rgba(255,255,255,.10);--mut:#9aa3ad;--mint:#5be6ff;
+    --green:#39ff9e;--txt:#e8edf2;--mono:"SFMono-Regular",Consolas,Menlo,monospace}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #c{position:fixed;inset:0;display:block;touch-action:none;width:100vw!important;height:100vh!important}
+  .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
+    text-shadow:0 1px 6px rgba(0,0,0,.7)}
+  .title .eng{display:block;font-family:var(--mono);font-size:9px;font-weight:400;color:var(--green);
+    letter-spacing:.22em;margin-top:3px;opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+  #err{position:fixed;top:46px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none}
+  #topNav{position:fixed;top:8px;right:10px;z-index:7;display:flex;gap:6px}
+  #topNav button{height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
+  #topNav button:active{background:rgba(91,230,255,.15)}
+  #barToggle{display:none;position:fixed;top:50px;right:10px;z-index:8;height:34px;padding:0 14px;
+    border-radius:10px;border:1px solid var(--line);background:rgba(20,24,29,.85);color:var(--txt);
+    font-size:12.5px;cursor:pointer}
+  #barToggle.visible{display:block}
+  #barToggle:active{background:rgba(91,230,255,.15)}
+
+  /* center drop card */
+  .drop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,86vw);padding:28px;
+    text-align:center;z-index:6;background:var(--panel);border:1px solid var(--line);border-radius:16px}
+  .drop.hide{display:none}
+  .drop h2{margin:.1em 0 .3em;font-size:16px}
+  .drop p{color:var(--mut);font-size:13px;margin:.3em 0 1.1em}
+
+  /* mode choice card */
+  .modeCard{display:block;cursor:pointer;text-align:left;border:1px solid var(--line);border-radius:14px;
+    background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
+  .modeCard:active{background:rgba(91,230,255,.10);border-color:rgba(91,230,255,.4)}
+  .modeCard.mint{border-color:rgba(91,230,255,.4)}
+  .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
+  .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+  .modeCard .sampleSelectRow{margin-top:10px}
+  .modeCard .sampleSelectRow select{width:100%;height:32px;font-size:12px}
+
+  /* single bottom control bar (slides up from below; hidden by default) */
+  /* フェーズ2: パラメータパネルが増えても画面上半分の3Dビューは必ず見える
+     ように、バー全体の高さを50vh以内に制限しスクロール可能にする
+     (character_3d.htmlのUI制約、GENERATOR_LIVE_PREVIEW_PLAN.md参照)。 */
+  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;max-height:50vh;overflow-y:auto;
+    display:flex;flex-direction:column;gap:8px;padding:10px 10px calc(10px + env(safe-area-inset-bottom));
+    background:linear-gradient(to top,rgba(13,15,18,.96),rgba(13,15,18,.74) 70%,transparent);
+    backdrop-filter:blur(6px);transform:translateY(100%);transition:transform .28s ease;pointer-events:none}
+  .bar.show{transform:translateY(0);pointer-events:auto}
+  .bar .row{display:flex;gap:7px;align-items:center;justify-content:center;flex-wrap:nowrap;width:100%}
+  .btn{flex:1 1 0;min-width:0;height:42px;border-radius:11px;border:1px solid var(--line);
+    background:rgba(255,255,255,.05);color:var(--txt);font-size:13px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;white-space:nowrap;transition:.12s;user-select:none}
+  .btn:active{transform:scale(.96)}
+  .btn.on{color:var(--mint);border-color:rgba(91,230,255,.6);background:rgba(91,230,255,.10)}
+  .btn.sm{flex:0 0 46px}
+  .btn:disabled{opacity:.35;cursor:default}
+  .btn:disabled:active{transform:none}
+  select{height:42px;border-radius:11px;border:1px solid var(--line);background:#161a1f;color:var(--txt);
+    font-size:13px;padding:0 10px;outline:none;flex:1 1 0;min-width:0}
+  .lbl{flex:0 0 auto;color:var(--mut);font-size:11px;padding:0 2px}
+  input[type=range]{flex:1 1 0;min-width:0;height:30px;accent-color:var(--mint);background:transparent}
+  .slideWrap{display:flex;align-items:center;gap:6px;flex:1 1 0;min-width:0}
+
+  /* viewer control tabs (view / shader / motion / model) */
+  .vtabbar{display:flex;gap:6px;padding-bottom:2px}
+  .vtabbtn{flex:1;height:36px;min-width:0;border-radius:10px;font-size:12.5px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.05);color:#3a3f46;font-weight:600}
+  .vtabbtn.on{border-color:rgba(91,230,255,.5);background:rgba(91,230,255,.12);color:var(--mint)}
+  .vtabpanel{display:none;flex-direction:column;gap:8px}
+  .vtabpanel.on{display:flex}
+
+  /* camera pan d-pad (▲ / ◀ ▶ / ▼) */
+  .dpad{display:grid;grid-template-columns:44px 44px 44px;grid-template-rows:38px 38px 38px;
+    gap:6px;justify-content:center;margin:2px auto 0}
+  .dpad button{width:44px;height:38px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(255,255,255,.05);color:var(--txt);font-size:15px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;user-select:none}
+  .dpad button:active{background:rgba(91,230,255,.18)}
+
+  /* フェーズ2: ライブパラメータパネル(landmark_tool.htmlのaccgroupパターンを踏襲) */
+  .accgroup{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;overflow:hidden;background:rgba(255,255,255,.03)}
+  .accgroup>summary{list-style:none;cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;
+    font-size:12.5px;color:var(--txt)}
+  .accgroup>summary::-webkit-details-marker{display:none}
+  .accgroup>summary::before{content:"▸";color:var(--mut);font-size:10px;transition:transform .12s}
+  .accgroup[open]>summary::before{transform:rotate(90deg)}
+  .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:10.5px}
+  .accgroup>.accbody{padding:2px 10px 10px}
+  .pitem{margin-bottom:8px}
+  .pitem .plabel{color:var(--txt);font-size:11.5px;margin-bottom:4px;display:flex;justify-content:space-between}
+  .pitem .prow{display:flex;align-items:center;gap:6px}
+  .pitem input[type=number]{width:66px;height:28px;border-radius:6px;border:1px solid var(--line);
+    background:#161a1f;color:var(--txt);font-size:11.5px;padding:0 6px}
+  .pitem .punit{color:var(--mut);font-size:10px;flex:0 0 auto}
+  #genPanelStatus{font-size:11px;color:var(--mint);min-height:14px}
+  /* Task1: 継ぎ目角度(seamAngles/seamNoSide)のボーン別一覧。landmark_tool.htmlの
+     .aclist/.acitemを移植 */
+  .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
+  .acitem{display:flex;align-items:center;gap:8px;font-size:11.5px;background:rgba(255,255,255,.04);
+    border:1px solid var(--line);border-radius:9px;padding:6px 8px}
+  .acitem .nm{flex:0 0 52px;color:var(--txt)}
+  .acitem input[type=number]{width:44px;height:26px;border-radius:6px;border:1px solid var(--line);
+    background:#161a1f;color:var(--txt);font-size:11px;padding:0 4px}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div class="title">ゴーストビューア<span class="eng">GHOST VIEWER</span></div>
+<div id="topNav">
+  <button id="backToIndex" title="トップページに戻る">← トップ</button>
+  <button id="backToLandmark" title="ゴーストジェネレータに戻る">← ジェネレータ</button>
+</div>
+<button id="barToggle" title="操作パネルの表示/非表示">操作パネル ▾</button>
+<div id="err"></div>
+
+<div class="drop hide" id="modeChoice">
+  <h2>モードを選んでください</h2>
+  <p style="font-size:11px;color:var(--mut);line-height:1.6;margin:-6px 0 14px">
+    ※このビューアは完成したモデル(.glb)の表示専用です。「生成調整」タブは
+    ここでは使えません。パラメータを調整したい場合は
+    <a href="landmark_tool.html" style="color:var(--mint)">ゴーストジェネレータ</a>
+    で「モデル生成してビューアで見る」から遷移してください。</p>
+  <div class="modeCard mint" id="modeSampleBtn">
+    <b>サンプルモードで開く</b>
+    <span>同梱のサンプルmodel.glb/モーションを自動読込してお試しできます。</span>
+    <span class="sampleSelectRow"><select id="sampleSelect"></select></span>
+  </div>
+  <div class="modeCard" id="modeNormalBtn">
+    <b>通常モード</b>
+    <span>自分の.glbファイルを選択/ドラッグ&ドロップして表示します。</span>
+  </div>
+</div>
+
+<div class="drop hide" id="drop">
+  <h2>3Dモデルを表示</h2>
+  <p>.glb ファイルを選択、またはドラッグ＆ドロップ<br>(モデルを読み込んだ後、モーション.glbを追加で読み込めます)</p>
+  <button class="btn" id="pick" style="flex:0 1 auto;padding:0 20px;display:inline-flex">ファイルを選択</button>
+  <input type="file" id="file" accept=".glb,.gltf" style="display:none"/>
+</div>
+
+<div class="bar" id="bar">
+  <div class="vtabbar" id="vtabbar">
+    <button class="vtabbtn on" data-vtab="view">ビュー</button>
+    <button class="vtabbtn" data-vtab="shader">シェーダ</button>
+    <button class="vtabbtn" data-vtab="motion">モーション</button>
+    <button class="vtabbtn" data-vtab="model">モデル</button>
+    <button class="vtabbtn" data-vtab="gen" id="genTabBtn" style="display:none">生成調整</button>
+  </div>
+
+  <div class="vtabpanel on" data-vtabpanel="view">
+    <div class="row">
+      <button class="btn" id="vFront">正面</button>
+      <button class="btn" id="vSide">側面</button>
+      <button class="btn" id="vBack">背面</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="spin">自動回転</button>
+      <button class="btn" id="reset">リセット</button>
+      <button class="btn" id="skel">ボーン表示</button>
+    </div>
+    <div class="dpad">
+      <span></span><button id="camUp" title="上へ移動">▲</button><span></span>
+      <button id="camL" title="左へ移動">◀</button><span></span><button id="camR" title="右へ移動">▶</button>
+      <span></span><button id="camDn" title="下へ移動">▼</button><span></span>
+    </div>
+  </div>
+
+  <div class="vtabpanel" data-vtabpanel="shader">
+    <div class="row">
+      <button class="btn on" id="bgWhite">白背景</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="cel" style="flex:0 0 80px">セル影</button>
+      <div class="slideWrap"><input type="range" id="celStrength" min="0" max="100" value="70"></div>
+      <button class="btn" id="outline" style="flex:0 0 80px">輪郭線</button>
+      <div class="slideWrap"><input type="range" id="outlineStrength" min="0" max="100" value="40"></div>
+    </div>
+    <div class="row">
+      <button class="btn on" id="vivid" style="flex:0 0 80px">アニメ調</button>
+      <span class="lbl">彩度</span>
+      <div class="slideWrap"><input type="range" id="vividSat" min="0" max="100" value="50"></div>
+      <span class="lbl">コントラスト</span>
+      <div class="slideWrap"><input type="range" id="vividCon" min="0" max="100" value="0"></div>
+    </div>
+  </div>
+
+  <div class="vtabpanel" data-vtabpanel="motion">
+    <div class="row">
+      <select id="animSel"></select>
+      <button class="btn sm" id="loadMotion" title="モーション用のglbファイルを追加読込">＋読込</button>
+      <button class="btn" id="play" disabled style="flex:0 0 92px">再生</button>
+    </div>
+  </div>
+
+  <div class="vtabpanel" data-vtabpanel="model">
+    <div class="row">
+      <button class="btn" id="load2">別のモデルを開く</button>
+      <button class="btn" id="download">モデルを保存</button>
+    </div>
+  </div>
+
+  <!-- フェーズ2: 中間パッケージ(生成ボタンから渡された彫刻直後メッシュ)がある
+       時だけ表示するライブパラメータパネル。彫刻(marching cubes)をやり直さず
+       反映できる12個のパラメータをTier1〜3の折りたたみグループで並べる
+       (landmark_tool.htmlのPARAM_META/accgroupパターンを移植)。 -->
+  <div class="vtabpanel" data-vtabpanel="gen" id="genPanel">
+    <div id="genPanelStatus"></div>
+    <div id="genParamsPanel"></div>
+    <!-- Task1: ボーン別の継ぎ目角度(seamAngles)/側面画像使用有無(seamNoSide) -->
+    <div id="genSeamPanel"></div>
+    <!-- フェーズ3: 現在のライブ調整状態からの最終出力 -->
+    <div class="row">
+      <button class="btn mint" id="exportGlbBtn">GLB書き出し</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="exportJsonBtn">JSON書き出し</button>
+      <button class="btn" id="copyJsonBtn">JSONコピー</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/GLTFLoader.js"></script>
+<script src="js/vendor/BufferGeometryUtils.js"></script>
+<script src="js/vendor/SimplifyModifier.js"></script>
+<script src="js/idb.js"></script>
+<!-- フェーズ1(2026-07-07〜): ジェネレータ(landmark_tool.html)から渡される
+     中間パッケージ(彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)から
+     GLBを組み立てるため、生成パイプラインの後半(平滑化/間引き/スキニング/
+     テクスチャ焼き込み/GLB書き出し)に必要なモジュールを読み込む。
+     フェーズ2ではこれらを使ったライブパラメータ編集UIをここに追加する。 -->
+<script src="js/common.js"></script>
+<script src="js/carving.js"></script>
+<script src="js/skeleton.js"></script>
+<script src="js/atlas.js"></script>
+<script src="js/model_export.js"></script>
+<script src="js/visual_hull.js"></script>
+<script src="js/accessories.js"></script>
+<script src="js/pipeline.js"></script>
+<script>
+(function(){
+const cvs=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true,alpha:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.outputEncoding=THREE.sRGBEncoding;
+// ★ACESフィルミックトーンマッピングは白飛び防止を狙って一度入れたが、フィルム調に
+// 色を大きく抜く(彩度を落とす)副作用が強く、セル影ONで「想像の5倍色が薄い」ほど
+// 彩度が落ちてしまうことを実測で確認したため不採用(NoToneMapping)。白飛び対策は
+// 代わりに光源強度そのものを下げる方向で対応する。
+renderer.toneMapping=THREE.NoToneMapping;
+const maxAniso=renderer.capabilities.getMaxAnisotropy();
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0xffffff);
+const cam=new THREE.PerspectiveCamera(35,innerWidth/innerHeight,0.01,100);
+let camDist=2.6; cam.position.set(0,0,camDist);
+const root=new THREE.Group(); scene.add(root);
+// --- トゥーンシェード用ライト（world固定: モデル回転で陰影が自然に動く） ---
+const hemiLight=new THREE.HemisphereLight(0xffffff,0x23262b,0.25);
+scene.add(hemiLight);
+const keyLight=new THREE.DirectionalLight(0xffffff,0.85);
+keyLight.position.set(1.4,2.4,2.8);
+scene.add(keyLight);
+const fillLight=new THREE.DirectionalLight(0xbcd6ff,0.2);
+fillLight.position.set(-1.6,0.6,-1.8);
+scene.add(fillLight);
+// リムライト(逆光): キャラの背後・上から当て、髪や肩の輪郭を光らせて立体感を出す。
+// 画面全体を明るくするのではなく輪郭だけに効くため、暗部はそのまま暗く保てる。
+// (複数光源の合計が1.0を大きく超えるとACESトーンマッピングで色が白っぽく
+// 薄まるため、リムライトはあくまで縁取り程度の弱さに留める)
+const rimLight=new THREE.DirectionalLight(0xcfe8ff,0.35);
+rimLight.position.set(-0.3,3.0,-3.0);
+scene.add(rimLight);
+// --- トゥーン用グラデーションマップ（3段階のセル影） ---
+let toonGradCtx=null;
+function makeToonGradient(){
+  const c=document.createElement('canvas');c.width=3;c.height=1;
+  const ctx=c.getContext('2d');
+  [70,150,255].forEach((v,i)=>{ctx.fillStyle='rgb('+v+','+v+','+v+')';ctx.fillRect(i,0,1,1);});
+  const tex=new THREE.CanvasTexture(c);
+  tex.minFilter=THREE.NearestFilter;tex.magFilter=THREE.NearestFilter;tex.generateMipmaps=false;
+  toonGradCtx=ctx;
+  return tex;
+}
+const toonGradient=makeToonGradient();
+// 影(暗部)は明るさをしっかり落としつつ青紫がかった色にし、明部(照らされた面)は
+// 常に255へ張り付かせず少し余白を残す(白飛び防止、ACESトーンマッピングと合わせて
+// 「セル影をONにすると明るくなりすぎる」のを防ぐ)。
+function setToonGradientStrength(pct){ // pct 0..100
+  const s=Math.max(0,Math.min(1,pct/100));
+  const ctx=toonGradCtx;
+  const darkV=Math.round(115-85*s);   // s=0:115(浅い影) → s=1:30(くっきり暗い影)
+  const litV=Math.round(225+20*s);    // s=0:225 → s=1:245(常に白飛びしない余白を残す)
+  // 色ティントは絶対値ではなく「比率」で掛ける(絶対値offsetだとdarkVが小さい時に
+  // チャンネル間の相対差が急拡大し、元のテクスチャの彩度を潰して灰色っぽくなって
+  // しまうため)。R/Gをわずかに落としBをわずかに持ち上げるだけの弱いティントに留め、
+  // 元の色の彩度をなるべく保つ。
+  const dark=[Math.round(darkV*0.92),Math.round(darkV*0.96),Math.min(255,Math.round(darkV*1.12))];
+  const mid=[Math.round(158*0.97),Math.round(158*0.99),Math.min(255,Math.round(158*1.05))];
+  const lit=[litV,litV,litV]; // 明部は無彩色のまま(色は変えず明るさのみ)
+  [dark,mid,lit].forEach((rgb,i)=>{ctx.fillStyle='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';ctx.fillRect(i,0,1,1);});
+  toonGradient.needsUpdate=true;
+  invalidate();
+}
+let celOn=false, outlineOn=false;
+function outlineThickness(pct){ return 0.0005+(pct/100)*0.0095; } // pct 0..100 -> 0.0005..0.01
+// --- 輪郭線(アウトライン)メッシュ生成: 法線方向に頂点を押し出した裏面メッシュ ---
+// 単色の黒ではなく、元のテクスチャ(map)をそのまま使い暗い色を掛け合わせることで、
+// 髪は暗い髪色、肌は暗い肌色、服は暗い服色…と場所ごとに自然に濃い色の線になる
+// (単一の黒縁取りだと全パーツで浮いて見えるため)。
+function buildOutline(mesh,thickness){
+  const geo=mesh.geometry.clone();
+  const pos=geo.attributes.position,nor=geo.attributes.normal;
+  for(let i=0;i<pos.count;i++){
+    pos.setXYZ(i,pos.getX(i)+nor.getX(i)*thickness,pos.getY(i)+nor.getY(i)*thickness,pos.getZ(i)+nor.getZ(i)*thickness);
+  }
+  pos.needsUpdate=true;
+  const mat=new THREE.MeshBasicMaterial({map:mesh.material.map||null,color:0x2a2830,
+    side:THREE.BackSide,skinning:true,toneMapped:false});
+  const out=new THREE.SkinnedMesh(geo,mat);
+  out.bind(mesh.skeleton,mesh.bindMatrix);
+  out.userData.isOutline=true;
+  return out;
+}
+let model=null, mixer=null, clips=[], action=null, playing=false;
+let skelHelper=null, showSkel=false;
+let rotY=0.4, rotX=0.04, autoSpin=false, dragging=false, lx=0, ly=0;
+let needsRender=true;                 // render-on-demand to stay light
+function invalidate(){ needsRender=true; }
+function resize(){renderer.setSize(innerWidth,innerHeight,false);cvs.style.width=innerWidth+'px';cvs.style.height=innerHeight+'px';cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();invalidate();}
+addEventListener('resize',resize); resize();
+
+// Bind-pose bounds (all vertices, ignores skinning). Simple, deterministic, same on every device.
+function bindBounds(obj){
+  obj.updateMatrixWorld(true);
+  const mn=new THREE.Vector3(Infinity,Infinity,Infinity);
+  const mx=new THREE.Vector3(-Infinity,-Infinity,-Infinity);
+  const v=new THREE.Vector3(); let any=false;
+  obj.traverse(o=>{
+    if(o.isMesh && o.geometry?.attributes?.position){
+      const p=o.geometry.attributes.position;
+      // use world matrix WITHOUT skinning (bind pose)
+      for(let i=0;i<p.count;i++){ v.fromBufferAttribute(p,i).applyMatrix4(o.matrixWorld); mn.min(v); mx.max(v); any=true; }
+    }
+  });
+  if(!any){mn.set(-1,-1,-1);mx.set(1,1,1);}
+  return new THREE.Box3(mn,mx);
+}
+let fitDist=2.6;
+// 接地影(疑似コンタクトシャドウ): 正確な影計算の代わりに、足元に柔らかい円形の
+// 暗い減衰デカールを1枚敷くだけで「地面に立っている感」を安く出す。
+let groundDecal=null;
+function buildGroundDecal(){
+  const c=document.createElement('canvas');c.width=128;c.height=128;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(64,64,0,64,64,64);
+  g.addColorStop(0,'rgba(0,0,0,0.32)');
+  g.addColorStop(0.7,'rgba(0,0,0,0.14)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,128,128);
+  const tex=new THREE.CanvasTexture(c);
+  const geo=new THREE.CircleGeometry(1,32);
+  geo.rotateX(-Math.PI/2);
+  const mat=new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false,toneMapped:false});
+  const mesh=new THREE.Mesh(geo,mat);
+  root.add(mesh);
+  return mesh;
+}
+function frameModel(obj){
+  obj.position.set(0,0,0); root.position.set(0,0,0); obj.updateMatrixWorld(true);
+  const box=bindBounds(obj);
+  const c=box.getCenter(new THREE.Vector3());
+  obj.position.sub(c);                          // center bind-pose bbox at origin (once)
+  const size=box.getSize(new THREE.Vector3());
+  // 画面アスペクトを考慮し、全身(縦横)が収まる距離を計算
+  const fovV=cam.fov*Math.PI/180;
+  const fovH=2*Math.atan(Math.tan(fovV/2)*cam.aspect);
+  const distV=(size.y*0.5)/Math.tan(fovV/2);
+  const distH=(size.x*0.5)/Math.tan(fovH/2);
+  fitDist=Math.max(distV,distH,size.z*0.5)*1.15;
+  camDist=fitDist;
+  rotY=0; rotX=0;                               // 正面・水平
+  cam.position.set(0,0,camDist); cam.lookAt(0,0,0);
+  if(!groundDecal)groundDecal=buildGroundDecal();
+  const gr=Math.max(size.x,size.z)*0.6;
+  groundDecal.scale.set(gr,gr,1);
+  groundDecal.position.set(0,-size.y/2+0.002,0);
+  invalidate();
+}
+// モデル再読込(ライブパラメータ編集での再構築等)のたびにgeometry/material/
+// textureを解放しないと、three.jsはGPU側リソースをGCに任せられずリークする。
+// flatMat.map/toonMat.map/アウトラインmaterialのmapは同一テクスチャを共有して
+// いる(loadGLBでold.mapを使い回している)ため、テクスチャのdispose()は1回だけ行う。
+function disposeMeshResources(o){
+  if(o.geometry)o.geometry.dispose();
+  const flatMat=o.userData.flatMat, toonMat=o.userData.toonMat;
+  if(flatMat){ if(flatMat.map)flatMat.map.dispose(); flatMat.dispose(); }
+  if(toonMat)toonMat.dispose();
+  const outline=o.userData.outline;
+  if(outline){ if(outline.geometry)outline.geometry.dispose(); if(outline.material)outline.material.dispose(); }
+}
+function disposeObject3D(obj){
+  if(!obj)return;
+  obj.traverse(o=>{ if(o.isMesh)disposeMeshResources(o); });
+}
+function clearModel(){ if(model){disposeObject3D(model);root.remove(model);model=null;} mixer=null;clips=[];action=null;playing=false; clearSkelViz(); }
+function clearSkelViz(){
+  if(skelHelper){
+    scene.remove(skelHelper);
+    if(skelHelper.geometry)skelHelper.geometry.dispose();
+    if(skelHelper.material)skelHelper.material.dispose();
+    skelHelper=null;
+  }
+}
+function buildSkelViz(m){
+  clearSkelViz();
+  let sm=null;
+  m.traverse(o=>{ if(o.isSkinnedMesh&&o.skeleton) sm=o; });
+  if(!sm) return;
+  skelHelper=new THREE.SkeletonHelper(m);
+  skelHelper.material.color=new THREE.Color(0xffe14d);
+  skelHelper.material.depthTest=false;
+  skelHelper.visible=showSkel;
+  scene.add(skelHelper);
+  const sphGeo=new THREE.SphereGeometry(0.018,10,8);
+  const sphMat=new THREE.MeshBasicMaterial({color:0xff2d55,depthTest:false});
+  sm.skeleton.bones.forEach(b=>{
+    const s=new THREE.Mesh(sphGeo,sphMat);
+    s.visible=showSkel; s.userData.jointViz=true;
+    b.add(s);
+  });
+}
+function setSkel(on){
+  showSkel=on;
+  document.getElementById('skel').classList.toggle('on',on);
+  if(skelHelper)skelHelper.visible=on;
+  if(model)model.traverse(o=>{ if(o.userData&&o.userData.jointViz)o.visible=on; });
+  invalidate();
+}
+
+// モーション専用glb(メッシュを持たずanimationsのみ)を、ロード済みモデルに
+// ボーン名で紐付けて追加する。three.jsのAnimationMixer/PropertyBindingはトラックを
+// ノード名で解決するため、モデルとモーションが別ファイルでも同じボーン名を使っている
+// 限りそのまま適用できる(bake_motion.pyが吐くmotion_*.glbはpipeline_lib/skeleton.pyの
+// BONES名をそのまま使っているため、model.glbのボーン名と常に一致する)。
+function addMotionClips(newClips,autoplay){
+  if(autoplay===undefined)autoplay=true;
+  if(!model){ document.getElementById('err').textContent='先にモデル(.glb)を読み込んでください'; return; }
+  if(!newClips || !newClips.length){ document.getElementById('err').textContent='このファイルにはモーションが含まれていません'; return; }
+  if(!mixer) mixer=new THREE.AnimationMixer(model);
+  const sel=document.getElementById('animSel');
+  const firstNew=clips.length;
+  newClips.forEach(cl=>{
+    const idx=clips.length; clips.push(cl);
+    const o=document.createElement('option');o.value=idx;o.textContent=cl.name||('motion '+(idx+1));sel.appendChild(o);
+  });
+  document.getElementById('err').textContent='';
+  // ★ 手動で「＋」から読み込んだ時は追加したクリップをすぐ自動再生してプレビューする
+  // (autoplay=true、従来の挙動)。起動時の自動読込(tryAutoLoad)では複数の
+  // motion_*.glbを次々addMotionClipsするため自動再生すると最後に届いたものが
+  // 勝手に再生され続けてしまう——初期状態は常に静止(モーション未設定)のまま
+  // にしたいので、その経路ではautoplay=falseを渡し、ここではsetClipを呼ばない
+  // (プルダウンには追加されるが、ユーザーが選択して「再生」を押すまでは動かない)。
+  if(autoplay)setClip(firstNew,true);
+}
+let lastModelBuf=null;   // ダウンロードボタン用: 直近に読み込んだ「モデル本体」のGLBバイト列
+// モデルの各メッシュに、セル影ON/OFF切替用のflatMat/toonMatを両方作って
+// 保持させ(userData.flatMat/toonMat)、スキンメッシュにはアウトラインも付ける。
+function applyMeshMaterials(model){
+  model.traverse(o=>{ if(o.isMesh&&o.material){
+    const old=o.material;
+    // flatMat(セル影OFF時)は「素のテクスチャをそのまま表示する」役割なので
+    // toneMapped=falseにしてACESトーンマッピングの影響を受けないようにする。
+    const flatMat=new THREE.MeshBasicMaterial({map:old.map||null,transparent:!!old.transparent,
+      alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,toneMapped:false});
+    if(flatMat.map){flatMat.map.encoding=THREE.sRGBEncoding;flatMat.map.anisotropy=maxAniso;}
+    const toonMat=new THREE.MeshToonMaterial({map:old.map||null,gradientMap:toonGradient,
+      transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh});
+    if(toonMat.map){toonMat.map.encoding=THREE.sRGBEncoding;toonMat.map.anisotropy=maxAniso;}
+    o.userData.flatMat=flatMat;o.userData.toonMat=toonMat;
+    o.material=celOn?toonMat:flatMat;
+    if(o.isSkinnedMesh){
+      const outline=buildOutline(o,outlineThickness(parseInt(document.getElementById('outlineStrength').value)));
+      outline.visible=outlineOn;
+      model.add(outline);
+      o.userData.outline=outline;
+    }
+  }});
+}
+// model.glb自体は通常アニメを持たない(2026-07-02〜、モデル/モーション分割出力)。
+// 旧来の「1ファイルにモデル+アニメ埋め込み」glbとの後方互換のため、埋め込みが
+// あればそのまま使う。モーションは基本的にモーション専用glbを別途「＋」で追加する。
+function setupMotionDropdown(gltf){
+  clips=gltf.animations||[];
+  const sel=document.getElementById('animSel');
+  sel.innerHTML='<option value="-1">未選択</option>'; // モーションは常に未選択スタート
+  if(clips.length){
+    mixer=new THREE.AnimationMixer(model);
+    clips.forEach((cl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=cl.name||('motion '+(i+1));sel.appendChild(o);});
+  }
+}
+function loadGLB(buf,onLoaded,autoplayMotion,keepView){
+  new THREE.GLTFLoader().parse(buf,'',function(gltf){
+    let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
+    if(!hasMesh){ addMotionClips(gltf.animations||[],autoplayMotion); if(onLoaded)onLoaded(); return; }
+    lastModelBuf=buf;
+    clearModel();
+    model=gltf.scene; root.add(model);
+    applyMeshMaterials(model);
+    document.getElementById('drop').classList.add('hide');
+    // 操作パネルはモデル読込後も自動では出さない(バーの開閉ボタンを
+    // 押すまで非表示のまま。初期表示は常に非表示にしたいため)。
+    document.getElementById('barToggle').classList.add('visible');
+    buildSkelViz(model);
+    setupMotionDropdown(gltf);
+    document.getElementById('err').textContent='';
+    // ★フェーズ2: ライブパラメータ変更での再読み込み(keepView=true)時は、
+    // カメラ位置/回転/ズームを毎回リセットすると微調整のたびに視点が飛んで
+    // しまうため、frameModel()(初期フィット)を呼ばずに現在の視点をそのまま
+    // 維持する。
+    if(!keepView){
+      // center AFTER matrices/skeleton are initialized (next frames), device-independent
+      requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
+    }
+    invalidate();
+    if(onLoaded)onLoaded();
+  }, e=>{
+    document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e);
+    // 既にモデルが表示中の再読込失敗ならそのまま表示を維持し、何も表示できて
+    // いない状態(初回読込失敗等)の時だけファイル選択画面に戻して操作不能を防ぐ。
+    if(!model){
+      document.getElementById('modeChoice').classList.add('hide');
+      document.getElementById('drop').classList.remove('hide');
+    }
+  });
+}
+function setClip(i,autoplay){
+  const p=document.getElementById('play');
+  if(i<0){ // 「未選択」: 現在のモーションを止めてバインドポーズに戻す
+    if(action){action.stop();action=null;}
+    playing=false; p.textContent='再生'; p.classList.remove('on'); p.disabled=true;
+    invalidate();
+    return;
+  }
+  if(!mixer||!clips[i])return;
+  if(action)action.stop();
+  action=mixer.clipAction(clips[i]);action.reset();
+  playing=!!autoplay; action.paused=!playing; action.play();
+  p.disabled=false;
+  p.textContent=playing?'一時停止':'再生'; p.classList.toggle('on',playing);
+  invalidate();
+}
+
+// file
+const fileEl=document.getElementById('file');
+document.getElementById('pick').onclick=()=>fileEl.click();
+document.getElementById('load2').onclick=()=>fileEl.click();
+document.getElementById('loadMotion').onclick=()=>fileEl.click();
+fileEl.onchange=e=>{const f=e.target.files[0];if(f)readGlbFile(f);};
+function readGlbFile(f){
+  const r=new FileReader();
+  r.onload=()=>loadGLB(r.result);
+  r.onerror=()=>{ document.getElementById('err').textContent='ファイルの読込に失敗しました: '+f.name; };
+  r.readAsArrayBuffer(f);
+}
+['dragover','drop'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+document.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f&&/\.(glb|gltf)$/i.test(f.name))readGlbFile(f);});
+
+// 起動時オートロード: character_3d.htmlと同じ場所に model.glb / motion_<name>.glb が
+// コミットされていれば(GitHub Pages等でホストしている場合)自動で読み込む。
+// 無ければ404で静かに諦め、従来通りファイル選択/ドラッグ&ドロップの画面のまま
+// (file://で直接開いた場合はブラウザがローカルファイルのfetchをブロックすることが
+// あるが、その場合も同様に諦めて手動選択にフォールバックするだけで実害はない)。
+// ★初期状態は常に静止(モーション未設定): モーションは選択プルダウンに追加する
+// だけで自動再生はしない(autoplayMotion=false)。手動で「＋」ボタンから読み込んだ
+// 場合はすぐプレビュー再生したいのでそちらは従来通り自動再生のまま。
+const MOTION_NAMES=['idle','wave','moshimoshi','dance','idol','run'];
+// サンプルは今のところ同梱のmodel.glb1個のみだが、複数サンプルを選べるよう
+// プルダウンで選択させる作りにしておく(増やす場合はSAMPLESに追記するだけでよい)。
+const SAMPLES=[
+  {id:'default', label:'サンプル1', model:'model.glb', motionPrefix:'motion_'},
+];
+const sampleSelectEl=document.getElementById('sampleSelect');
+sampleSelectEl.innerHTML=SAMPLES.map((s,i)=>`<option value="${i}">${s.label}</option>`).join('');
+sampleSelectEl.addEventListener('click', e=>e.stopPropagation());
+// character_3d.htmlと同じ場所に置かれたmotion_<name>.glb(メッシュを持たず
+// ボーン階層+アニメーションのみ)を全種fetchし、既に読み込み済みのモデルへ
+// ボーン名で紐付けて追加する。tryAutoLoad(サンプルmodel.glb)・生成済みGLB
+// (IndexedDB経由)のどちらの読み込み後でも同じものを使う。
+function loadMotionClips(sample){
+  MOTION_NAMES.forEach(n=>{
+    fetch(sample.motionPrefix+n+'.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
+      .then(mbuf=>loadGLB(mbuf,undefined,false)).catch(()=>{});
+  });
+}
+function tryAutoLoad(){
+  const sample=SAMPLES[+sampleSelectEl.value]||SAMPLES[0];
+  fetch(sample.model).then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); }).then(buf=>{
+    loadGLB(buf,()=>loadMotionClips(sample));
+  }).catch(()=>{
+    // サンプルmodel.glbが無い(コミットされていない等)場合は通常モードの
+    // アップロード画面にフォールバックする。
+    document.getElementById('modeChoice').classList.add('hide');
+    document.getElementById('drop').classList.remove('hide');
+  });
+}
+document.getElementById('modeSampleBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  tryAutoLoad();
+};
+document.getElementById('modeNormalBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  document.getElementById('drop').classList.remove('hide');
+};
+// 3DtoolJS: ランドマークツールの「モデル生成」ボタンからIndexedDB経由で渡された
+// 生成済みGLBがあれば最優先で読み込む(モード選択画面は出さない。読み込んだら
+// 消費して1回限りにし、次回の通常起動では改めてモード選択を出す)。
+// ★フェーズ1(2026-07-07〜): loadGeneratedModel()は完成GLBではなく中間パッケージ
+// (彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)を返すようになった。
+// P3D.finishFromIntermediate()で平滑化/間引き/テクスチャ焼き込み/GLB化まで
+// このページ側で行ってから読み込む(フェーズ2ではこのgen_paramsをライブ編集
+// できるUIパネルに置き換える)。
+let currentPackage=null; // フェーズ2のライブパラメータ編集用に保持しておく
+let liveGP=null;         // currentPackage.gen_paramsのコピー。パネル操作で更新する
+let liveSeamSmoothIters=null, liveColorGradWidth=null;
+// ★追加課題5の対応: seamAngles/seamNoSide(ボーン別の継ぎ目角度・側面画像
+// 不使用フラグ)もビューアでライブ編集できるようにする(landmark_tool.htmlの
+// 「境目角度」タブと同じBONE_GROUPS/seamRowHtmlパターンを移植)。
+let liveSeamAngles=null, liveSeamNoSide=null;
+document.getElementById('err').textContent='';
+(async function(){
+  try{
+    const pkg = window.P3D && await P3D.loadGeneratedModel();
+    if(pkg && pkg.raw_body){
+      currentPackage = pkg;
+      liveGP = Object.assign({}, pkg.gen_params);
+      liveSeamSmoothIters = pkg.seam_smooth_iters;
+      liveColorGradWidth = pkg.color_grad_width;
+      liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
+      liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
+      document.getElementById('err').textContent='モデルを構築中…';
+      const glb = await P3D.finishFromIntermediate(pkg, currentLiveParams(),
+        (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
+      // ★構築成功後に初めてIndexedDBの中間パッケージを消費する。失敗時に先に
+      // 消してしまうと、失敗の原因を直さないままページを再読込しても二度と
+      // 復元できなくなる(以前はfinishFromIntermediate呼び出し前にclearしていた)。
+      await P3D.clearGeneratedModel();
+      document.getElementById('err').textContent='';
+      lastModelBuf=glb;
+      // 生成直後のモデルは常に同梱の既定motion_<name>.glb(SAMPLES[0]と同じ命名規則)を使う。
+      loadGLB(glb,()=>loadMotionClips(SAMPLES[0]));
+      document.getElementById('genTabBtn').style.display='';
+      renderGenParamsPanel();
+      renderSeamPanel();
+      return;
+    }
+  }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル構築に失敗しました: '+((e&&e.message)||e); }
+  document.getElementById('modeChoice').classList.remove('hide');
+})();
+
+/* ---------- フェーズ2: ライブパラメータ編集パネル ---------- */
+// 彫刻(marching cubes)をやり直さずに反映できる12パラメータをTier1〜3で分類
+// (GENERATOR_LIVE_PREVIEW_PLAN.md「移動可能パラメータの分類」参照)。
+// Tier1: 完全即時。Tier2: raw_body/raw_accessoriesの間引き前メッシュがあれば
+// 反映可能。Tier3: 上記に加えてbled_canvases(atlas_bake再実行)が必要。
+// いずれもcharacter_3d.htmlは常にraw_*とbled_canvasesを保持しているため、
+// 実装上は全てP3D.finishFromIntermediate()を丸ごと呼び直すだけで反映できる
+// (finishFromIntermediate自体が毎回smooth→decimate→atlas_bakeの順で計算する)。
+const GEN_PARAM_TIERS=[
+  {tier:"Tier1(即時反映)", items:[
+    {key:"body_smooth_iters", label:"全身の表面平滑化回数", min:0,max:60,step:1,unit:"回"},
+    {key:"acc_smooth_iters", label:"アクセサリーの平滑化回数", min:0,max:60,step:1,unit:"回"},
+    {key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", min:0,max:0.8,step:0.05,unit:""},
+    {key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", min:50,max:1000,step:10,unit:"KB"},
+  ]},
+  {tier:"Tier2(生メッシュキャッシュ利用)", items:[
+    {key:"body_decimate", label:"全身の頂点数を間引く", type:"checkbox"},
+    {key:"body_target_verts", label:"全身の間引き後目標頂点数", min:1000,max:300000,step:1000,unit:"頂点"},
+    {key:"acc_decimate", label:"アクセサリーの頂点数を間引く", type:"checkbox"},
+    {key:"acc_target_verts", label:"アクセサリーの間引き後目標頂点数", min:500,max:300000,step:500,unit:"頂点"},
+  ]},
+  {tier:"Tier3(生メッシュ+画像キャッシュ利用)", items:[
+    {key:"__seamSmoothIters", label:"継ぎ目の平滑化回数", min:0,max:30,step:1,unit:"回"},
+    {key:"__colorGradWidth", label:"色のディザグラデーション幅", min:0,max:40,step:1,unit:"px"},
+  ]},
+];
+function genParamGet(key){
+  if(key==="__seamSmoothIters") return liveSeamSmoothIters;
+  if(key==="__colorGradWidth") return liveColorGradWidth;
+  return liveGP[key];
+}
+function genParamSet(key,val){
+  if(key==="__seamSmoothIters"){ liveSeamSmoothIters=val; return; }
+  if(key==="__colorGradWidth"){ liveColorGradWidth=val; return; }
+  liveGP[key]=val;
+}
+let genPanelOpen={};
+function renderGenParamsPanel(){
+  const el=document.getElementById('genParamsPanel'); if(!el)return;
+  el.innerHTML=GEN_PARAM_TIERS.map(grp=>{
+    const isOpen=!!genPanelOpen[grp.tier];
+    const items=grp.items.map(it=>{
+      const cur=genParamGet(it.key);
+      let body;
+      if(it.type==="checkbox"){
+        body='<div class="prow" style="justify-content:space-between">'+
+          '<span>'+it.label+'</span><input type="checkbox" data-gkey="'+it.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px"></div>';
+        return '<div class="pitem">'+body+'</div>';
+      }else{
+        body='<div class="prow">'+
+          '<input type="range" data-gkey-range="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
+          '<input type="number" data-gkey="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
+          (it.unit?'<span class="punit">'+it.unit+'</span>':'')+'</div>';
+      }
+      return '<div class="pitem"><div class="plabel">'+it.label+'</div>'+body+'</div>';
+    }).join("");
+    return '<details class="accgroup" data-gtier="'+grp.tier+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>'+grp.tier+'</span><span class="accCount">'+grp.items.length+'項目</span></summary>'+
+      '<div class="accbody">'+items+'</div></details>';
+  }).join("");
+  [].forEach.call(el.querySelectorAll("details.accgroup"),d=>{
+    d.addEventListener("toggle",()=>{ genPanelOpen[d.dataset.gtier]=d.open; });
+  });
+  [].forEach.call(el.querySelectorAll("[data-gkey]"),inp=>{
+    const key=inp.dataset.gkey;
+    inp.onchange=()=>{
+      const v = inp.type==="checkbox" ? inp.checked : (parseFloat(inp.value)||0);
+      genParamSet(key,v);
+      const rg=el.querySelector('[data-gkey-range="'+key+'"]'); if(rg)rg.value=v;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-gkey-range]"),rg=>{
+    const key=rg.dataset.gkeyRange;
+    rg.oninput=()=>{
+      const v=parseFloat(rg.value)||0;
+      genParamSet(key,v);
+      const numEl=el.querySelector('[data-gkey="'+key+'"]'); if(numEl)numEl.value=v;
+      scheduleGenRecompute();
+    };
+  });
+}
+/* ---------- Task1: seamAngles/seamNoSideのボーン別ライブ編集 ---------- */
+// landmark_tool.htmlのBONE_GROUPS/BONE_JP/seamRowHtmlパターンをそのまま移植。
+const SEAM_DEFAULT_DEG=45;
+const BONE_JP_V={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
+  clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
+  clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
+  thigh_L:"腿L",shin_L:"すねL",foot_L:"足L",toe_L:"つま先L",
+  thigh_R:"腿R",shin_R:"すねR",foot_R:"足R",toe_R:"つま先R"};
+const BONE_GROUPS_V=[
+  {label:"体幹", bones:["hips","torso","chest","neck","head"]},
+  {label:"左腕", bones:["clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L"]},
+  {label:"右腕", bones:["clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R"]},
+  {label:"左脚", bones:["thigh_L","shin_L","foot_L","toe_L"]},
+  {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
+];
+let seamGroupOpen={};
+function seamRowHtmlV(label,key,v,ns){
+  return '<div class="acitem"><span class="nm">'+label+'</span>'+
+    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-vseam-range="'+key+'" style="flex:1;min-width:40px">'+
+    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-vseam-key="'+key+'" style="width:44px">°'+
+    '<label style="font-size:10.5px;color:var(--mut);margin-left:4px;white-space:nowrap">'+
+    '<input type="checkbox" data-vseam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面</label>'+
+    '</div>';
+}
+// ★ユーザー指摘2026-07-07:「側面画像利用は元々一括変更機能があったのに
+// なくなった」への対応。landmark_tool.htmlの旧「画像境界」タブにあった
+// 「一括設定」(全パーツ角度一括適用/側面画像を使う一括ON-OFF)をビューアの
+// 継ぎ目パネルにも移植する(Task1でボーン別の個別リストは移植済みだったが、
+// 一括操作部分が抜けていた)。
+let seamBulkOpen=false;
+function renderSeamBulkHtml(){
+  return '<details class="accgroup" data-vseamgroup="一括設定"'+(seamBulkOpen?" open":"")+'>'+
+    '<summary><span>一括設定</span><span class="accCount">2項目</span></summary>'+
+    '<div class="accbody">'+
+    '<div class="acitem" style="margin-bottom:8px">'+
+    '<span class="nm">全パーツ一括</span>'+
+    '<input type="number" id="vSeamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°'+
+    '<button class="btn sm mint" id="vSeamBulkApply">全パーツに適用</button>'+
+    '</div>'+
+    '<div class="acitem" style="flex-wrap:wrap;row-gap:6px">'+
+    '<span class="nm" style="flex:1 1 100%">側面画像を使う(一括)</span>'+
+    '<button class="btn sm mint" id="vSeamSideAllOn" style="flex:1 1 auto">全パーツON</button>'+
+    '<button class="btn sm" id="vSeamSideAllOff" style="flex:1 1 auto">全パーツOFF</button>'+
+    '</div></div></details>';
+}
+function wireSeamBulkHtml(el){
+  const bulkDetails=el.querySelector('details[data-vseamgroup="一括設定"]');
+  if(bulkDetails) bulkDetails.addEventListener("toggle",()=>{ seamBulkOpen=bulkDetails.open; });
+  const statusEl=document.getElementById('genPanelStatus');
+  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  document.getElementById('vSeamBulkApply').onclick=()=>{
+    const v=parseInt(document.getElementById('vSeamBulkVal').value,10);
+    if(!isFinite(v)||v<1||v>89){ if(statusEl)statusEl.textContent='角度は1〜89の範囲で入力してください。'; return; }
+    P3D.BONES.forEach(b=>{ if(v===SEAM_DEFAULT_DEG) delete liveSeamAngles[b]; else liveSeamAngles[b]=v; });
+    renderSeamPanel();
+    scheduleGenRecompute();
+  };
+  document.getElementById('vSeamSideAllOn').onclick=()=>{
+    liveSeamNoSide={};
+    renderSeamPanel();
+    scheduleGenRecompute();
+  };
+  document.getElementById('vSeamSideAllOff').onclick=()=>{
+    P3D.BONES.forEach(b=>{ liveSeamNoSide[b]=true; });
+    accKeys.forEach(k=>{ liveSeamNoSide[k]=true; });
+    renderSeamPanel();
+    scheduleGenRecompute();
+  };
+}
+function buildSeamGroupsHtml(accKeys){
+  const boneGroupsHtml=BONE_GROUPS_V.map(grp=>{
+    const rows=grp.bones.map(b=>{
+      const v=(liveSeamAngles[b]!==undefined)?liveSeamAngles[b]:SEAM_DEFAULT_DEG;
+      return seamRowHtmlV(BONE_JP_V[b]||b,b,v,!!liveSeamNoSide[b]);
+    }).join("");
+    const isOpen=!!seamGroupOpen[grp.label];
+    return '<details class="accgroup" data-vseamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }).join("");
+  let accHtml="";
+  if(accKeys.length){
+    const rows=accKeys.map(key=>{
+      const v=(liveSeamAngles[key]!==undefined)?liveSeamAngles[key]:SEAM_DEFAULT_DEG;
+      return seamRowHtmlV(key.replace(/^acc:/,""),key,v,!!liveSeamNoSide[key]);
+    }).join("");
+    const isOpen=!!seamGroupOpen["アクセサリー"];
+    accHtml='<details class="accgroup" data-vseamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }
+  return boneGroupsHtml+accHtml;
+}
+function wireSeamPanelEvents(el){
+  [].forEach.call(el.querySelectorAll("details[data-vseamgroup]:not([data-vseamgroup='一括設定'])"),d=>{
+    d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.vseamgroup]=d.open; });
+  });
+  function setAngle(key,n){
+    if(!isFinite(n)||n<1||n>89) return;
+    liveSeamAngles[key]=n;
+  }
+  [].forEach.call(el.querySelectorAll("[data-vseam-key]"),inp=>{
+    inp.onchange=()=>{
+      const key=inp.dataset.vseamKey, n=parseInt(inp.value,10);
+      setAngle(key,n);
+      const rg=el.querySelector('[data-vseam-range="'+key+'"]'); if(rg)rg.value=inp.value;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-vseam-range]"),rg=>{
+    rg.oninput=()=>{
+      const key=rg.dataset.vseamRange, n=parseInt(rg.value,10);
+      setAngle(key,n);
+      const numEl=el.querySelector('[data-vseam-key="'+key+'"]'); if(numEl)numEl.value=rg.value;
+      scheduleGenRecompute();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-vseam-side]"),cb=>{
+    cb.onchange=()=>{
+      const key=cb.dataset.vseamSide;
+      if(cb.checked) delete liveSeamNoSide[key]; else liveSeamNoSide[key]=true;
+      scheduleGenRecompute();
+    };
+  });
+}
+function renderSeamPanel(){
+  const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
+  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  el.innerHTML=renderSeamBulkHtml()+buildSeamGroupsHtml(accKeys);
+  wireSeamBulkHtml(el);
+  wireSeamPanelEvents(el);
+}
+let genRecomputeTimer=null, genRecomputeBusy=false, genRecomputeQueued=false;
+function scheduleGenRecompute(){
+  clearTimeout(genRecomputeTimer);
+  genRecomputeTimer=setTimeout(doGenRecompute, 250);
+}
+// doGenRecompute()(自動更新)とexportGlbBtn(手動書き出し)の両方が同じ
+// ライブ調整状態からGLBを焼き直すため、finishFromIntermediate()に渡す
+// パラメータオブジェクトをここに集約する(重複定義でどちらかの更新漏れを防ぐ)。
+function currentLiveParams(){
+  return {gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
+    seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth};
+}
+async function doGenRecompute(){
+  if(!currentPackage) return;
+  if(genRecomputeBusy){ genRecomputeQueued=true; return; }
+  genRecomputeBusy=true;
+  const statusEl=document.getElementById('genPanelStatus');
+  try{
+    statusEl.textContent='更新中…';
+    const glb=await P3D.finishFromIntermediate(currentPackage, currentLiveParams(),
+      (label)=>{ statusEl.textContent='更新中: '+label; });
+    lastModelBuf=glb;
+    loadGLB(glb, undefined, false, true); // keepView=true: 視点を維持したまま差し替え
+    statusEl.textContent='';
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='更新に失敗しました: '+((e&&e.message)||e);
+  }finally{
+    genRecomputeBusy=false;
+    if(genRecomputeQueued){ genRecomputeQueued=false; doGenRecompute(); }
+  }
+}
+
+/* ---------- フェーズ3: ビューアからの最終出力(GLB/JSON) ---------- */
+// 「GLB書き出し」: 現在のライブ調整状態(liveGP/liveSeamSmoothIters/
+// liveColorGradWidth)から改めてfinishFromIntermediate()でGLBを焼き直して
+// ダウンロードする(直近の自動更新がデバウンス待ち/実行中でも、押した時点の
+// 値で確実に最新のGLBを書き出すため、lastModelBufに頼らず明示的に再計算する)。
+document.getElementById('exportGlbBtn').onclick=async()=>{
+  if(!currentPackage){ document.getElementById('genPanelStatus').textContent='中間パッケージがありません(通常モードで読み込んだGLBは書き出し対象外です。「モデル」タブの「モデルを保存」をお使いください)。'; return; }
+  const statusEl=document.getElementById('genPanelStatus');
+  try{
+    statusEl.textContent='GLBを書き出し中…';
+    const glb=await P3D.finishFromIntermediate(currentPackage, currentLiveParams(),
+      (label)=>{ statusEl.textContent='書き出し中: '+label; });
+    lastModelBuf=glb;
+    const blob=new Blob([glb],{type:'model/gltf-binary'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    statusEl.textContent='GLBを書き出しました。';
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='GLB書き出しに失敗しました: '+((e&&e.message)||e);
+  }
+};
+
+// 「JSON書き出し/コピー」: currentPackage.landmarks_json(landmark_tool.htmlの
+// buildJson()の戻り値そのもの)をベースに、ビューアでライブ調整した
+// gen_params/seam_smooth_iters/color_grad_widthフィールドだけを上書きして
+// landmarks_ai.json形式で出力する(landmark_tool.htmlのexportJson/copyJsonと
+// 同等のUI/挙動)。seam_angles/seam_no_sideはフェーズ2の対象外(生成時点の値の
+// まま)のため上書きしない。
+function buildLiveJson(){
+  const base=currentPackage.landmarks_json || {};
+  return Object.assign({}, base, {
+    gen_params: Object.assign({}, base.gen_params||{}, liveGP),
+    seam_smooth_iters: liveSeamSmoothIters,
+    color_grad_width: liveColorGradWidth,
+    seam_angles: Object.assign({}, liveSeamAngles),
+    seam_no_side: Object.assign({}, liveSeamNoSide),
+  });
+}
+document.getElementById('exportJsonBtn').onclick=()=>{
+  const statusEl=document.getElementById('genPanelStatus');
+  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
+  const str=JSON.stringify(buildLiveJson(),null,1), blob=new Blob([str],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="landmarks_ai.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  statusEl.textContent='landmarks_ai.json を書き出しました。';
+};
+document.getElementById('copyJsonBtn').onclick=async()=>{
+  const statusEl=document.getElementById('genPanelStatus');
+  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
+  const str=JSON.stringify(buildLiveJson(),null,1);
+  try{ await navigator.clipboard.writeText(str); statusEl.textContent='JSONをコピーしました。'; }
+  catch(_){
+    const t=document.createElement("textarea"); t.value=str; document.body.appendChild(t); t.select();
+    try{ document.execCommand("copy"); statusEl.textContent='JSONをコピーしました。'; }
+    catch(__){ statusEl.textContent='コピー不可。書き出しボタンをお試しください。'; }
+    t.remove();
+  }
+};
+
+// interaction (pointer)
+// pointer tracking (supports 1-finger rotate + 2-finger pinch zoom)
+const ptrs=new Map(); let pinchDist=0;
+function dist2(){ const v=[...ptrs.values()]; const dx=v[0].x-v[1].x, dy=v[0].y-v[1].y; return Math.hypot(dx,dy); }
+cvs.addEventListener('pointerdown',e=>{ try{cvs.setPointerCapture(e.pointerId);}catch(_){}
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){dragging=true;lx=e.clientX;ly=e.clientY;}
+  else if(ptrs.size===2){dragging=false;pinchDist=dist2();}
+});
+cvs.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size>=2){
+    const d=dist2();
+    if(pinchDist>0){ camDist*=pinchDist/d; camDist=Math.max(fitDist*0.3,Math.min(fitDist*4,camDist)); cam.position.z=camDist; invalidate(); }
+    pinchDist=d;
+  } else if(dragging){
+    rotY+=(e.clientX-lx)*0.01; rotX+=(e.clientY-ly)*0.01; rotX=Math.max(-1.2,Math.min(1.2,rotX));
+    lx=e.clientX;ly=e.clientY; invalidate();
+  }
+});
+function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2)pinchDist=0; if(ptrs.size===0)dragging=false;
+  else if(ptrs.size===1){const v=[...ptrs.values()][0];dragging=true;lx=v.x;ly=v.y;} }
+cvs.addEventListener('pointerup',endPtr);
+cvs.addEventListener('pointercancel',endPtr);
+cvs.addEventListener('wheel',e=>{e.preventDefault();camDist*=(1+Math.sign(e.deltaY)*0.08);
+  camDist=Math.max(fitDist*0.3,Math.min(fitDist*4,camDist));cam.position.z=camDist;invalidate();},{passive:false});
+
+function setSpin(on){autoSpin=on;document.getElementById('spin').classList.toggle('on',on);invalidate();}
+document.getElementById('spin').onclick=()=>setSpin(!autoSpin);
+document.getElementById('skel').onclick=()=>setSkel(!showSkel);
+function setCel(on){
+  celOn=on;
+  document.getElementById('cel').classList.toggle('on',on);
+  if(model)model.traverse(o=>{
+    if(o.userData&&o.userData.flatMat){o.material=on?o.userData.toonMat:o.userData.flatMat;}
+  });
+  invalidate();
+}
+document.getElementById('cel').onclick=()=>setCel(!celOn);
+document.getElementById('celStrength').oninput=function(){ setToonGradientStrength(parseInt(this.value)); };
+setToonGradientStrength(parseInt(document.getElementById('celStrength').value));
+
+function rebuildOutlines(thickness){
+  if(!model)return;
+  model.traverse(o=>{
+    if(o.isSkinnedMesh&&o.userData.outline){
+      const oldOut=o.userData.outline;
+      model.remove(oldOut);
+      if(oldOut.geometry)oldOut.geometry.dispose();
+      if(oldOut.material)oldOut.material.dispose(); // mapは元メッシュのマテリアルと共有のためdisposeしない
+      const newOut=buildOutline(o,thickness);
+      newOut.visible=outlineOn;
+      model.add(newOut);
+      o.userData.outline=newOut;
+    }
+  });
+  invalidate();
+}
+function setOutline(on){
+  outlineOn=on;
+  document.getElementById('outline').classList.toggle('on',on);
+  if(model)model.traverse(o=>{ if(o.userData&&o.userData.outline){o.userData.outline.visible=on;} });
+  invalidate();
+}
+document.getElementById('outline').onclick=()=>setOutline(!outlineOn);
+document.getElementById('outlineStrength').oninput=function(){ rebuildOutlines(outlineThickness(parseInt(this.value))); };
+
+let bgWhiteOn=true;
+function setBgWhite(on){
+  bgWhiteOn=on;
+  document.getElementById('bgWhite').classList.toggle('on',on);
+  scene.background=on?new THREE.Color(0xffffff):null;
+  invalidate();
+}
+document.getElementById('bgWhite').onclick=()=>setBgWhite(!bgWhiteOn);
+
+// アニメ調(彩度・コントラスト強調): WebGLの描画には手を加えず、canvas要素に
+// CSS filterをかけるだけの表示専用エフェクト(ダウンロードするGLBの色データには
+// 影響しない)。invalidate()は不要(ブラウザがCSSレイヤーを自動で再合成する)。
+let vividOn=true;
+function applyVivid(){
+  const sSat=parseInt(document.getElementById('vividSat').value);
+  const sCon=parseInt(document.getElementById('vividCon').value);
+  const sat=1+(sSat/100)*1.2, con=1+(sCon/100)*0.5;
+  cvs.style.filter=vividOn?`saturate(${sat.toFixed(2)}) contrast(${con.toFixed(2)})`:'none';
+}
+function setVivid(on){
+  vividOn=on;
+  document.getElementById('vivid').classList.toggle('on',on);
+  applyVivid();
+}
+document.getElementById('vivid').onclick=()=>setVivid(!vividOn);
+document.getElementById('vividSat').oninput=applyVivid;
+document.getElementById('vividCon').oninput=applyVivid;
+applyVivid();
+document.getElementById('download').onclick=()=>{
+  if(!lastModelBuf){ document.getElementById('err').textContent='ダウンロードできるモデルがありません'; return; }
+  const blob=new Blob([lastModelBuf],{type:'model/gltf-binary'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+};
+document.getElementById('backToLandmark').onclick=()=>{ location.href='landmark_tool.html'; };
+document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
+document.getElementById('barToggle').onclick=()=>{
+  const bar=document.getElementById('bar'), open=bar.classList.toggle('show');
+  document.getElementById('barToggle').textContent=open?'操作パネル ▾':'操作パネル ▴';
+};
+document.getElementById('reset').onclick=()=>{rotY=0.4;rotX=0.04;camDist=fitDist;cam.position.z=camDist;root.position.set(0,0,0);setSpin(false);};
+const PAN=0.12;  // pan step (camera position shift)
+document.getElementById('camUp').onclick=()=>{root.position.y+=PAN;invalidate();};
+document.getElementById('camDn').onclick=()=>{root.position.y-=PAN;invalidate();};
+document.getElementById('camL').onclick=()=>{root.position.x-=PAN;invalidate();};
+document.getElementById('camR').onclick=()=>{root.position.x+=PAN;invalidate();};
+document.getElementById('vFront').onclick=()=>{rotY=0;rotX=0.04;setSpin(false);};
+document.getElementById('vSide').onclick=()=>{rotY=Math.PI/2;rotX=0.04;setSpin(false);};
+document.getElementById('vBack').onclick=()=>{rotY=Math.PI;rotX=0.04;setSpin(false);};
+document.getElementById('animSel').onchange=function(){
+  const i=parseInt(this.value,10);
+  setClip(i, i>=0 && playing);
+};
+document.querySelectorAll('.vtabbtn').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.vtabbtn').forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('.vtabpanel').forEach(p=>p.classList.toggle('on',p.dataset.vtabpanel===b.dataset.vtab));
+  };
+});
+document.getElementById('play').onclick=function(){ if(!action)return; playing=!playing;action.paused=!playing;
+  this.textContent=playing?'一時停止':'再生'; this.classList.toggle('on',playing); invalidate(); };
+
+const clock=new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const dt=clock.getDelta();
+  if(autoSpin){rotY+=0.6*dt;invalidate();}
+  if(mixer&&playing){mixer.update(dt);invalidate();}
+  if(needsRender){
+    root.rotation.set(rotX,rotY,0);
+    renderer.render(scene,cam);
+    needsRender=false;
+  }
+}
+tick();
+})();
+</script>
+</body></html>

@@ -1,0 +1,2051 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴーストジェネレータ</title>
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/BufferGeometryUtils.js"></script>
+<script src="js/vendor/SimplifyModifier.js"></script>
+<script src="js/marching_cubes.js"></script>
+<script src="js/common.js"></script>
+<script src="js/carving.js"></script>
+<script src="js/skeleton.js"></script>
+<script src="js/profile.js"></script>
+<script src="js/atlas.js"></script>
+<script src="js/model_export.js"></script>
+<script src="js/visual_hull.js"></script>
+<script src="js/accessories.js"></script>
+<script src="js/pipeline.js"></script>
+<script src="js/idb.js"></script>
+<style>
+  :root{--bg:#07080a;--mut:#9aa3ad;--mint:#ff2fb0;--green:#39ff9e;--txt:#e8edf2;--line:rgba(255,255,255,.12);
+    --mono:"SFMono-Regular",Consolas,Menlo,monospace}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .page{max-width:460px;margin:0 auto;padding:14px 12px 28px}
+  h1{font-size:16px;font-weight:700;margin:0 0 2px;letter-spacing:.01em}
+  h1 .eng{display:block;font-family:var(--mono);font-size:9.5px;color:var(--green);
+    letter-spacing:.22em;margin:5px 0 0;opacity:.85;font-weight:400}
+  .sub{font-size:11.5px;color:var(--mut);margin:6px 0 14px}
+  .slots{display:flex;gap:8px;margin-bottom:12px}
+  .slot{flex:1;height:64px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(255,255,255,.04);color:var(--mut);font-size:12px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center}
+  .slot.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.08);color:var(--mint)}
+  .slot b{font-weight:600}
+  .slot small{font-size:10px}
+  .slot input{display:none}
+  #wrap{width:100%;border-radius:12px;overflow:hidden;background:#000;border:1px solid var(--line);margin-bottom:10px}
+  #cvs{display:block;width:100%;touch-action:none}
+  .bar{display:flex;gap:7px;margin-bottom:10px;flex-wrap:wrap}
+  .btn{flex:1 1 0;min-width:0;height:42px;border-radius:11px;font-size:13px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--txt);
+    white-space:nowrap;display:flex;align-items:center;justify-content:center;user-select:none}
+  .btn:active{transform:scale(.97)}
+  .btn.mint{background:rgba(255,47,176,.14);color:var(--mint);border-color:rgba(255,47,176,.4)}
+  .btn.sm{flex:0 0 auto;height:34px;padding:0 10px;font-size:12px}
+  .btn[disabled]{opacity:.5}
+  #msg{font-size:11.5px;color:var(--mut);min-height:16px;line-height:1.5;margin-bottom:10px}
+  .legend{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{font-size:11px;padding:5px 9px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04)}
+  .chip.on{border-color:#ffe14d;background:rgba(255,225,77,.10);color:#ffe14d!important}
+  .hint{color:var(--mut);font-size:13px;margin-top:24px;text-align:center}
+  .modeCard{display:block;cursor:pointer;border:1px solid var(--line);border-radius:14px;
+    background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
+  .modeCard:active{background:rgba(255,47,176,.10);border-color:rgba(255,47,176,.4)}
+  .modeCard.mint{border-color:rgba(255,47,176,.4)}
+  .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
+  .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+  .modeCard.disabled{cursor:default;opacity:.45;pointer-events:none}
+  .modeCard.disabled b{color:var(--mut)}
+  .modeCard .sampleSelectRow{margin-top:10px}
+  .modeCard .sampleSelectRow select{width:100%;height:32px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(255,255,255,.06);color:var(--txt);font-size:12px}
+  .nudge{margin-top:12px;display:flex;flex-direction:column;gap:8px;align-items:center}
+  .nudge .sel{font-size:12px;color:var(--mut)}
+  .nudge .sel b{color:#ffe14d}
+  .nudgerow{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%}
+  .dpad{display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:48px 48px 48px;gap:6px;flex:0 0 auto}
+  .dpad button{width:56px;height:48px;font-size:22px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(255,255,255,.06);color:var(--txt);cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}
+  .dpad button:active{background:rgba(255,47,176,.18)}
+  .dpad button:disabled{opacity:.3;cursor:default}
+  .dpad button:disabled:active{background:rgba(255,255,255,.06)}
+  .hidden{display:none}
+  .btn.danger{border-color:rgba(255,107,107,.45);color:#ff8484}
+  .btn.danger:active{background:rgba(255,107,107,.14)}
+  .qbtn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+    border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.08);color:var(--mut);
+    font-size:11px;line-height:1;cursor:pointer;vertical-align:middle;margin-left:4px;flex:0 0 auto;padding:0}
+  .qbtn.on{color:#ffe14d;border-color:rgba(255,225,77,.5)}
+  .helpText{font-size:11px;color:var(--mut);line-height:1.6;margin:4px 0 10px;
+    background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .subhead{font-size:10.5px;font-weight:700;letter-spacing:.03em;color:var(--mut);margin:9px 0 4px}
+  .subhead:first-child{margin-top:0}
+  .legendGroups{display:flex;flex-direction:column;gap:2px}
+  .bonesGroups{display:flex;flex-direction:column;gap:2px;max-height:230px;overflow:auto}
+  .bonesRow{display:flex;flex-wrap:wrap;gap:4px}
+  .accgroup{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden;background:rgba(255,255,255,.02)}
+  .accgroup>summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;align-items:center;gap:8px;
+    font-size:12.5px;color:var(--txt);font-weight:600;user-select:none}
+  .accgroup>summary::-webkit-details-marker{display:none}
+  .accgroup>summary::before{content:"▸";color:var(--mut);font-size:11px;transition:transform .12s}
+  .accgroup[open]>summary::before{transform:rotate(90deg)}
+  .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:11px}
+  .accgroup>summary .accDot{width:7px;height:7px;border-radius:50%;background:#ffe14d;flex:0 0 auto;
+    box-shadow:0 0 0 2px rgba(255,225,77,.18)}
+  .accgroup>.accbody{padding:0 12px 12px}
+  .accResetGrp{font-size:10.5px;color:var(--mut);border:1px solid var(--line);border-radius:6px;
+    background:rgba(255,255,255,.05);padding:2px 8px;cursor:pointer;flex:0 0 auto}
+  .accToolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .accToolbar button{font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:7px;
+    background:rgba(255,255,255,.05);padding:5px 10px;cursor:pointer}
+  #genOverlay{position:fixed;inset:0;background:rgba(8,10,13,.92);z-index:1000;
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:20px;text-align:center}
+  #genOverlay:not(.hidden){display:flex}
+  .genTag{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--green);letter-spacing:.16em}
+  .genTag .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:genBlink 1.4s infinite}
+  .genTag.err{color:#ff5a6e}
+  .genTag.err .dot{background:#ff5a6e;animation:none}
+  @keyframes genBlink{0%,100%{opacity:1}50%{opacity:.15}}
+  .viewbar{display:flex;gap:6px;margin-bottom:8px}
+  .viewbtn{flex:1;height:34px;border-radius:9px;font-size:12px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut)}
+  .viewbtn.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
+  .acpanel{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+  .acpanel h2{font-size:13px;margin:0 0 8px;color:var(--txt)}
+  .tabbar{display:flex;gap:6px;margin:14px 0 10px;flex-wrap:wrap}
+  .tabbtn{flex:1 1 0;min-width:0;height:38px;border-radius:10px;font-size:12px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut);white-space:nowrap}
+  .tabbtn.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
+  .tabpanel{display:none}
+  .tabpanel.on{display:block}
+  .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
+  .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+  .acitem{display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,.04);
+    border:1px solid var(--line);border-radius:9px;padding:7px 9px;transition:background .6s ease,border-color .6s ease}
+  .acitem.flash{background:rgba(255,47,176,.22);border-color:rgba(255,47,176,.6)}
+  .acitem .nm{flex:1;color:var(--txt)}
+  .acitem .tag{color:var(--mut);font-size:10.5px}
+  .acitem .ed{color:var(--mint);cursor:pointer;font-size:11px;padding:2px 6px}
+  .acitem .rm{color:#ff6b6b;cursor:pointer;font-size:11px;padding:2px 6px}
+  .acitem input.acNameEdit{flex:1;min-width:0;background:rgba(255,255,255,.06);
+    border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:5px 7px;font-size:12px}
+  .acitem input[type=number]{background:rgba(255,255,255,.06);border:1px solid var(--line);
+    color:var(--txt);border-radius:7px;padding:4px 6px;font-size:12px}
+  .acform{display:flex;flex-direction:column;gap:8px;background:rgba(255,255,255,.03);
+    border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+  .acform label{font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px}
+  .acform input[type=text],.acform select{background:rgba(255,255,255,.06);border:1px solid var(--line);
+    color:var(--txt);border-radius:7px;padding:6px 8px;font-size:12px}
+  .acform .bonesRow label{flex-direction:row;align-items:center;gap:4px;font-size:10.5px;
+    background:rgba(255,255,255,.05);border-radius:6px;padding:3px 6px}
+  .acform .row{display:flex;gap:8px}
+  .acform .row>*{flex:1}
+  .acstep{font-size:11.5px;color:#ffe14d}
+</style></head>
+<body>
+<div class="page">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <button class="btn sm" id="backToIndex" style="flex:0 0 auto">← トップに戻る</button>
+  </div>
+  <h1>ゴーストジェネレータ<span class="eng">GHOST GENERATOR</span></h1>
+  <p class="sub">3枚絵 → 全点を自動仮配置 → ドラッグで微調整 → landmarks.json 出力</p>
+
+  <div id="editor" class="hidden">
+    <div class="tabbar" id="tabbar">
+      <button class="tabbtn on" data-tab="lm">マーク</button>
+      <button class="tabbtn" data-tab="ex">領域</button>
+      <button class="tabbtn" data-tab="ac">パーツ＋</button>
+      <button class="tabbtn" data-tab="params">設定値</button>
+      <button class="tabbtn" data-tab="gen">生成</button>
+    </div>
+
+    <div id="imgArea">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn sm" id="lockToggle" style="flex:0 0 auto">🔓 点をロック</button>
+      </div>
+      <div id="wrap"><canvas id="cvs"></canvas></div>
+      <div class="viewbar" id="viewbar" style="margin-top:8px">
+        <button class="viewbtn on" data-view="front">正面</button>
+        <button class="viewbtn" data-view="side">側面</button>
+        <button class="viewbtn" data-view="back">背面</button>
+      </div>
+      <div id="msg"></div>
+      <div class="nudge">
+        <div class="sel">微調整中: <b id="selName">未選択</b>（押しっぱなしで連続移動）</div>
+        <div class="sel" id="selDesc" style="min-height:14px;color:var(--mut)"></div>
+        <div class="nudgerow">
+          <button class="btn" id="viewReset" style="flex:0 0 auto;max-width:130px">表示リセット（拡大/位置）</button>
+          <div class="dpad">
+            <span></span><button id="nUp">▲</button><span></span>
+            <button id="nLeft">◀</button><span></span><button id="nRight">▶</button>
+            <span></span><button id="nDown">▼</button><span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabpanel on" data-tabpanel="lm">
+      <div class="acitem" style="margin-bottom:10px">
+        <span class="nm">ボーン表示/範囲プレビュー</span>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneOverlayToggleLM">ボーン表示</label>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneRegionToggleLM">ボーン範囲</label>
+      </div>
+      <div class="legendGroups" id="legend"></div>
+      <div class="bar" style="margin-top:14px">
+        <button class="btn danger" id="reset">初期配置に戻す</button>
+      </div>
+    </div>
+
+    <div class="tabpanel acpanel" data-tabpanel="ex">
+      <h2>除外範囲（毛先など、シルエット測定から除外したい部分）
+        <button type="button" class="qbtn" data-help="help-ex">?</button></h2>
+      <p class="helpText hidden" id="help-ex">
+        前髪が首にかぶる等、体のシルエットに紛れ込んで幅/奥行きの自動測定を
+        狂わせる部分を、正面/側面/背面それぞれで直接塗って除外できます。
+        「マジックツール」はタップした点から色の近い連続領域を自動選択、
+        「ブラシ」は丸で塗って除外/解除します。赤く表示されている部分が除外範囲です。</p>
+      <p style="font-size:11px;color:var(--mint);margin:0 0 10px">
+        ↑上の画像を直接タップ/なぞって除外・解除できます。</p>
+      <div class="acitem" style="margin-bottom:6px">
+        <span class="nm">ツール</span>
+        <button class="btn sm exmode mint" id="exModeWand" data-exmode="wand" style="flex:0 0 auto">マジック</button>
+        <button class="btn sm exmode" id="exModeBrush" data-exmode="brush" style="flex:0 0 auto">ブラシ</button>
+      </div>
+      <div class="acitem" style="margin-bottom:8px">
+        <span class="nm">操作</span>
+        <button class="btn sm exact mint" id="exActAdd" data-exact="add" style="flex:0 0 auto">除外する</button>
+        <button class="btn sm exact" id="exActRemove" data-exact="remove" style="flex:0 0 auto">解除する</button>
+      </div>
+      <div class="acitem" id="exSliderRow" style="margin-bottom:8px">
+        <span class="nm" id="exSliderLabel">許容誤差</span>
+        <input type="range" id="exSlider" min="5" max="100" value="30" style="flex:1">
+      </div>
+      <div class="row">
+        <button class="btn" id="exUndo">↩ 元に戻す</button>
+        <button class="btn" id="exClear">全解除</button>
+      </div>
+    </div>
+
+    <div class="tabpanel acpanel" data-tabpanel="ac">
+      <h2>アクセサリー（ヘッドホン・猫耳・カメラ小物・スカート等）</h2>
+      <div class="acitem" style="margin-bottom:10px">
+        <span class="nm">ボーン表示/範囲プレビュー</span>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneOverlayToggleAC">ボーン表示</label>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneRegionToggleAC">ボーン範囲</label>
+      </div>
+      <div id="acList" class="aclist"></div>
+      <div id="acForm"></div>
+      <button class="btn mint" id="acAddBtn">+ 手動で追加</button>
+    </div>
+
+    <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
+         (seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの編集UI)は
+         character_3d.html(ビューア)側に完全移管したため削除した。
+         seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの各変数自体と
+         buildJson()での出力は変更していない(既定値のままintermediate
+         パッケージへ渡り、ビューアの初期値として使われる)。 -->
+
+    <div class="tabpanel acpanel" data-tabpanel="params">
+      <h2>モデル生成パラメータ（試行錯誤用）
+        <button type="button" class="qbtn" data-help="help-params">?</button></h2>
+      <p class="helpText hidden" id="help-params">
+        pipeline.py側にハードコードされていた生成パラメータをここで調整できます。
+        landmarks_ai.json に保存され、次回パイプライン実行時に反映されます。
+        触らなければ全て既定値のまま動作します（各項目に既定値を記載）。</p>
+      <div id="paramsPanel"></div>
+      <div id="outlinePanel"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn" id="paramsResetAll">全て既定値に戻す</button>
+      </div>
+    </div>
+
+    <div class="tabpanel acpanel" data-tabpanel="gen">
+      <h2>JSON</h2>
+      <div class="bar">
+        <button class="btn" id="loadJson">JSON読み込み</button>
+        <button class="btn mint" id="export">landmarks.json 出力</button>
+        <button class="btn" id="copy">JSONをコピー</button>
+        <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
+      </div>
+      <h2 style="margin-top:18px">モデル生成</h2>
+      <div class="bar">
+        <button class="btn mint" id="generateBtn" style="height:48px;font-size:14px">▶ モデル生成してビューアで見る</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="genOverlay" class="hidden">
+    <div class="genTag" id="genTag"><span class="dot"></span><span id="genTagText">GENERATING</span></div>
+    <div style="font-size:15px;color:var(--mint);font-weight:600" id="genStage">準備中…</div>
+    <div style="font-size:34px;font-variant-numeric:tabular-nums" id="genSeconds">0秒</div>
+    <div style="font-size:11.5px;color:var(--mut);max-width:280px" id="genNote">
+      端末内(ブラウザ)だけでモデルを生成しています。解像度が高いほど時間がかかります(数十秒〜数分)。</div>
+    <div id="genError" class="hidden" style="font-size:12px;color:#ff6b6b;max-width:300px"></div>
+  </div>
+
+  <div id="modeChoice" class="hidden" style="max-width:420px;margin:10px auto 0">
+    <p style="font-size:12.5px;color:var(--mut);margin:0 0 12px;text-align:center">モードを選んでください</p>
+    <div class="modeCard mint" id="modeSampleBtn">
+      <b>サンプルモードで開く</b>
+      <span id="modeSampleDesc">同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。</span>
+      <span class="sampleSelectRow"><select id="sampleSelect"></select></span>
+      <span id="modeSampleResetRow" class="hidden" style="margin-top:6px">
+        <button type="button" class="btn sm" id="modeSampleReset" style="flex:0 0 auto;height:28px;font-size:11px">前回のサンプル編集を破棄して初期状態に戻す</button>
+      </span>
+    </div>
+    <div class="modeCard" id="modeNewBtn">
+      <b>新規作成</b>
+      <span>自分のキャラクター画像(正面/側面/背面)をアップロードして最初から作成します。</span>
+    </div>
+    <div class="modeCard" id="modeContinueBtn">
+      <b>前回の続き</b>
+      <span id="modeContinueDesc">前回保存した通常モードの画像・ランドマークを読み込んで再開します。</span>
+    </div>
+  </div>
+
+  <div id="uploadArea" class="hidden">
+    <p class="hint" id="hint">正面/側面/背面の3枚すべてを読み込むと自動で全点を仮配置し、編集画面に進みます。</p>
+
+    <div class="slots">
+      <label class="slot" id="slotFront"><b>正面 front</b><small>タップで選択</small>
+        <input type="file" accept="image/*" data-slot="front"></label>
+      <label class="slot" id="slotSide"><b>側面 side</b><small>タップで選択</small>
+        <input type="file" accept="image/*" data-slot="side"></label>
+      <label class="slot" id="slotBack"><b>背面 back</b><small>タップで選択</small>
+        <input type="file" accept="image/*" data-slot="back"></label>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+// 標準人体プロポーション（このキャラ固有値ではない＝stage_landmarks の STD と同一）
+const STD={head_bottom:0.125,shoulder:0.182,waist:0.375,hip:0.500,knee_frac:0.47,ankle_frac:0.91,elbow_frac:0.47};
+// L=画像左 / R=画像右（pipeline.py の leg_runs と同規約）
+const LM=[
+ {k:"head_top",jp:"頭頂",g:"head",desc:"頭のてっぺん(髪を含めた輪郭の一番上)"},
+ {k:"chin",jp:"あご",g:"head",desc:"あごの先端(顔の輪郭で一番下の点。髪で隠れていても実際の輪郭位置)"},
+ {k:"clavicle_L",jp:"鎖骨L",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
+ {k:"clavicle_R",jp:"鎖骨R",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
+ {k:"shoulder_L",jp:"肩L",g:"arm",desc:"肩関節(腕が胴体に接続する回転軸の位置。腕の付け根の一番外側ではなく、腕がそこを軸に回る点)"},
+ {k:"shoulder_R",jp:"肩R",g:"arm",desc:"肩関節(腕が胴体に接続する回転軸の位置。腕の付け根の一番外側ではなく、腕がそこを軸に回る点)"},
+ {k:"elbow_L",jp:"肘L",g:"arm",desc:"肘関節(腕が曲がる位置)"},
+ {k:"elbow_R",jp:"肘R",g:"arm",desc:"肘関節(腕が曲がる位置)"},
+ {k:"wrist_L",jp:"手首L",g:"arm",desc:"手首関節(手のひらの付け根。指先ではない)"},
+ {k:"wrist_R",jp:"手首R",g:"arm",desc:"手首関節(手のひらの付け根。指先ではない)"},
+ {k:"waist_L",jp:"腰L",g:"torso",desc:"胴が一番くびれている高さの、体の左右の輪郭端(ウエストの一番細い所)"},
+ {k:"waist_R",jp:"腰R",g:"torso",desc:"胴が一番くびれている高さの、体の左右の輪郭端(ウエストの一番細い所)"},
+ {k:"hip",jp:"股",g:"leg",desc:"股(両脚の間、脚の付け根の中心点)"},
+ {k:"knee_L",jp:"膝L",g:"leg",desc:"膝関節(脚が曲がる位置)"},
+ {k:"knee_R",jp:"膝R",g:"leg",desc:"膝関節(脚が曲がる位置)"},
+ {k:"ankle_L",jp:"足首L",g:"leg",desc:"足首関節(すねと足の境目)"},
+ {k:"ankle_R",jp:"足首R",g:"leg",desc:"足首関節(すねと足の境目)"},
+ {k:"toe_L",jp:"つま先L",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
+ {k:"toe_R",jp:"つま先R",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
+];
+const GCOL={head:"#52e0c4",arm:"#ffb454",torso:"#7aa2ff",leg:"#ff6ad5"};
+const LM_GROUP_ORDER=["head","torso","arm","leg"];
+const LM_GROUP_JP={head:"頭部",torso:"胴体",arm:"腕",leg:"脚"};
+const BONES=["hips","torso","chest","neck","head",
+  "clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L",
+  "clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R",
+  "thigh_L","shin_L","foot_L","toe_L","thigh_R","shin_R","foot_R","toe_R"];
+// ボーンの部位グルーピング(アクセサリー取付ボーン選択・境目角度一覧の両方で使う)
+const BONE_GROUPS=[
+  {label:"体幹", bones:["hips","torso","chest","neck","head"]},
+  {label:"左腕", bones:["clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L"]},
+  {label:"右腕", bones:["clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R"]},
+  {label:"左脚", bones:["thigh_L","shin_L","foot_L","toe_L"]},
+  {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
+];
+
+let imgs={front:null,side:null,back:null};
+let curView="front";
+function curImg(){return imgs[curView];}
+let accessories=[], pendingAcc=null, pendingAccEditIdx=null, pendingAccEditOriginal=null;
+const BONE_JP={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
+  clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
+  clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
+  thigh_L:"腿L",shin_L:"すねL",foot_L:"足L",toe_L:"つま先L",
+  thigh_R:"腿R",shin_R:"すねR",foot_R:"足R",toe_R:"つま先R"};
+// アクセサリー取付部位の初期配置を前面ランドマークから求めるためのアンカー
+// (各部位の位置算出方法。anchorFrontPos()参照)。
+const OV_ANCHOR={
+  hips:{mid:["hip"]}, torso:{mid:["waist_L","waist_R"]}, chest:{mid:["clavicle_L","clavicle_R"]},
+  head:{mid:["head_top","chin"]},
+  clavicle_L:{mid:["clavicle_L"]}, clavicle_R:{mid:["clavicle_R"]},
+  upperarm_L:{mid:["shoulder_L","elbow_L"]}, upperarm_R:{mid:["shoulder_R","elbow_R"]},
+  forearm_L:{mid:["elbow_L","wrist_L"]}, forearm_R:{mid:["elbow_R","wrist_R"]},
+  wrist_L:{mid:["wrist_L"]}, wrist_R:{mid:["wrist_R"]},
+  hand_L:{extrap:["elbow_L","wrist_L"]}, hand_R:{extrap:["elbow_R","wrist_R"]},
+  thigh_L:{mid:["hip","knee_L"]}, thigh_R:{mid:["hip","knee_R"]},
+  shin_L:{mid:["knee_L","ankle_L"]}, shin_R:{mid:["knee_R","ankle_R"]},
+  foot_L:{mid:["ankle_L","toe_L"]}, foot_R:{mid:["ankle_R","toe_R"]},
+  toe_L:{mid:["toe_L"]}, toe_R:{mid:["toe_R"]},
+};
+let seamAngles={};
+let seamNoSide={}; // {boneName:true} または {"acc:"+名前:true} = 側面画像を使わない
+let seamSmoothIters=8; // 境界線平滑化の反復回数(atlas.jsのSEAM_DEFAULT_SMOOTHと一致)
+const SEAM_DEFAULT_SMOOTH=8;
+let colorGradWidth=0; // 色のディザ(擬似)グラデーション幅(既定0=無効)
+const COLOR_GRAD_DEFAULT=0;
+// モデル生成パラメータ(js/common.jsのDEFAULT_GEN_PARAMSと値を一致させる。
+// ブラウザ版はvox解像度・間引きライブラリの制約から、Python版より粗い既定値に
+// している。詳細はjs/common.jsのコメント参照)。パラメータタブで数値/
+// チェックボックスを操作するとgenParamsが更新され、書き出したlandmarks_ai.json
+// のgen_paramsに入る。
+const DEFAULT_GEN_PARAMS={
+  body_vox:0.003, acc_vox:0.003,
+  body_decimate:true, body_target_verts:3000,
+  acc_decimate:true, acc_target_verts:1000,
+  psq_head:2.0, psq_torso:2.2, psq_legs:2.2, psq_arms:2.0, psq_hands:3.0, psq_acc:2.2,
+  track_gap:6, track_win:1,
+  body_smooth_iters:0, acc_smooth_iters:0,
+  arm_circle:true, arm_tol:0.06, arm_max_hw:0.2,
+  hand_extrude:true, hand_depth:0.01, hand_max_hw:0.1, hand_len:0.25,
+  subpixel:true,
+  white_thr:240, alpha_dilate:9,
+  band_h:220, band_overlap:40,
+  kb_per_face:200,
+  back_offset_x:0, back_offset_y:0,
+  side_offset_x:0, side_offset_y:0,
+  rigid_soft_width:0,
+};
+// group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
+// (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
+const PARAM_META=[
+ {group:"解像度/軽量化", key:"body_vox", label:"全身のボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
+  desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。大きくすると速く軽くなるが丸みが粗くなる。"},
+ {group:"解像度/軽量化", key:"acc_vox", label:"アクセサリーのボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
+  desc:"ヘッドホン・猫耳・スカート等、個別に彫り出すアクセサリー用の解像度。意味はbody_voxと同じ。"},
+ {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく。"},
+ {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_torso", label:"胴体の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"首〜腰(胸/腹/腰)の断面形状。2に近いほど楕円(丸み)に近づき、大きくすると四角形に近づく(角ばった衣装等で有効な場合がある)。腕/脚が胴体に接続する遷移帯の形状にも使われる。"},
+ {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_legs", label:"脚の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"腰から下(脚)の断面形状。左右対称なので左右で共通の1個の値。意味はpsq_torsoと同じ。"},
+ {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_arms", label:"腕の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"肩→肘→手首の円形断面(arm_circle有効時)に使う指数。左右対称なので左右で共通の1個の値。2に近いほど円形に近く自然な腕になる。"},
+ {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_hands", label:"手の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
+ {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_acc", label:"アクセサリーの断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"髪・帽子・スカート等、個別に彫り出すアクセサリーの断面形状。意味はpsq_torsoと同じ。"},
+ {group:"ノイズ・ガタつき対策", key:"track_gap", label:"輪郭検出のつながりやすさ(ギャップ)", type:"number", min:0, max:30, step:1, unit:"行",
+  desc:"大きくすると装飾線や指の隙間で測定が一瞬途切れても同じ塊として繋がりやすくなる(繋げすぎると別部位まで誤って繋がるリスクもある)。小さくすると途切れやすく、彫り込みが縦に凸凹しやすくなる。"},
+ {group:"ノイズ・ガタつき対策", key:"track_win", label:"横方向のノイズ平滑化幅", type:"number", min:1, max:31, step:2, unit:"行",
+  desc:"幅方向(front/back)のセグメント測定に適用する。大きくすると測定ノイズは減るが細かい起伏も均されて鈍る。小さくすると細部の形状は残るがノイズによる凸凹が出やすい。※奥行き(side計測)には適用されない(顎先のような数行の突出が消えるため)。"},
+ {group:"腕の彫刻", key:"arm_circle", label:"腕をボーンに沿った円筒形にする", type:"checkbox",
+  desc:"ONだと肩→肘→手首の骨線に沿って、front画像の各列で腕の縦(y)方向の太さを測り、それを奥行き(z)に適用した円形断面で彫る(side計測は腕に使わない。腕が板状/胴体並みの厚みになるのを防ぐ)。OFFにすると従来通りside計測の奥行きをそのまま使う。"},
+ {group:"腕の彫刻", key:"arm_tol", label:"(旧方式のパラメータ・現在は未使用)", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
+  desc:"旧・行スキャン方式で使っていた骨線分からの許容距離。現在の列スキャン方式(縦幅を測って奥行きに適用)では使用しない(変更しても効果なし)。"},
+ {group:"腕の彫刻", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
+  desc:"腕の円形断面の半径(縦幅から傾き補正した値)の上限。これを超える列は腕とみなさない(骨線が肩の付け根など胴体内部を通る列を誤って円形化するのを防ぐ)。小さくしすぎると太い袖の腕が拾われなくなる。arm_circleがONの時のみ有効。"},
+ {group:"手の彫刻", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
+  desc:"ONだと手首から先(手)を、side計測の奥行き(その高さの胴体・腰の厚み)ではなく、front絵柄のシルエットをhand_depthの薄い奥行きでそのまま押し出した板として彫る。OFFだと従来通りside計測の奥行きになる。"},
+ {group:"手の彫刻", key:"hand_depth", label:"手の厚み(半分の値)", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)",
+  desc:"手の押し出しの厚みの半分(全厚はこの2倍)。side計測やシルエット幅に関係なく、手の奥行きは常にこの設定値になる。hand_extrudeがONの時のみ有効。"},
+ {group:"手の彫刻", key:"hand_max_hw", label:"手とみなす最大の太さ", type:"number", min:0.01, max:0.15, step:0.005, unit:"(model単位)",
+  desc:"列走査で測った手の縦半幅がこれを超える(=手の線が胴体等の内部を通っている)列は手扱いしない安全弁。arm_max_hwの手版。hand_extrudeがONの時のみ有効。"},
+ {group:"手の彫刻", key:"hand_len", label:"手の長さ(手首から先)", type:"number", min:0.02, max:0.3, step:0.005, unit:"(model単位)",
+  desc:"手首から指方向へ何model単位分を「手」として押し出し扱いにするかの長さ。長すぎると前腕側まで手扱いになり、短すぎると指先が手扱いから外れて胴体側面の奥行きに戻ってしまう。hand_extrudeがONの時のみ有効。"},
+ {group:"ノイズ・ガタつき対策", key:"subpixel", label:"サブピクセル境界補正", type:"checkbox",
+  desc:"ONだと2値マスクの境界を元画像の連続値から線形補間し、整数ピクセル単位の階段を滑らかにする。OFFにすると旧来通り整数ピクセル境界を使う(縦方向の階段が目立ちやすくなる)。"},
+ {group:"背景/しきい値", key:"white_thr", label:"白背景と判定するしきい値", type:"number", min:200, max:255, step:1, unit:"(0-255)",
+  desc:"上げると薄いグレーも背景と判定されやすくなる(白い衣装の淡い陰影を削ってしまうリスクがある)。下げると背景判定が厳しくなり輪郭が太めに残ることがある。prep/carving/accessoriesの3箇所で共通して使う値。"},
+ {group:"背景/しきい値", key:"alpha_dilate", label:"縁の色にじみの膨張量", type:"number", min:0, max:30, step:1, unit:"px",
+  desc:"増やすとテクスチャ縁の透明の隙間(拡大縮小時ににじみが出るのを防ぐ処理)が広がるが、輪郭のディテールがわずかに丸まる。"},
+ {group:"アクセサリーの背景除去", key:"band_h", label:"帯の高さ", type:"number", min:40, max:800, step:10, unit:"px",
+  desc:"垂れた髪のように縦長のアクセサリーの背景除去を帯状に分割する高さ。小さくしすぎると帯の継ぎ目で背景判定が不連続になりやすい。大きくすると根本近くの隙間を局所的に判定する効果が薄れる。"},
+ {group:"アクセサリーの背景除去", key:"band_overlap", label:"帯どうしの重なり", type:"number", min:0, max:200, step:5, unit:"px",
+  desc:"帯の境界付近での判定の不連続を防ぐための重なり幅。band_hより十分小さい値にする。"},
+ {group:"背面/側面ズレ補正", key:"back_offset_x", label:"背面画像 左右ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"背面写真は前面写真とは別に撮影/作画されるため、前面基準の彫り出し/貼り付けにpx単位のズレが残ることがある。正の値で背面の彫り出し/テクスチャ参照位置を右へ、負の値で左へずらす。実際のビューアで見た目を確認しながら調整する。"},
+ {group:"背面/側面ズレ補正", key:"back_offset_y", label:"背面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はback_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"背面/側面ズレ補正", key:"side_offset_x", label:"側面画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"側面写真の奥行き(前後)方向の基準ズレを補正する。正の値で奥行きの参照位置を右へ、負の値で左へずらす。"},
+ {group:"背面/側面ズレ補正", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+];
+// ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): body_smooth_iters/
+// acc_smooth_iters/rigid_soft_width/kb_per_face(Tier1)、body_decimate/
+// body_target_verts/acc_decimate/acc_target_verts(Tier2)は、生成後の
+// character_3d.html(ビューア)側で彫刻をやり直さずライブ編集できるように
+// なったため、このPARAM_META(生成前の設定パネル)からは編集UIを削除した。
+// ただしgenParams自体(DEFAULT_GEN_PARAMSの値)は従来通りbuildJson()経由で
+// intermediateパッケージに含まれ、ビューアの初期値として使われる
+// (データは残す、UIのみ削除)。
+let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
+// カテゴリごとのアコーディオン開閉状態(既定は全部閉じる)。再描画(個別リセット等)を
+// またいで開閉状態を保つため、レンダリング関数の外側に保持する。
+let paramGroupOpen={};
+
+/* ---------- フェーズ0: 2Dプレビュー(パラメータ展開中に効果をその場表示) ---------- */
+// PARAM_META上のグループ名 -> {view:自動切替先, keys:関連パラメータ}。
+// 「純粋な2D画像処理だけで完結する」パラメータ群のみが対象(彫刻/メッシュ
+// 系パラメータのグループはここに含めない)。
+const PREVIEW_GROUPS={
+  "背景/しきい値":{view:"front",keys:["white_thr","alpha_dilate"]},
+  "アクセサリーの背景除去":{view:"front",keys:["band_h","band_overlap"]},
+  "背面/側面ズレ補正":{view:"back",keys:["back_offset_x","back_offset_y","side_offset_x","side_offset_y"]},
+  "ノイズ・ガタつき対策":{view:"front",keys:["track_gap","track_win"]},
+};
+let previewActiveGroup=null; // 現在プレビュー中のPARAM_METAグループ名(展開中のグループ)
+// シルエット外周の輪郭線除去プレビュー用パラメータ(pipeline側には未実装の
+// プレビュー専用機能のため、genParams/landmarks_ai.jsonには含めない)。
+let outlineParams={enabled:false,band_px:6,dark_thr:90};
+const OUTLINE_DEFAULT={band_px:6,dark_thr:90};
+// プレビュー画像のキャッシュ(同一view+パラメータで毎フレーム再計算しない
+// ように、直前の入力をキーにして保持する。white_thr変更のたびに全画素の
+// 背景マスクBFS+bleedをやり直すのはやや重いため)。
+let previewCache={key:null,view:null,canvas:null,w:0,h:0};
+function previewCacheKey(view){
+  return [view, genParams.white_thr, genParams.alpha_dilate, excludeMaskVer,
+    outlineParams.enabled, outlineParams.band_px, outlineParams.dark_thr].join("|");
+}
+function buildPreviewCanvas(view){
+  const img=imgs[view]; if(!img)return null;
+  const key=previewCacheKey(view);
+  if(previewCache.key===key && previewCache.view===view) return previewCache;
+  try{
+    const ex=excludeMask[view]?P3D.excludeMaskToBool(excludeMask[view],img.w,img.h):null;
+    const thr=genParams.white_thr;
+    const loaded=P3D.loadRgbaRemoveWhite(img.el, thr, ex);
+    let bled=P3D.bleedEdges(loaded.rgba, loaded.w, loaded.h, loaded.alpha, genParams.alpha_dilate);
+    if(outlineParams.enabled){
+      const alpha2=new Uint8Array(loaded.w*loaded.h);
+      for(let i=0;i<alpha2.length;i++)alpha2[i]=bled[i*4+3]>0?1:0;
+      bled=P3D.removeSilhouetteOutline(bled, loaded.w, loaded.h, alpha2, outlineParams.band_px, outlineParams.dark_thr);
+    }
+    const c=document.createElement("canvas");c.width=loaded.w;c.height=loaded.h;
+    c.getContext("2d").putImageData(new ImageData(bled,loaded.w,loaded.h),0,0);
+    previewCache={key,view,canvas:c,w:loaded.w,h:loaded.h};
+    return previewCache;
+  }catch(e){ console.error("プレビュー生成に失敗しました",e); return null; }
+}
+// パラメータグループ展開中(またはシルエット輪郭線除去プレビューON)は
+// 「設定値」タブでプレビューを表示する。
+function previewModeActive(){
+  return curTab==="params" && (!!previewActiveGroup || outlineParams.enabled);
+}
+// プレビュー対象view("設定値"タブでの自動切替先)を決める。展開中の
+// パラメータグループの推奨viewを使い、その面の画像が無ければ現在のviewに
+// フォールバックする。
+function previewTargetView(){
+  const group=previewActiveGroup && PREVIEW_GROUPS[previewActiveGroup];
+  const wantView=group?group.view:curView;
+  return imgs[wantView]?wantView:curView;
+}
+function renderOutlinePanel(){
+  const el=$("outlinePanel"); if(!el)return;
+  const changed=outlineParams.band_px!==OUTLINE_DEFAULT.band_px||outlineParams.dark_thr!==OUTLINE_DEFAULT.dark_thr;
+  const isOpen=!!paramGroupOpen["輪郭線除去(プレビュー専用)"];
+  el.innerHTML='<details class="accgroup" data-accgroup="輪郭線除去(プレビュー専用)"'+(isOpen?" open":"")+'>'+
+    '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
+    '<span>シルエット輪郭線の除去(プレビュー専用)</span><span class="accCount">試験機能</span></summary>'+
+    '<div class="accbody">'+
+    '<p class="helpText">線画イラストの外周にできる黒い輪郭線を、前景マスクをNpx収縮した'+
+    '帯の中の暗いピクセルだけ内側の色で塗りのばして消すプレビューです。内部の黒髪・黒服等は'+
+    '対象外(帯の外なので変更されません)。実際のモデル生成には未反映のプレビュー専用機能です。</p>'+
+    '<div class="acform" style="margin-bottom:6px">'+
+    '<label style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px">'+
+    '<span style="color:var(--txt);font-size:12px">有効にする(プレビュー)</span>'+
+    '<input type="checkbox" id="outlineEnabled" '+(outlineParams.enabled?"checked":"")+' style="width:18px;height:18px">'+
+    '</label></div>'+
+    '<div class="acform" style="margin-bottom:6px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">帯の幅(収縮量)</div>'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<input type="range" id="outlineBandRange" value="'+outlineParams.band_px+'" min="1" max="30" step="1" style="flex:1">'+
+    '<input type="number" id="outlineBandNum" value="'+outlineParams.band_px+'" min="1" max="30" step="1" style="width:70px">'+
+    '<span style="color:var(--mut);font-size:10.5px">px</span></div></div>'+
+    '<div class="acform">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">暗さのしきい値(これ未満の輝度を除去対象に)</div>'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<input type="range" id="outlineThrRange" value="'+outlineParams.dark_thr+'" min="0" max="255" step="1" style="flex:1">'+
+    '<input type="number" id="outlineThrNum" value="'+outlineParams.dark_thr+'" min="0" max="255" step="1" style="width:70px">'+
+    '</div></div>'+
+    '</div></details>';
+  const enEl=$("outlineEnabled");
+  enEl.onchange=()=>{ outlineParams.enabled=enEl.checked; renderOutlinePanel(); if(IMG_TABS.includes(curTab))draw(); };
+  const bandR=$("outlineBandRange"), bandN=$("outlineBandNum");
+  const thrR=$("outlineThrRange"), thrN=$("outlineThrNum");
+  const syncBand=v=>{outlineParams.band_px=v;bandR.value=v;bandN.value=v;if(IMG_TABS.includes(curTab))draw();};
+  const syncThr=v=>{outlineParams.dark_thr=v;thrR.value=v;thrN.value=v;if(IMG_TABS.includes(curTab))draw();};
+  bandR.oninput=()=>syncBand(parseInt(bandR.value,10));
+  bandN.onchange=()=>syncBand(Math.max(1,Math.min(30,parseInt(bandN.value,10)||OUTLINE_DEFAULT.band_px)));
+  thrR.oninput=()=>syncThr(parseInt(thrR.value,10));
+  thrN.onchange=()=>syncThr(Math.max(0,Math.min(255,parseInt(thrN.value,10)||OUTLINE_DEFAULT.dark_thr)));
+  const d=el.querySelector("details.accgroup");
+  if(d)d.addEventListener("toggle",()=>{ paramGroupOpen[d.dataset.accgroup]=d.open; });
+}
+function paramGroupChanged(g){
+  return PARAM_META.some(m=>m.group===g && genParams[m.key]!==DEFAULT_GEN_PARAMS[m.key]);
+}
+function buildParamsPanelHtml(){
+  const groups=[]; PARAM_META.forEach(m=>{if(!groups.includes(m.group))groups.push(m.group);});
+  return groups.map(g=>{
+    const itemList=PARAM_META.filter(m=>m.group===g);
+    const items=itemList.map(m=>{
+      const dv=DEFAULT_GEN_PARAMS[m.key];
+      const cur=genParams[m.key];
+      const defTxt="既定値: "+(typeof dv==="boolean"?(dv?"ON":"OFF"):(dv+(m.unit?(" "+m.unit):"")));
+      const resetBtn='<button type="button" class="paramResetOne" data-reset-param="'+m.key+'" title="既定値に戻す" '+
+        'style="flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--line);'+
+        'background:rgba(255,255,255,.05);color:var(--mut);cursor:pointer;font-size:13px">↺</button>';
+      let body;
+      if(m.type==="checkbox"){
+        body='<label style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px">'+
+          '<span style="color:var(--txt);font-size:12px">'+m.label+'</span>'+
+          '<span style="display:flex;align-items:center;gap:6px">'+
+          '<input type="checkbox" data-param="'+m.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px">'+resetBtn+'</span></label>';
+      }else{
+        body='<div style="color:var(--txt);font-size:12px;margin-bottom:6px">'+m.label+'</div>'+
+          '<div style="display:flex;align-items:center;gap:6px">'+
+          '<input type="range" data-param-range="'+m.key+'" value="'+cur+'" min="'+m.min+'" max="'+m.max+'" step="'+m.step+'" style="flex:1;min-width:60px">'+
+          '<input type="number" data-param="'+m.key+'" value="'+cur+'" min="'+m.min+'" max="'+m.max+'" step="'+m.step+'" style="width:78px;flex:0 0 auto">'+
+          (m.unit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+m.unit+'</span>':"")+resetBtn+'</div>';
+      }
+      return '<div class="acform" style="margin-bottom:6px">'+body+
+        '<div style="font-size:10.5px;color:var(--mut)">'+m.desc+' <b style="color:#7aa2ff">('+defTxt+')</b></div>'+
+        '</div>';
+    }).join("");
+    const changed=paramGroupChanged(g), isOpen=!!paramGroupOpen[g];
+    return '<details class="accgroup" data-accgroup="'+g+'"'+(isOpen?" open":"")+'>'+
+      '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
+      '<span>'+g+'</span><span class="accCount">'+itemList.length+'項目</span>'+
+      '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
+      '</summary><div class="accbody">'+items+'</div></details>';
+  }).join("");
+}
+function wireParamsPanelEvents(el){
+  [].forEach.call(el.querySelectorAll("[data-param]"),inp=>{
+    const key=inp.dataset.param;
+    const sync=()=>{
+      const rg=el.querySelector('[data-param-range="'+key+'"]'); if(rg)rg.value=genParams[key];
+    };
+    inp.onchange=()=>{
+      if(inp.type==="checkbox")genParams[key]=inp.checked;
+      else{
+        const n=parseFloat(inp.value);
+        genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
+      }
+      sync();
+      // white_thrはランドマーク配置の基準(analysis.ytop/ybot/cx)にも影響するため
+      // 変更のたびに実際の生成パイプラインと同じ基準に揃え直す
+      if(key==="white_thr"){resyncAnalysisToProfile();draw();}
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-param-range]"),rg=>{
+    const key=rg.dataset.paramRange;
+    rg.oninput=()=>{
+      const n=parseFloat(rg.value);
+      genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
+      const numEl=el.querySelector('[data-param="'+key+'"]'); if(numEl)numEl.value=genParams[key];
+      if(key==="white_thr"){resyncAnalysisToProfile();draw();}
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-reset-param]"),btn=>{
+    btn.onclick=(e)=>{
+      e.preventDefault();
+      const key=btn.dataset.resetParam;
+      genParams[key]=DEFAULT_GEN_PARAMS[key];
+      renderParamsPanel();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-reset-group]"),btn=>{
+    btn.onclick=(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const g=btn.dataset.resetGroup;
+      PARAM_META.forEach(m=>{ if(m.group===g)genParams[m.key]=DEFAULT_GEN_PARAMS[m.key]; });
+      renderParamsPanel();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("details.accgroup"),d=>{
+    d.addEventListener("toggle",()=>{
+      const g=d.dataset.accgroup;
+      paramGroupOpen[g]=d.open;
+      const pg=PREVIEW_GROUPS[g];
+      if(pg){
+        if(d.open){
+          previewActiveGroup=g;
+          if(imgs[pg.view]){curView=pg.view;view={z:1,ox:0,oy:0};syncViewBtns();}
+        }else if(previewActiveGroup===g){
+          previewActiveGroup=null;
+        }
+        if(IMG_TABS.includes(curTab))draw();
+      }
+    });
+  });
+}
+function renderParamsPanel(){
+  const el=$("paramsPanel"); if(!el)return;
+  el.innerHTML=buildParamsPanelHtml();
+  wireParamsPanelEvents(el);
+}
+// 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲を
+// 塗ったオフスクリーンcanvas)。キャラのシルエットに紛れ込む前髪等を
+// マジックツール/ブラシで直接塗って除外する(2026-07-03〜、パーツごとの
+// 幅/奥行き上書きパネルの後継)。
+let excludeMask={front:null,side:null,back:null};
+let excludeMaskVer=0; // 除外マスクが変わるたびに増やし、プレビューキャッシュの無効化に使う
+let exMode="wand", exAction="add";
+let brushCursor=null; // ブラシで塗っている間、現在位置にサイズの円を表示するための画像座標
+let analysis=null, points=null, sel=null, dragPoint=null;
+let view={z:1,ox:0,oy:0};
+
+const $=id=>document.getElementById(id);
+const cvs=$("cvs"), wrap=$("wrap");
+function setMsg(t){ $("msg").textContent=t; }
+
+// 「新規作成」/「サンプルモードで開く」のどちらで今のセッションが始まったか。
+let currentMode=null; // "sample" | "normal"
+
+// ★ビューア(character_3d.html)と行き来しても編集中のデータを失わないための
+// セッション保存(localStorage)。「モデル生成」でビューアへ移る直前に
+// buildJson()と同じ内容を保存し、モード選択画面の「前回の続き」(通常モード)
+// /次回の「サンプルモードで開く」(サンプルモード)で復元する。通常/サンプルで
+// 保存先キーを分け、片方の作業がもう片方を上書きしないようにする。
+// ★2026-07-07: 以前はサンプルモードを「常に同梱データに戻る決定的な状態」
+// として保存対象外にしていたが、サンプルモードで試行錯誤したパラメータ/
+// ランドマーク編集がビューア往復で消えてしまうのは不便との指摘を受け、
+// サンプルモードも自動保存の対象にした(画像本体は常に同梱のimages/*.pngを
+// 使う決定的なものなので保存不要。JSON相当の編集内容のみ保存する)。
+const NORMAL_SESSION_KEY="3dtoolJS_normal_session_v1";
+const SAMPLE_SESSION_KEY="3dtoolJS_sample_session_v1";
+function saveNormalSession(){
+  try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(buildJson())); }
+  catch(e){ console.warn("セッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
+}
+function saveSampleSession(){
+  try{ localStorage.setItem(SAMPLE_SESSION_KEY, JSON.stringify(buildJson())); }
+  catch(e){ console.warn("サンプルセッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
+}
+function imageElementToBlob(imgEl,w,h){
+  return new Promise(res=>{
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    c.getContext("2d").drawImage(imgEl,0,0,w,h);
+    c.toBlob(res,"image/png");
+  });
+}
+async function saveNormalSessionImages(){
+  const blobs={};
+  for(const slot of ["front","side","back"]){
+    const im=imgs[slot];
+    if(im) blobs[slot]=await imageElementToBlob(im.el,im.w,im.h);
+  }
+  try{ await P3D.saveNormalSessionImages(blobs); }
+  catch(e){ console.warn("画像セッション保存に失敗しました:", e); setMsg("画像の自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
+}
+
+// ★常時オートセーブ: 以前は「モデル生成」完了時にしか保存されず、生成前に閉じると
+// 編集内容が失われていた。ランドマーク/パラメータ編集は呼び出し箇所が非常に多く
+// 全箇所にフックを仕込むのは漏れの元なので、変化があれば数秒おきに拾って保存する
+// ポーリング方式にする(内容が前回と同じならbuildJson()の再シリアライズ以外は何もしない)。
+let autosaveInterval=null, lastAutosaveJson=null;
+function startAutosaveLoop(){
+  if(autosaveInterval)return;
+  autosaveInterval=setInterval(()=>{
+    if(!points||(currentMode!=="normal"&&currentMode!=="sample"))return;
+    const json=JSON.stringify(buildJson());
+    if(json===lastAutosaveJson)return;
+    lastAutosaveJson=json;
+    if(currentMode==="normal"){
+      saveNormalSession();
+      saveNormalSessionImages();
+    }else{
+      saveSampleSession(); // 画像は同梱の固定アセットなので保存不要
+    }
+  },4000);
+}
+
+/* ---------- シルエット解析（stage_profile/stage_landmarks のJS移植） ---------- */
+function buildMask(img,W,H,thr){
+  thr=thr||238;
+  const c=document.createElement("canvas");c.width=W;c.height=H;
+  const x=c.getContext("2d");x.drawImage(img,0,0,W,H);
+  const d=x.getImageData(0,0,W,H).data, m=new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2],a=d[i*4+3];
+    m[i]=(a>40 && !(r>thr&&g>thr&&b>thr))?1:0;}
+  return m;
+}
+function rowRuns(mask,W,y,minGap,minLen){
+  minGap=minGap||4;minLen=minLen||0;
+  const out=[];let s=-1,p=-1;
+  for(let x=0;x<W;x++){
+    if(mask[y*W+x]){ if(s<0){s=x;p=x;} else if(x<=p+minGap)p=x; else{ if(p-s>=minLen)out.push([s,p]); s=x;p=x; } }
+  }
+  if(s>=0&&p-s>=minLen)out.push([s,p]);
+  return out;
+}
+function analyze(mask,W,H){
+  let ytop=-1,ybot=-1;
+  for(let y=0;y<H;y++){for(let x=0;x<W;x++)if(mask[y*W+x]){if(ytop<0)ytop=y;ybot=y;break;}}
+  if(ytop<0)return null;
+  const BH=ybot-ytop, NOISE=Math.max(6,Math.round(0.01*BH));
+  const tc=[];
+  for(let f=0.32;f<=0.50;f+=0.012){const y=Math.round(ytop+f*BH),r=rowRuns(mask,W,y,4,NOISE);
+    if(r.length){const big=r.reduce((a,b)=>(b[1]-b[0])>(a[1]-a[0])?b:a);tc.push((big[0]+big[1])/2);}}
+  tc.sort((a,b)=>a-b);const cx=tc.length?tc[tc.length>>1]:W/2;
+  const widthAt=v=>{const y=Math.min(Math.max(Math.round(ytop+v*BH),0),H-1),r=rowRuns(mask,W,y,4,NOISE);
+    if(!r.length)return{full:0,n:0,r:[],y};return{full:r[r.length-1][1]-r[0][0],n:r.length,r,y};};
+  const sm=(a,k)=>{k=k||5;return a.map((_,i)=>{let s=0,c=0;for(let j=-(k>>1);j<=(k>>1);j++){const t=i+j;if(t>=0&&t<a.length){s+=a[t];c++;}}return s/c;});};
+  const vs=[];for(let v=0.06;v<=0.42;v+=0.0018)vs.push(v);
+  const ws=sm(vs.map(v=>widthAt(v).full));
+  let j=0,best=-1;for(let i=0;i<ws.length-1;i++){const d=ws[i+1]-ws[i];if(d>best){best=d;j=i;}}
+  let shoulder_v=vs[j];
+  const pre=Math.min.apply(null,ws.slice(0,j+1)), post=Math.max.apply(null,ws.slice(j,Math.min(j+20,ws.length)));
+  const shoulder_detected=post>1.8*Math.max(pre,1);
+  if(!shoulder_detected)shoulder_v=STD.shoulder;
+  const preFull=widthAt(Math.max(shoulder_v-0.01,0.02)).full;
+  const shoulder_hw=preFull>0?preFull/2:BH*0.10;
+  let merge_end_v=Math.min(shoulder_v+0.20,0.46);
+  for(let v=shoulder_v+0.01;v<=Math.min(shoulder_v+0.30,0.48);v+=0.0025){const w=widthAt(v);if(w.full>0&&w.full<1.5*Math.max(preFull,1)&&w.n<=1){merge_end_v=v;break;}}
+  let waist_v=STD.waist,waist_hw=shoulder_hw*0.75,waist_detected=false,mn=1e9;
+  for(let v=merge_end_v+0.01;v<=0.48;v+=0.0025){const w=widthAt(v);if(w.n===1&&w.full>0&&w.full<mn){mn=w.full;waist_v=v;waist_hw=w.full/2;waist_detected=true;}}
+  let hip_v=STD.hip,hip_detected=false;
+  for(let v=waist_v+0.02;v<=0.62;v+=0.002){const w=widthAt(v);const big=w.r.filter(rr=>rr[1]-rr[0]>NOISE);if(big.length>=2){hip_v=v;hip_detected=true;break;}}
+  return{ytop,ybot,BH,cx,NOISE,mask,W,H,shoulder_v,shoulder_hw,shoulder_detected,merge_end_v,waist_v,waist_hw,waist_detected,hip_v,hip_detected};
+}
+function placeAll(A){
+  const{ytop,BH,cx,W,mask,NOISE}=A, yOf=v=>Math.round(ytop+v*BH), P={};
+  P.head_top=[cx,ytop];
+  const hb=A.shoulder_v*(STD.head_bottom/STD.shoulder);P.chin=[cx,yOf(hb)];
+  const shY=yOf(A.shoulder_v);
+  P.shoulder_L=[cx-A.shoulder_hw,shY];P.shoulder_R=[cx+A.shoulder_hw,shY];
+  P.clavicle_L=[cx-A.shoulder_hw*0.45,shY+BH*0.012];P.clavicle_R=[cx+A.shoulder_hw*0.45,shY+BH*0.012];
+  const armY=yOf((A.shoulder_v+A.merge_end_v)/2);let xl=cx,xr=cx;
+  for(let y=shY;y<=yOf(A.merge_end_v);y++){const r=rowRuns(mask,W,y,4,NOISE);for(const rr of r){if(rr[0]<xl)xl=rr[0];if(rr[1]>xr)xr=rr[1];}}
+  const shL=cx-A.shoulder_hw,shR=cx+A.shoulder_hw;
+  const wrR=shR+0.88*(xr-shR),wrL=shL+0.88*(xl-shL);
+  P.wrist_R=[wrR,armY];P.wrist_L=[wrL,armY];
+  P.elbow_R=[shR+0.5*(wrR-shR),armY];P.elbow_L=[shL+0.5*(wrL-shL),armY];
+  const waY=yOf(A.waist_v);P.waist_L=[cx-A.waist_hw,waY];P.waist_R=[cx+A.waist_hw,waY];
+  P.hip=[cx,yOf(A.hip_v)];
+  const legAt=v=>{const y=yOf(v),r=rowRuns(mask,W,y,4,NOISE).filter(rr=>rr[1]-rr[0]>NOISE);
+    const L=r.filter(rr=>(rr[0]+rr[1])/2<cx),R=r.filter(rr=>(rr[0]+rr[1])/2>=cx);
+    const pick=l=>l.length?l.reduce((a,b)=>(b[1]-b[0])>(a[1]-a[0])?b:a):null;
+    const pl=pick(L),pr=pick(R);
+    return{L:pl?(pl[0]+pl[1])/2:cx-A.shoulder_hw*0.3,R:pr?(pr[0]+pr[1])/2:cx+A.shoulder_hw*0.3,y};};
+  const kv=A.hip_v+STD.knee_frac*(1-A.hip_v),av=A.hip_v+STD.ankle_frac*(1-A.hip_v);
+  const k=legAt(kv),an=legAt(av),to=legAt(0.992);
+  P.knee_L=[k.L,k.y];P.knee_R=[k.R,k.y];P.ankle_L=[an.L,an.y];P.ankle_R=[an.R,an.y];P.toe_L=[to.L,to.y];P.toe_R=[to.R,to.y];
+  const out={};for(const kk in P)out[kk]=[Math.round(P[kk][0]),Math.round(P[kk][1])];
+  return out;
+}
+function deriveFromPoints(P,A){
+  const{ytop,BH}=A, v=y=>(y-ytop)/BH;
+  const sh_v=v((P.shoulder_L[1]+P.shoulder_R[1])/2);
+  const shw=Math.abs(P.shoulder_R[0]-P.shoulder_L[0])/2, waw=Math.abs(P.waist_R[0]-P.waist_L[0])/2;
+  const ef=(s,e,w)=>{const dn=w[0]-s[0],num=e[0]-s[0];return Math.abs(dn)>1e-3?num/dn:STD.elbow_frac;};
+  let efL=ef(P.shoulder_L,P.elbow_L,P.wrist_L),efR=ef(P.shoulder_R,P.elbow_R,P.wrist_R);
+  let elbow_frac=(Math.abs(efL)+Math.abs(efR))/2;if(!(elbow_frac>0.2&&elbow_frac<0.8))elbow_frac=STD.elbow_frac;
+  return{STD,shoulder_v:sh_v,shoulder_hw_px:shw,shoulder_detected:A.shoulder_detected,merge_end_v:A.merge_end_v,
+    waist_v:v((P.waist_L[1]+P.waist_R[1])/2),waist_hw_px:waw,waist_detected:A.waist_detected,
+    hip_v:v(P.hip[1]),hip_detected:A.hip_detected,head_bottom_v:v(P.chin[1]),
+    knee_v:v((P.knee_L[1]+P.knee_R[1])/2),ankle_v:v((P.ankle_L[1]+P.ankle_R[1])/2),elbow_frac};
+}
+function makeAnnotated(img,W,H,pts,maxDim){
+  maxDim=maxDim||1000;const sc=Math.min(1,maxDim/Math.max(W,H)),w=Math.round(W*sc),h=Math.round(H*sc);
+  const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d");x.drawImage(img,0,0,w,h);
+  x.font="bold 13px sans-serif";x.textAlign="left";x.textBaseline="middle";
+  LM.forEach((d,i)=>{const p=pts[d.k];if(!p)return;const px=p[0]*sc,py=p[1]*sc;
+    x.strokeStyle="rgba(255,45,85,.95)";x.lineWidth=1.5;
+    x.beginPath();x.moveTo(px-7,py);x.lineTo(px+7,py);x.moveTo(px,py-7);x.lineTo(px,py+7);x.stroke();
+    x.beginPath();x.arc(px,py,2.2,0,7);x.fillStyle="rgba(255,45,85,.95)";x.fill();
+    x.fillStyle="#00e0ff";x.fillText(String(i+1),px+8,py-7);});
+  return c.toDataURL("image/jpeg",0.9);
+}
+function cleanJpeg(img,W,H,maxDim){
+  maxDim=maxDim||800;const sc=Math.min(1,maxDim/Math.max(W,H)),w=Math.round(W*sc),h=Math.round(H*sc);
+  const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);
+  return c.toDataURL("image/jpeg",0.85);
+}
+
+/* ---------- 描画（view = ズーム/パン対応） ---------- */
+function drawCross(x,px,py,on,color){
+  const r=on?9:6.5;
+  x.lineWidth=on?3.4:2.4;x.strokeStyle="rgba(0,0,0,.65)";
+  x.beginPath();x.moveTo(px-r,py);x.lineTo(px+r,py);x.moveTo(px,py-r);x.lineTo(px,py+r);x.stroke();
+  x.lineWidth=on?1.8:1.2;x.strokeStyle=on?"#ffe14d":color;
+  x.beginPath();x.moveTo(px-r,py);x.lineTo(px+r,py);x.moveTo(px,py-r);x.lineTo(px,py+r);x.stroke();
+}
+function drawLabel(x,text,px,py,color){
+  x.font="bold 11px sans-serif";x.textAlign="center";
+  x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.75)";x.strokeText(text,px,py);
+  x.fillStyle=color;x.fillText(text,px,py);
+}
+// アクセサリーごとに枠線/点の色を変える(全パーツ同色だと見分けが付かない
+// との指摘のため)。パレットを順番に割り当て、編集中(pendingAcc)は
+// 選択ハイライトと同じ色で常に区別できるようにする。
+const ACC_COLOR_PALETTE=["#7aa2ff","#ff6ad5","#52e0c4","#ffb454","#ff8a8a","#b48cff","#8cffb4","#5be6ff"];
+const ACC_PENDING_COLOR="#ffe14d";
+function accColorFor(idx){ return ACC_COLOR_PALETTE[idx % ACC_COLOR_PALETTE.length]; }
+
+/* ---------- 汎用「操作可能な点」レジストリ ----------
+   19個の解剖学的ランドマーク(front専用)・アクセサリー範囲(可変N点多角形)を、
+   タップ選択/ドラッグ/十字キー微調整という同じ操作で扱えるように統一する。 */
+function getInteractivePoints(view){
+  // タブごとに「そのタブの専門」の点だけを対象にする(表示・タップ選択・ドラッグ
+  // すべて共通でこの一覧を使うため、ここで絞ればマークタブでアクセサリー点に
+  // 触れてしまう、除外タブにランドマークが写り込む等の混線を防げる)。
+  const out=[];
+  if(curTab==="lm" && view==="front"){
+    LM.forEach(d=>{const p=points[d.k];if(!p)return;
+      out.push({key:"lm:"+d.k, pos:p, set:np=>{points[d.k]=np;}, color:GCOL[d.g], label:d.jp});});
+  }
+  if(curTab==="ac"){
+    const pushRegionPts=(regions,prefix,name,color)=>{
+      Object.keys(regions).forEach(v=>{if(v!==view)return;
+        const r=regions[v];
+        r.points.forEach((p,i)=>{
+          out.push({key:prefix+":"+v+":"+i, pos:p, set:np=>{r.points[i]=np;}, color, label:name+"-"+(i+1)});
+        });});
+    };
+    if(pendingAcc)pushRegionPts(pendingAcc.regions,"pend","新規",ACC_PENDING_COLOR);
+    accessories.forEach((a,i)=>pushRegionPts(a.regions,"acc"+i,a.name||"?",accColorFor(i)));
+  }
+  return out;
+}
+function drawRegionOutlines(x,sc){
+  const toPx=p=>[p[0]*sc+view.ox, p[1]*sc+view.oy];
+  const drawRegions=(regions,color)=>{
+    Object.keys(regions).forEach(v=>{if(v!==curView)return;
+      const pts=regions[v].points; if(!pts||pts.length<2)return;
+      x.save();x.lineWidth=2;x.strokeStyle=color;x.beginPath();
+      const p0=toPx(pts[0]);x.moveTo(p0[0],p0[1]);
+      for(let i=1;i<pts.length;i++){const p=toPx(pts[i]);x.lineTo(p[0],p[1]);}
+      x.closePath();x.stroke();x.restore();
+    });
+  };
+  if(pendingAcc)drawRegions(pendingAcc.regions,ACC_PENDING_COLOR);
+  accessories.forEach((a,i)=>drawRegions(a.regions,accColorFor(i)));
+}
+// ボーンタブ用: 現在のランドマークからP3D.computePivots()を呼び、
+// 生成時と同じロジックでボーン位置(モデル座標)を求める(表示のみ、調整不可)。
+function computeBonePivots(){
+  if(!analysis||!points) return null;
+  try{
+    const derivedBase=deriveFromPoints(points,analysis);
+    const derivedLandmarks=P3D.buildDerivedLandmarks(points,analysis,derivedBase);
+    return P3D.computePivots(analysis.mask,analysis.W,analysis.H,analysis.ytop,analysis.ybot,analysis.cx,derivedLandmarks);
+  }catch(e){ console.error("computeBonePivots failed",e); return null; }
+}
+function drawBoneOverlay(x,sc,bp){
+  bp=bp||computeBonePivots();
+  if(!bp)return;
+  const pivots=Object.assign({},bp.pivots,bp.extraPivots);
+  const BH=analysis.BH, CX=analysis.cx, YBOT=analysis.ybot;
+  function toPx(p){ return [p[0]*BH+CX, YBOT-p[1]*BH]; }
+  function scPt(p){ const q=toPx(p); return [q[0]*sc+view.ox, q[1]*sc+view.oy]; }
+  x.save();
+  P3D.BONES.forEach(b=>{
+    const par=P3D.BHIER[b];
+    if(!par||!pivots[par]||!pivots[b])return;
+    const a=scPt(pivots[par]), c=scPt(pivots[b]);
+    x.lineWidth=3.5;x.strokeStyle="rgba(0,0,0,.55)";
+    x.beginPath();x.moveTo(a[0],a[1]);x.lineTo(c[0],c[1]);x.stroke();
+    x.lineWidth=1.6;x.strokeStyle="#ffe14d";
+    x.beginPath();x.moveTo(a[0],a[1]);x.lineTo(c[0],c[1]);x.stroke();
+  });
+  Object.keys(pivots).forEach(b=>{
+    const p=scPt(pivots[b]);
+    x.fillStyle="rgba(0,0,0,.6)";x.beginPath();x.arc(p[0],p[1],4.5,0,Math.PI*2);x.fill();
+    x.fillStyle="#ff5ad1";x.beginPath();x.arc(p[0],p[1],3,0,Math.PI*2);x.fill();
+  });
+  x.restore();
+}
+// 「マーク」「パーツ＋」タブ共通のボーン表示/範囲トグル状態(両タブの
+// チェックボックスを同じ状態に同期させる=同じオーバーレイの見せ方を共有)。
+let boneOverlayOn=false, boneRegionOn=false;
+// ボーン範囲(Voronoi風)オーバーレイ用の粗いグリッド解像度(front限定MVP)。
+const BONE_REGION_GRID_W=40, BONE_REGION_GRID_H=60;
+const BONE_REGION_COLORS={};
+(function(){
+  P3D.BONES.forEach((b,i)=>{ BONE_REGION_COLORS[b]="hsl("+Math.round(i*360/P3D.BONES.length)+",70%,55%)"; });
+})();
+function pointSegDist2(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay, len2=dx*dx+dy*dy;
+  let t=len2>1e-9?((px-ax)*dx+(py-ay)*dy)/len2:0;
+  t=Math.max(0,Math.min(1,t));
+  const cx=ax+t*dx, cy=ay+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy);
+}
+// front限定MVP: computeBonePivots()の座標系(model単位)をpxに変換した
+// 骨線分ごとに、粗いグリッド(既定40x60)の各セル中心から最も近い骨線分を
+// 求めてその骨の色で塗る、Voronoi風の担当領域プレビュー。フル解像度で
+// 毎フレーム計算しないことで負荷を抑える(セル単位のfillRectのみ)。
+function drawBoneRegionOverlay(x,sc,bp){
+  bp=bp||computeBonePivots();
+  if(!bp||!imgs.front)return;
+  const pivots=Object.assign({},bp.pivots,bp.extraPivots);
+  const BH=analysis.BH, CX=analysis.cx, YBOT=analysis.ybot;
+  const toPx=p=>[p[0]*BH+CX, YBOT-p[1]*BH];
+  const segs=[];
+  P3D.BONES.forEach(b=>{
+    const par=P3D.BHIER[b];
+    if(!par||!pivots[par]||!pivots[b])return;
+    const a=toPx(pivots[par]), c=toPx(pivots[b]);
+    segs.push({a,c,bone:b});
+  });
+  if(!segs.length)return;
+  const W=imgs.front.w, H=imgs.front.h;
+  const cellW=W/BONE_REGION_GRID_W, cellH=H/BONE_REGION_GRID_H;
+  x.save();x.globalAlpha=0.30;
+  for(let gy=0; gy<BONE_REGION_GRID_H; gy++){
+    const py=(gy+0.5)*cellH;
+    for(let gx=0; gx<BONE_REGION_GRID_W; gx++){
+      const px=(gx+0.5)*cellW;
+      let best=null, bestD=Infinity;
+      for(let i=0;i<segs.length;i++){
+        const s=segs[i];
+        const d=pointSegDist2(px,py,s.a[0],s.a[1],s.c[0],s.c[1]);
+        if(d<bestD){bestD=d;best=s;}
+      }
+      if(!best)continue;
+      const sx=gx*cellW*sc+view.ox, sy=gy*cellH*sc+view.oy;
+      x.fillStyle=BONE_REGION_COLORS[best.bone]||"#7aa2ff";
+      x.fillRect(sx,sy,cellW*sc+0.5,cellH*sc+0.5);
+    }
+  }
+  x.restore();
+}
+// フェーズ0: パラメータタブでの2Dプレビュー。展開中のグループ(または輪郭線
+// 除去プレビュー)に応じて、背景除去+縁の色にじみ(+輪郭線除去)を適用した
+// 加工後の画像を代わりに表示する。
+function drawPreviewLayer(x,sc,el,w,h){
+  const pv=previewTargetView();
+  let offX=0,offY=0;
+  if(pv==="back"){offX=genParams.back_offset_x||0;offY=genParams.back_offset_y||0;}
+  if(pv==="side"){offX=genParams.side_offset_x||0;offY=genParams.side_offset_y||0;}
+  const pc=buildPreviewCanvas(pv);
+  if(pc){
+    x.drawImage(pc.canvas,0,0,pc.w,pc.h, view.ox+offX*sc,view.oy+offY*sc, pc.w*sc, pc.h*sc);
+  }else{
+    x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  }
+  if(previewActiveGroup==="アクセサリーの背景除去"){
+    // band_h/band_overlapの帯の切れ目を目安線として重ねる(実際の
+    // アクセサリー背景除去は個別パーツ単位の帯分割処理だが、ここでは
+    // 「どの高さで帯が切り替わるか」だけを可視化する簡易プレビュー)。
+    const bandH=Math.max(10,genParams.band_h||220), overlap=Math.min(genParams.band_overlap||0,bandH-1);
+    const step=Math.max(1,bandH-overlap);
+    x.save();x.setLineDash([6,4]);x.lineWidth=1.5;x.strokeStyle="rgba(122,162,255,.85)";
+    for(let by=0; by<h; by+=step){
+      const py=by*sc+view.oy;
+      x.beginPath();x.moveTo(view.ox,py);x.lineTo(view.ox+w*sc,py);x.stroke();
+    }
+    x.restore();
+  }
+  x.save();x.font="bold 11px sans-serif";x.fillStyle="#39ff9e";x.textAlign="left";
+  x.fillText("プレビュー中: "+(previewActiveGroup||"輪郭線除去")+"("+VIEWJP[pv]+")",8,16);
+  x.restore();
+}
+// 除外マスクの赤い塗りは「領域」タブでの作業対象なので、そのタブでのみ見せる
+// (他タブで常に赤く覆われていると、そのタブ本来の要素の邪魔になるため)。
+function drawExcludeMaskOverlay(x,sc,w,h){
+  const ec=excludeMask[curView];
+  if(!ec||curTab!=="ex")return;
+  x.save();x.globalAlpha=0.45;
+  x.drawImage(ec.canvas,0,0,ec.canvas.width,ec.canvas.height, view.ox,view.oy, w*sc, h*sc);
+  x.restore();
+}
+// マーク/パーツ＋タブそれぞれの専門の点だけをgetInteractivePoints側で絞っている。
+// 領域(除外)タブでは何も重ねない。
+function drawLandmarkPoints(x,sc){
+  if(curTab==="ac")drawRegionOutlines(x,sc);
+  getInteractivePoints(curView).forEach(p=>{
+    const px=p.pos[0]*sc+view.ox, py=p.pos[1]*sc+view.oy, on=sel===p.key;
+    drawCross(x,px,py,on,p.color);
+    drawLabel(x,p.label,px,py-13,on?"#ffe14d":p.color);
+  });
+}
+// 「マーク」「パーツ＋」タブ用のボーン表示/範囲トグル(既存のボーン専用
+// タブに切り替えなくても、ランドマーク/アクセサリー配置中に確認できる)。
+function drawBoneOverlaysIfEnabled(x,sc){
+  if((curTab!=="lm"&&curTab!=="ac")||curView!=="front")return;
+  // 両方ONの場合にcomputeBonePivots()を2回計算しないよう、1回だけ求めて共有する
+  // (ドラッグ中はdraw()が毎pointermoveで呼ばれるため、二重計算の削減効果が大きい)。
+  const sharedBp=(boneOverlayOn||boneRegionOn)?computeBonePivots():null;
+  if(boneOverlayOn)drawBoneOverlay(x,sc,sharedBp);
+  if(boneRegionOn)drawBoneRegionOverlay(x,sc,sharedBp);
+}
+function drawBrushCursorIfActive(x,sc){
+  if(!brushCursor||curTab!=="ex"||exMode!=="brush")return;
+  const bx=brushCursor[0]*sc+view.ox, by=brushCursor[1]*sc+view.oy;
+  const br=parseInt($("exSlider").value,10)*sc;
+  x.save();x.beginPath();x.arc(bx,by,br,0,Math.PI*2);
+  x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.65)";x.stroke();
+  x.lineWidth=1.5;x.strokeStyle="#ffe14d";x.stroke();
+  x.restore();
+}
+function draw(){
+  const previewOn=previewModeActive();
+  const CI=previewOn?imgs[previewTargetView()]:curImg();
+  if(!CI||!points)return;
+  const{el,w,h}=CI, cw=wrap.clientWidth||360, base=cw/w;
+  cvs.width=cw; cvs.height=Math.round(h*base);
+  const x=cvs.getContext("2d"); x.clearRect(0,0,cvs.width,cvs.height);
+  const sc=base*view.z;
+  if(previewOn) drawPreviewLayer(x,sc,el,w,h);
+  else x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  drawExcludeMaskOverlay(x,sc,w,h);
+  if(!previewOn) drawLandmarkPoints(x,sc);
+  drawBoneOverlaysIfEnabled(x,sc);
+  drawBrushCursorIfActive(x,sc);
+}
+
+/* ---------- ファイル読み込み ---------- */
+function loadImg(file,slot){
+  const r=new FileReader();
+  r.onload=()=>{
+    const el=new Image();
+    el.onload=()=>{
+      imgs[slot]={el,w:el.naturalWidth,h:el.naturalHeight};
+      $("slot"+slot[0].toUpperCase()+slot.slice(1)).classList.add("on");
+      $("slot"+slot[0].toUpperCase()+slot.slice(1)).querySelector("small").textContent="✓ 読込済";
+      previewCache={key:null,view:null,canvas:null,w:0,h:0};
+      syncViewBtns();
+      // 正面だけで編集画面(editor)に遷移すると側面/背面を読み込む前に画面が
+      // 切り替わってしまう(「生成」には結局3枚とも必須)。3枚とも読込済みに
+      // なってから初めて自動仮配置して編集画面へ進む。
+      if(imgs.front&&imgs.side&&imgs.back)runAnalyze();
+    };
+    el.onerror=()=>{ setMsg("画像の読込に失敗しました("+slot+")。別のファイルをお試しください。"); };
+    el.src=r.result;
+  };
+  r.onerror=()=>{ setMsg("ファイルの読込に失敗しました("+slot+")。"); };
+  r.readAsDataURL(file);
+}
+function runAnalyze(){
+  const{el,w,h}=imgs.front, mask=buildMask(el,w,h), A=analyze(mask,w,h);
+  if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
+  analysis=A;points=placeAll(A);sel=null;curView="front";
+  $("editor").classList.remove("hidden");$("hint").classList.add("hidden");
+  renderAcList();syncViewBtns();
+  resyncAnalysisToProfile();
+  draw();
+  setMsg("前処理OK  shoulder v="+A.shoulder_v.toFixed(3)+"(det="+A.shoulder_detected+") waist v="+A.waist_v.toFixed(3)+" hip v="+A.hip_v.toFixed(3));
+}
+// ★2026-07-04: ランドマーク配置用のanalysis.ytop/ybot/cx(旧buildMask、しきい値
+// 固定238・除外マスク非対応)と、実際の生成パイプラインが使うprofile(genParams.
+// white_thr・除外マスク反映)が食い違い、ボーン/腕/手の位置が実メッシュとズレる
+// 原因になっていた。ここで両者を同じ2値化・同じ除外マスクに揃えて
+// analysis.ytop/ybot/BH/cxを上書きする(auto placement由来のshoulder_v等はそのまま)。
+function resyncAnalysisToProfile(){
+  if(!analysis || !imgs.front) return;
+  const {el,w,h}=imgs.front;
+  const thr=(genParams&&genParams.white_thr!==undefined)?genParams.white_thr:238;
+  const exFront=excludeMask.front?P3D.excludeMaskToBool(excludeMask.front,w,h):null;
+  const alpha=P3D.loadRgbaRemoveWhite(el, thr, exFront).alpha;
+  const fp=P3D.frontProfileOnly(alpha, w, h);
+  analysis.ytop=fp.YTOP; analysis.ybot=fp.YBOT; analysis.BH=fp.YBOT-fp.YTOP; analysis.cx=fp.CX;
+}
+
+/* ---------- 操作: 1本指=点ドラッグ または パン, 2本指=ピンチズーム ---------- */
+function canvasPt(e){const rc=cvs.getBoundingClientRect();
+  return[(e.clientX-rc.left)*(cvs.width/rc.width),(e.clientY-rc.top)*(cvs.height/rc.height)];}
+function toImg(e){const c=canvasPt(e),base=(wrap.clientWidth||360)/curImg().w,sc=base*view.z;
+  return[(c[0]-view.ox)/sc,(c[1]-view.oy)/sc];}
+
+/* ---------- 除外マスク(マジックツール/ブラシで塗る、シルエット測定から
+   除外する範囲)。正面/側面/背面ごとに、その画像と同じ解像度のオフスクリーン
+   canvasを持つ。除外部分=不透明(赤、表示用)、非除外=透明。 ---------- */
+function ensureExcludeCanvas(v){
+  if(excludeMask[v])return excludeMask[v];
+  const img=imgs[v]; if(!img)return null;
+  const c=document.createElement("canvas");c.width=img.w;c.height=img.h;
+  excludeMask[v]={canvas:c,ctx:c.getContext("2d")};
+  return excludeMask[v];
+}
+function paintBrush(v,px,py,radius,add){
+  const ec=ensureExcludeCanvas(v); if(!ec)return;
+  ec.ctx.save();
+  ec.ctx.globalCompositeOperation=add?"source-over":"destination-out";
+  ec.ctx.fillStyle="rgba(255,40,40,1)";
+  ec.ctx.beginPath();ec.ctx.arc(px,py,radius,0,Math.PI*2);ec.ctx.fill();
+  ec.ctx.restore();
+  excludeMaskVer++;
+}
+function floodFillSelect(v,x0,y0,tolerance){
+  // タップした点から色の近い(許容誤差以内)連続領域を選択する(マジック
+  // ツール)。シルエット(ink)の外には広がらない。
+  const img=imgs[v]; if(!img)return null;
+  const w=img.w,h=img.h;
+  if(x0<0||y0<0||x0>=w||y0>=h)return null;
+  if(!img._rgba){
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    const ctx=c.getContext("2d");ctx.drawImage(img.el,0,0,w,h);
+    img._rgba=ctx.getImageData(0,0,w,h).data;
+  }
+  if(!img._ink)img._ink=buildMask(img.el,w,h);
+  const rgba=img._rgba, ink=img._ink;
+  const idx0=y0*w+x0;
+  if(!ink[idx0])return null; // シルエットの外をタップした
+  const r0=rgba[idx0*4],g0=rgba[idx0*4+1],b0=rgba[idx0*4+2];
+  const tol2=tolerance*tolerance*3;
+  const visited=new Uint8Array(w*h);
+  const stack=[idx0];visited[idx0]=1;
+  const selected=[];
+  while(stack.length){
+    const idx=stack.pop();selected.push(idx);
+    const x=idx%w, y=(idx/w)|0;
+    const nbrs=(x>0?[[idx-1]]:[]).concat(x<w-1?[[idx+1]]:[],y>0?[[idx-w]]:[],y<h-1?[[idx+w]]:[]);
+    for(const[nidx] of nbrs){
+      if(visited[nidx]||!ink[nidx])continue;
+      const o=nidx*4, dr=rgba[o]-r0, dg=rgba[o+1]-g0, db=rgba[o+2]-b0;
+      if(dr*dr+dg*dg+db*db<=tol2){visited[nidx]=1;stack.push(nidx);}
+    }
+  }
+  return{w,h,indices:selected};
+}
+function applyExcludeSelection(v,sel,add){
+  if(!sel)return;
+  const ec=ensureExcludeCanvas(v); if(!ec)return;
+  const imgData=ec.ctx.getImageData(0,0,sel.w,sel.h), data=imgData.data;
+  for(const idx of sel.indices){
+    const o=idx*4;
+    if(add){data[o]=255;data[o+1]=40;data[o+2]=40;data[o+3]=255;}
+    else{data[o+3]=0;}
+  }
+  ec.ctx.putImageData(imgData,0,0);
+  excludeMaskVer++;
+}
+// 除外マスクの元に戻す(直近5操作、面をまたいで通しで管理)。ブラシは
+// ひとストローク単位(pointerdown時に1回だけ)、マジックツール/全解除は
+// 1タップ/1クリックごとにスナップショットを取る。
+let exUndo=[];
+const EX_UNDO_MAX=5;
+function exSnapshot(v){
+  const existed=!!excludeMask[v];
+  const imgData=existed?excludeMask[v].ctx.getImageData(0,0,excludeMask[v].canvas.width,excludeMask[v].canvas.height):null;
+  exUndo.push({view:v,existed,imgData});
+  if(exUndo.length>EX_UNDO_MAX)exUndo.shift();
+}
+function exUndoLast(){
+  const last=exUndo.pop();
+  if(!last){setMsg("これ以上元に戻せません。");return;}
+  if(!last.existed){
+    excludeMask[last.view]=null;
+  }else{
+    const ec=ensureExcludeCanvas(last.view);
+    if(ec)ec.ctx.putImageData(last.imgData,0,0);
+  }
+  excludeMaskVer++;
+  if(last.view===curView)draw();
+  setMsg(VIEWJP[last.view]+"の除外操作を1つ元に戻しました(残り"+exUndo.length+"回分)。");
+}
+const ptrs=new Map(); let ptrMode=null,lastX=0,lastY=0,pinchD=0;
+let pointsLocked=false; // trueの間は画像上のタップ/ドラッグが常にパンになり、
+                        // 点には触れない(拡大/縮小・位置合わせ中に誤って
+                        // 点を動かしてしまう事故を防ぐ)。
+function _mid(){const v=[...ptrs.values()];return[(v[0].x+v[1].x)/2,(v[0].y+v[1].y)/2];}
+function _dist(){const v=[...ptrs.values()];return Math.hypot(v[0].x-v[1].x,v[0].y-v[1].y);}
+cvs.addEventListener("pointerdown",e=>{
+  if(!points)return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  try{cvs.setPointerCapture(e.pointerId);}catch(_){}
+  if(ptrs.size===1){
+    if(curTab==="ex"&&!pointsLocked){
+      const p=toImg(e), px=Math.round(p[0]), py=Math.round(p[1]);
+      if(exMode==="brush"){
+        ptrMode="paint";
+        brushCursor=[px,py];
+        exSnapshot(curView); // ひとストローク単位で1回だけ記録
+        paintBrush(curView,px,py,parseInt($("exSlider").value,10),exAction==="add");
+        draw();
+      }else{
+        ptrMode=null;
+        const s=floodFillSelect(curView,px,py,parseInt($("exSlider").value,10));
+        if(s){exSnapshot(curView);applyExcludeSelection(curView,s,exAction==="add");}
+        else setMsg("シルエットの外をタップしました。キャラクターの上をタップしてください。");
+        draw();
+      }
+      return;
+    }
+    let near=null,nd=1e9;
+    if(!pointsLocked){
+      const p=toImg(e);
+      const pts=getInteractivePoints(curView);
+      pts.forEach(pp=>{const dd=Math.hypot(pp.pos[0]-p[0],pp.pos[1]-p[1]);if(dd<nd){nd=dd;near=pp;}});
+    }
+    const sc=((wrap.clientWidth||360)/curImg().w)*view.z;
+    if(near&&nd<20/sc){ptrMode="point";dragPoint=near;sel=near.key;syncChips();draw();}
+    else{ptrMode="pan";lastX=e.clientX;lastY=e.clientY;}
+  }else if(ptrs.size===2){ptrMode="pinch";pinchD=_dist();dragPoint=null;}
+});
+cvs.addEventListener("pointermove",e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrMode==="pinch"&&ptrs.size>=2){
+    const d=_dist();
+    if(pinchD>0){const rc=cvs.getBoundingClientRect(),m=_mid();
+      const mx=(m[0]-rc.left)*(cvs.width/rc.width),my=(m[1]-rc.top)*(cvs.height/rc.height);
+      const base=(wrap.clientWidth||360)/curImg().w,z0=view.z;let z1=z0*d/pinchD;z1=Math.max(0.5,Math.min(8,z1));
+      const imx=(mx-view.ox)/(base*z0),imy=(my-view.oy)/(base*z0);
+      view.z=z1;view.ox=mx-imx*base*z1;view.oy=my-imy*base*z1;draw();}
+    pinchD=d;
+  }else if(ptrMode==="paint"){
+    const p=toImg(e);
+    brushCursor=[Math.round(p[0]),Math.round(p[1])];
+    paintBrush(curView,brushCursor[0],brushCursor[1],parseInt($("exSlider").value,10),exAction==="add");
+    draw();
+  }else if(ptrMode==="point"&&dragPoint){
+    const p=toImg(e);dragPoint.set([Math.round(p[0]),Math.round(p[1])]);draw();
+  }else if(ptrMode==="pan"){
+    view.ox+=(e.clientX-lastX);view.oy+=(e.clientY-lastY);lastX=e.clientX;lastY=e.clientY;draw();
+  }
+});
+function endPtr(e){ptrs.delete(e.pointerId);
+  if(ptrs.size===0){ ptrMode=null;dragPoint=null;
+    if(brushCursor){brushCursor=null;draw();} }
+  else if(ptrs.size===1){const v=[...ptrs.values()][0];ptrMode="pan";lastX=v.x;lastY=v.y;}
+  else if(ptrs.size>=2){pinchD=_dist();}}
+cvs.addEventListener("pointerup",endPtr);
+cvs.addEventListener("pointercancel",endPtr);
+addEventListener("resize",()=>{if(points)draw();});
+
+/* ---------- 出力 ---------- */
+function buildJson(){
+  const w=imgs.front.w,h=imgs.front.h,points_px={};
+  LM.forEach(d=>{points_px[d.k]={img:"front",x:points[d.k][0],y:points[d.k][1]};});
+  return{version:2,generator:"ai-landmark-tool",
+    image:{front:{w,h,ytop:analysis.ytop,ybot:analysis.ybot,cx:Math.round(analysis.cx)},
+      side:imgs.side?{w:imgs.side.w,h:imgs.side.h}:null,back:imgs.back?{w:imgs.back.w,h:imgs.back.h}:null},
+    points_px,derived:deriveFromPoints(points,analysis),
+    accessories:accessories.map(a=>({name:a.name,mode:a.mode,bones:a.bones,
+      regions:Object.keys(a.regions).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{})})),
+    exclude_masks:(function(){
+      const out={};
+      ["front","side","back"].forEach(v=>{
+        if(excludeMask[v])out[v]=excludeMask[v].canvas.toDataURL("image/png");
+      });
+      return out;
+    })(),
+    seam_angles:Object.assign({},seamAngles),
+    seam_no_side:Object.assign({},seamNoSide),
+    seam_smooth_iters:seamSmoothIters,
+    color_grad_width:colorGradWidth,
+    gen_params:Object.assign({},genParams)};
+}
+function exportJson(){
+  if(!points||!analysis)return;
+  try{
+    const str=JSON.stringify(buildJson(),null,1),blob=new Blob([str],{type:"application/json"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="landmarks_ai.json";
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    setMsg("landmarks_ai.json を書き出しました。失敗する場合は「コピー」を使ってください。");
+  }catch(e){
+    console.warn("landmarks_ai.json の書き出しに失敗しました:", e);
+    setMsg("書き出しに失敗しました。「コピー」をお試しください。");
+  }
+}
+async function copyJson(){
+  if(!points||!analysis)return;
+  const str=JSON.stringify(buildJson(),null,1);
+  try{await navigator.clipboard.writeText(str);setMsg("JSONをコピーしました。landmarks_ai.json として保存してください。");}
+  catch(_){const t=document.createElement("textarea");t.value=str;document.body.appendChild(t);t.select();
+    try{document.execCommand("copy");setMsg("JSONをコピーしました。");}catch(__){setMsg("コピー不可。出力ボタンをお試しください。");}t.remove();}
+}
+function applyLoadedJson(d){
+  if(!points){setMsg("先に正面画像を読み込んでください。");return;}
+  if(d.points_px){
+    LM.forEach(lm=>{const p=d.points_px[lm.k];if(p)points[lm.k]=[p.x,p.y];});
+  }
+  accessories=(d.accessories||[]).map(a=>({
+    name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
+    regions:Object.keys(a.regions||{}).reduce((o,v)=>{
+      const pts=a.regions[v]&&a.regions[v].points;
+      if(pts&&pts.length)o[v]={points:pts.map(p=>[p[0],p[1]])};
+      return o;
+    },{})
+  }));
+  seamAngles=Object.assign({},d.seam_angles||{});
+  seamNoSide=Object.assign({},d.seam_no_side||{});
+  seamSmoothIters=(d.seam_smooth_iters!==undefined)?d.seam_smooth_iters:SEAM_DEFAULT_SMOOTH;
+  const seamSmoothEl=$("seamSmoothVal"); if(seamSmoothEl) seamSmoothEl.value=seamSmoothIters;
+  const seamSmoothSl=$("seamSmoothSlider"); if(seamSmoothSl) seamSmoothSl.value=seamSmoothIters;
+  colorGradWidth=(d.color_grad_width!==undefined)?d.color_grad_width:COLOR_GRAD_DEFAULT;
+  const colorGradEl=$("colorGradVal"); if(colorGradEl) colorGradEl.value=colorGradWidth;
+  const colorGradSl=$("colorGradSlider"); if(colorGradSl) colorGradSl.value=colorGradWidth;
+  genParams=Object.assign({},DEFAULT_GEN_PARAMS,d.gen_params||{});
+  renderParamsPanel();
+  excludeMask={front:null,side:null,back:null};
+  excludeMaskVer++;
+  exUndo=[];
+  const masks=d.exclude_masks||{};
+  resyncAnalysisToProfile(); // white_thr変更分をひとまず反映(除外マスクがあれば下でさらに反映)
+  Object.keys(masks).forEach(v=>{
+    if(!imgs[v]||!masks[v])return;
+    const im=new Image();
+    im.onload=()=>{
+      const ec=ensureExcludeCanvas(v);
+      if(ec){
+        ec.ctx.clearRect(0,0,ec.canvas.width,ec.canvas.height);ec.ctx.drawImage(im,0,0);
+        excludeMaskVer++;
+        if(v==="front")resyncAnalysisToProfile(); // front除外マスク反映後にanalysisを揃え直す
+        draw();
+      }
+    };
+    im.src=masks[v];
+  });
+  sel=null;pendingAcc=null;
+  syncChips();renderAcList();syncViewBtns();draw();
+  setMsg("landmarks_ai.json を読み込みました(正面/側面/背面画像は別途読み込み済みのものを使います)。");
+}
+function loadJsonFile(file){
+  const r=new FileReader();
+  r.onload=()=>{
+    try{ applyLoadedJson(JSON.parse(r.result)); }
+    catch(e){ setMsg("JSON読み込みに失敗しました: "+((e&&e.message)||e)); }
+  };
+  r.readAsText(file);
+}
+
+/* ---------- タブ(ランドマーク/アクセサリー/幅奥行き/境目角度を切り替え、縦スクロールを短縮) ---------- */
+let curTab="lm";
+// 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
+// タブ(画像境界/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
+const IMG_TABS=["lm","ex","ac","params"];
+function syncTabs(){
+  [].forEach.call(document.querySelectorAll(".tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===curTab);});
+  [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{p.classList.toggle("on",p.dataset.tabpanel===curTab);});
+  $("imgArea").classList.toggle("hidden",!IMG_TABS.includes(curTab));
+}
+[].forEach.call(document.querySelectorAll(".tabbtn"),b=>{
+  b.onclick=()=>{curTab=b.dataset.tab;syncTabs();
+    syncViewBtns();
+    if(IMG_TABS.includes(curTab))draw();
+  };
+});
+
+/* ---------- アクセサリー(ヘッドホン/猫耳/カメラ小物/スカート等) ---------- */
+function syncViewBtns(){
+  document.querySelectorAll("#viewbar .viewbtn").forEach(b=>{
+    b.classList.toggle("on",b.dataset.view===curView);
+    b.disabled=!imgs[b.dataset.view];
+  });
+}
+const VIEWJP={front:"正面",side:"側面",back:"背面"};
+function distributeBoxPoints(n,cx0,cy0,halfW,halfH){
+  // n点を矩形の辺に沿って周長比例で均等配置する(既定の標準形状=直方体の
+  // 輪郭。多角形の内側だけが彫られる=検出ウィンドウなので、まずは単純な
+  // 箱から始めて各点をドラッグ/十字キーで実際の輪郭に合わせてもらう)。
+  n=Math.max(3,Math.min(25,n||8));
+  const pts=[];
+  for(let i=0;i<n;i++){
+    let d=(4*(halfW+halfH))*(i/n), x,y;
+    if(d<halfW*2){x=-halfW+d;y=-halfH;}
+    else if((d-=halfW*2)<halfH*2){x=halfW;y=-halfH+d;}
+    else if((d-=halfH*2)<halfW*2){x=halfW-d;y=halfH;}
+    else{d-=halfW*2;x=-halfW;y=halfH-d;}
+    pts.push([Math.round(cx0+x),Math.round(cy0+y)]);
+  }
+  return pts;
+}
+function anchorForBones(bones){
+  for(const b of (bones||[])){const a=anchorFrontPos(b); if(a)return a;}
+  return null;
+}
+function defaultAccRegion(view,pointCount,bones){
+  const img=imgs[view]; if(!img)return null;
+  const anc=anchorForBones(bones);
+  const baseHalf=(analysis?analysis.shoulder_hw:img.w*0.12)*0.5;
+  let cx0,cy0,halfW,halfH;
+  if(view==="front"){
+    if(anc){cx0=anc.cx;cy0=anc.cy;}else{cx0=img.w/2;cy0=img.h*0.15;}
+    halfW=baseHalf;halfH=baseHalf*0.7;
+  }else{
+    // side/back: 前面アンカーの高さ比率をその面の画像自身のシルエットで
+    // 較正しなおして揃える(本体幅/奥行き上書きと同じ3面連動の考え方)。
+    let vFront=0.1;
+    if(anc&&analysis)vFront=(anc.cy-analysis.ytop)/analysis.BH;
+    const ext=imgYExtent(view);
+    cy0=ext?ext.ytop+vFront*(ext.ybot-ext.ytop):img.h*0.15;
+    cx0=img.w/2;
+    halfW=baseHalf*0.6;halfH=baseHalf*0.7;
+  }
+  return{points:distributeBoxPoints(pointCount,cx0,cy0,halfW,halfH)};
+}
+function buildAcFormHtml(){
+  const bonesHtml=BONE_GROUPS.map(grp=>{
+    const rowHtml=grp.bones.map(b=>{
+      const checked=pendingAcc.bones.includes(b)?"checked":"";
+      return '<label><input type="checkbox" value="'+b+'" '+checked+'> '+(BONE_JP[b]||b)+'</label>';
+    }).join("");
+    return '<div class="subhead">'+grp.label+'</div><div class="bonesRow">'+rowHtml+'</div>';
+  }).join("");
+  const canAdd=!!(pendingAcc.regions.front||pendingAcc.regions.back);
+  const drawBtns=["front","side","back"].map(v=>{
+    const has=!!pendingAcc.regions[v], avail=!!imgs[v];
+    const label=v==="side"?"側面(奥行き)":VIEWJP[v];
+    return '<button class="btn'+(has?" mint":"")+'" data-drawview="'+v+'"'+(avail?"":" disabled")+'>'+label+(has?" 編集":" に配置")+'</button>';
+  }).join("");
+  let selBtns="";
+  if(pendingAcc.regions[curView]){
+    const n=pendingAcc.regions[curView].points.length, btns=[];
+    for(let i=0;i<n;i++){
+      const key="pend:"+curView+":"+i;
+      btns.push('<button class="btn sm'+(sel===key?" mint":"")+'" data-pt-sel="'+i+'">'+(i+1)+'</button>');
+    }
+    selBtns='<div class="row" style="flex-wrap:wrap">'+btns.join("")+'</div>';
+  }
+  return '<div class="acform">'+
+    '<label>名前<input type="text" id="acName" value="'+pendingAcc.name+'" placeholder="例: ヘッドホン"></label>'+
+    '<label>取り付け方式</label>'+
+    '<div class="row">'+
+    '<button type="button" class="btn sm'+(pendingAcc.mode==="rigid"?" mint":"")+'" data-acmode="rigid">rigid(1ボーン固定)</button>'+
+    '<button type="button" class="btn sm'+(pendingAcc.mode==="soft"?" mint":"")+'" data-acmode="soft">soft(複数ボーン追従)</button>'+
+    '</div>'+
+    '<label>取り付けボーン('+(pendingAcc.mode==="rigid"?"1つ選択":"複数選択可")+')'+
+    '<div class="bonesGroups">'+bonesHtml+'</div></label>'+
+    '<label>点数(3〜25、多いほど複雑な輪郭を再現できます)'+
+    '<input type="number" id="acPointCount" min="3" max="25" value="'+(pendingAcc.pointCount||8)+'"></label>'+
+    '<div style="font-size:11px;color:var(--mut)">「まとめて配置」を押すと、選んだボーン付近に標準形状(直方体)の輪郭が'+
+    '前面/側面/背面へ連動して配置されます(正面か背面のどちらか+側面(奥行き)があれば十分)。'+
+    '各点をドラッグ/十字キーで実際の輪郭に合わせてください。多角形の内側だけが検出・彫り込みの対象になります。</div>'+
+    '<div class="row"><button class="btn mint" id="acPlaceAll">まとめて配置(直方体)</button></div>'+
+    '<div class="row">'+drawBtns+'</div>'+
+    selBtns+
+    '<div class="row">'+
+    '<button class="btn mint" id="acConfirm"'+(canAdd?"":" disabled")+'>'+(pendingAccEditIdx!==null?"この内容で保存する":"この内容で追加する")+'</button>'+
+    '<button class="btn" id="acCancel">キャンセル</button>'+
+    '</div></div>';
+}
+function wireAcFormEvents(){
+  $("acName").oninput=e=>{pendingAcc.name=e.target.value;};
+  [].forEach.call(document.querySelectorAll("#acForm [data-acmode]"),btn=>{
+    btn.onclick=()=>{
+      pendingAcc.mode=btn.dataset.acmode;
+      if(pendingAcc.mode==="rigid"&&pendingAcc.bones.length>1)pendingAcc.bones=pendingAcc.bones.slice(0,1);
+      renderAcForm();
+    };
+  });
+  $("acPointCount").oninput=e=>{
+    pendingAcc.pointCount=Math.max(3,Math.min(25,parseInt(e.target.value,10)||8));
+  };
+  [].forEach.call(document.querySelectorAll("#acForm .bonesGroups input"),cb=>{
+    cb.onchange=()=>{
+      if(pendingAcc.mode==="rigid"){
+        pendingAcc.bones=cb.checked?[cb.value]:[];renderAcForm();
+      }else{
+        if(cb.checked){if(pendingAcc.bones.indexOf(cb.value)<0)pendingAcc.bones.push(cb.value);}
+        else{pendingAcc.bones=pendingAcc.bones.filter(x=>x!==cb.value);}
+      }
+    };
+  });
+  $("acPlaceAll").onclick=()=>{
+    const n=pendingAcc.pointCount||8;
+    ["front","side","back"].forEach(v=>{
+      if(imgs[v])pendingAcc.regions[v]=defaultAccRegion(v,n,pendingAcc.bones);
+    });
+    curView=pendingAcc.regions.front?"front":(pendingAcc.regions.side?"side":"back");
+    syncViewBtns();
+    sel=pendingAcc.regions[curView]?"pend:"+curView+":0":null;
+    syncChips();renderAcForm();draw();
+    setMsg("前面/側面/背面に標準形状(直方体、"+n+"点)を配置しました。各点をドラッグ/十字キーで輪郭に合わせて調整してください。");
+  };
+  [].forEach.call(document.querySelectorAll("#acForm [data-drawview]"),btn=>{
+    const v=btn.dataset.drawview;
+    btn.onclick=()=>{
+      if(!imgs[v]){setMsg("先に"+VIEWJP[v]+"画像を読み込んでください。");return;}
+      if(!pendingAcc.regions[v])pendingAcc.regions[v]=defaultAccRegion(v,pendingAcc.pointCount||8,pendingAcc.bones);
+      curView=v;syncViewBtns();
+      sel="pend:"+v+":0";
+      syncChips();renderAcForm();draw();
+      setMsg(VIEWJP[v]+"画像上で点を十字キー/ドラッグで動かして輪郭を囲んでください。");
+    };
+  });
+  [].forEach.call(document.querySelectorAll("#acForm [data-pt-sel]"),btn=>{
+    btn.onclick=()=>{
+      sel="pend:"+curView+":"+btn.dataset.ptSel;
+      syncChips();renderAcForm();draw();
+    };
+  });
+  $("acConfirm").onclick=()=>{
+    if(!(pendingAcc.regions.front||pendingAcc.regions.back)){setMsg("正面か背面の少なくとも一方に範囲が必要です。");return;}
+    const wasEdit=pendingAccEditIdx!==null;
+    const targetIdx=wasEdit?pendingAccEditIdx:accessories.length;
+    if(wasEdit){accessories.splice(pendingAccEditIdx,0,pendingAcc);}
+    else{accessories.push(pendingAcc);}
+    pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
+    curView="front";syncViewBtns();sel=null;
+    renderAcList();renderAcForm();syncChips();draw();
+    setMsg(wasEdit?"アクセサリーを更新しました。":"アクセサリーを追加しました。");
+    highlightAcListItem(targetIdx);
+  };
+  $("acCancel").onclick=()=>{
+    if(pendingAccEditIdx!==null){accessories.splice(pendingAccEditIdx,0,pendingAccEditOriginal);}
+    pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
+    sel=null;renderAcList();renderAcForm();syncChips();draw();
+  };
+}
+function renderAcForm(){
+  const el=$("acForm");
+  if(!pendingAcc){el.innerHTML="";return;}
+  el.innerHTML=buildAcFormHtml();
+  wireAcFormEvents();
+}
+function highlightAcListItem(idx){
+  const el=$("acList").children[idx];
+  if(!el)return;
+  el.scrollIntoView({behavior:"smooth",block:"center"});
+  el.classList.add("flash");
+  setTimeout(()=>el.classList.remove("flash"),1200);
+}
+function renderAcList(){
+  const el=$("acList");
+  el.innerHTML=accessories.map((a,i)=>
+    '<div class="acitem"><input type="text" class="acNameEdit" data-i="'+i+'" '+
+    'value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)">'+
+    '<span class="tag">'+a.mode+'/'+(a.bones.join(",")||"未設定")+'</span>'+
+    '<span class="ed" data-i="'+i+'">変更</span>'+
+    '<span class="rm" data-i="'+i+'">削除</span></div>'
+  ).join("");
+  [].forEach.call(el.querySelectorAll(".acNameEdit"),inp=>{
+    inp.oninput=()=>{
+      const i=+inp.dataset.i, oldKey="acc:"+(accessories[i].name||"accessory");
+      accessories[i].name=inp.value;
+      const newKey="acc:"+(accessories[i].name||"accessory");
+      if(oldKey!==newKey && seamAngles[oldKey]!==undefined){
+        seamAngles[newKey]=seamAngles[oldKey];delete seamAngles[oldKey];
+      }
+    };
+  });
+  [].forEach.call(el.querySelectorAll(".ed"),s=>{
+    s.onclick=()=>{
+      const i=+s.dataset.i;
+      pendingAccEditIdx=i;
+      pendingAccEditOriginal=accessories[i];
+      pendingAcc=JSON.parse(JSON.stringify(accessories[i]));
+      accessories.splice(i,1);
+      curView=pendingAcc.regions.front?"front":(pendingAcc.regions.side?"side":"back");
+      syncViewBtns();
+      sel=pendingAcc.regions[curView]?"pend:"+curView+":0":null;
+      renderAcList();renderAcForm();syncChips();draw();
+      setMsg("アクセサリーを編集中です。各点を調整して保存してください。");
+    };
+  });
+  [].forEach.call(el.querySelectorAll(".rm"),s=>{s.onclick=()=>{accessories.splice(+s.dataset.i,1);renderAcList();draw();};});
+}
+function imgYExtent(view){
+  // その面(side/back)の画像自身のシルエット上端/下端(px)を求め、img
+  // オブジェクトにキャッシュする(新しい画像が読み込まれるとimgs[view]自体が
+  // 差し替わるため、キャッシュは自動的に無効化される)。前面と同じ「身長に
+  // 対する高さの比率」で位置を揃えるために使う。
+  const im=imgs[view];
+  if(!im)return null;
+  if(im.ytop!==undefined)return{ytop:im.ytop,ybot:im.ybot};
+  const mask=buildMask(im.el,im.w,im.h);
+  let ytop=-1,ybot=-1;
+  for(let y=0;y<im.h;y++){
+    let has=false;
+    for(let x=0;x<im.w;x++){if(mask[y*im.w+x]){has=true;break;}}
+    if(has){if(ytop<0)ytop=y;ybot=y;}
+  }
+  if(ytop<0){ytop=0;ybot=im.h-1;}
+  im.ytop=ytop;im.ybot=ybot;
+  return{ytop,ybot};
+}
+function anchorFrontPos(joint){
+  // そのパーツの前面ランドマークから、標準形状の中心位置・傾き・基準長さを
+  // 求める。首は専用処理(肩と顎の中間、既存の実装を踏襲)。2点(mid)指定の
+  // 部位は2点の中点を中心・2点を結ぶ線の角度を傾きの初期値にする(前腕/上腕
+  // 等、画面上で斜めに写るパーツに標準形状を沿わせるため)。
+  if(!points)return null;
+  if(joint==="neck"){
+    if(!(points.shoulder_L&&points.shoulder_R&&points.chin))return null;
+    const cx=(points.shoulder_L[0]+points.shoulder_R[0])/2;
+    const cy=points.shoulder_L[1]-Math.abs(points.shoulder_L[1]-points.chin[1])*0.3;
+    return{cx,cy,angle:0,len:Math.abs(points.shoulder_L[1]-points.chin[1])*0.5};
+  }
+  const a=OV_ANCHOR[joint]; if(!a)return null;
+  if(a.mid){
+    if(a.mid.length===1){
+      const p=points[a.mid[0]]; if(!p)return null;
+      return{cx:p[0],cy:p[1],angle:0,len:null};
+    }
+    const p0=points[a.mid[0]],p1=points[a.mid[1]]; if(!p0||!p1)return null;
+    const dx=p1[0]-p0[0],dy=p1[1]-p0[1];
+    return{cx:(p0[0]+p1[0])/2,cy:(p0[1]+p1[1])/2,angle:Math.atan2(dy,dx)*180/Math.PI,len:Math.hypot(dx,dy)};
+  }
+  if(a.extrap){
+    const p0=points[a.extrap[0]],p1=points[a.extrap[1]]; if(!p0||!p1)return null;
+    const dx=p1[0]-p0[0],dy=p1[1]-p0[1];
+    return{cx:p1[0]+dx*0.35,cy:p1[1]+dy*0.35,angle:Math.atan2(dy,dx)*180/Math.PI,len:Math.hypot(dx,dy)*0.5};
+  }
+  return null;
+}
+/* ---------- 凡例チップ ---------- */
+function buildLegend(){
+  const wrapEl=$("legend");wrapEl.innerHTML="";
+  LM_GROUP_ORDER.forEach(g=>{
+    const items=LM.filter(d=>d.g===g); if(!items.length)return;
+    const h=document.createElement("div");
+    h.className="subhead";h.style.color=GCOL[g];h.textContent=LM_GROUP_JP[g]||g;
+    wrapEl.appendChild(h);
+    const row=document.createElement("div");
+    row.className="legend";
+    items.forEach(d=>{const s=document.createElement("span");s.className="chip";s.textContent=d.jp;
+      s.dataset.k=d.k;s.style.color=GCOL[d.g];s.title=d.desc;
+      s.onclick=()=>{const key="lm:"+d.k;sel=(sel===key)?null:key;syncChips();draw();};row.appendChild(s);});
+    wrapEl.appendChild(row);
+  });
+}
+function syncChips(){
+  // sel はgetInteractivePoints()と同じ"lm:"+ランドマーク名の形式(凡例チップ・
+  // 画像上タップのどちらで選択しても統一。以前はチップ経由だけ素の名前が
+  // 入ってしまい、十字キー(nudge()はgetInteractivePoints経由でしか探さない)
+  // が反応しないバグがあった)。
+  [].forEach.call($("legend").querySelectorAll(".chip"),s=>{s.classList.toggle("on",("lm:"+s.dataset.k)===sel);});
+  [].forEach.call(document.querySelectorAll(".dpad button"),b=>{b.disabled=!sel;});
+  var lmKey=(sel&&sel.indexOf("lm:")===0)?sel.slice(3):null;
+  var d=LM.filter(function(x){return x.k===lmKey;})[0];
+  var sn=document.getElementById("selName"), sd=document.getElementById("selDesc");
+  if(d){ if(sn)sn.textContent=d.jp; if(sd)sd.textContent=d.desc; return; }
+  var p=getInteractivePoints(curView).filter(function(pp){return pp.key===sel;})[0];
+  if(sn)sn.textContent=p?p.label:"未選択";
+  if(sd)sd.textContent="";
+}
+
+/* ---------- 配線 ---------- */
+[].forEach.call(document.querySelectorAll('input[type="file"][data-slot]'),inp=>{
+  inp.addEventListener("change",e=>{const f=e.target.files[0];if(f)loadImg(f,inp.dataset.slot);e.target.value="";});
+});
+$("reset").onclick=()=>{
+  if(!analysis)return;
+  if(!confirm("初期配置に戻しますか？現在のランドマークの微調整はすべて失われます。"))return;
+  points=placeAll(analysis);sel=null;view={z:1,ox:0,oy:0};syncChips();draw();setMsg("前処理の初期配置に戻しました。");
+};
+$("export").onclick=exportJson;
+$("copy").onclick=copyJson;
+$("loadJson").onclick=()=>{
+  if(!points){setMsg("先に正面画像を読み込んでください。");return;}
+  $("jsonFile").click();
+};
+$("jsonFile").onchange=e=>{const f=e.target.files[0];if(f)loadJsonFile(f);e.target.value="";};
+
+/* ---------- モデル生成(3DtoolJS: ブラウザ完結でGLBを作りビューアへ遷移) ---------- */
+let genTimer=null, genStartMs=0;
+function genOverlayShow(){
+  $("genError").classList.add("hidden");$("genError").textContent="";
+  $("genTag").classList.remove("err");$("genTagText").textContent="GENERATING";
+  $("genStage").textContent="準備中…";
+  $("genSeconds").textContent="0秒";
+  $("genOverlay").classList.remove("hidden");
+  genStartMs=Date.now();
+  genTimer=setInterval(()=>{
+    const s=Math.floor((Date.now()-genStartMs)/1000);
+    $("genSeconds").textContent=s+"秒";
+  },1000);
+}
+function genOverlayHide(){
+  if(genTimer){clearInterval(genTimer);genTimer=null;}
+  $("genOverlay").classList.add("hidden");
+}
+function genOverlayError(msg){
+  if(genTimer){clearInterval(genTimer);genTimer=null;}
+  $("genTag").classList.add("err");$("genTagText").textContent="ERROR";
+  $("genStage").textContent="生成に失敗しました";
+  const err=$("genError");
+  err.textContent=msg+"\n(タップで閉じます)";
+  err.classList.remove("hidden");
+  $("genOverlay").onclick=()=>{genOverlayHide();$("genOverlay").onclick=null;};
+}
+$("generateBtn").onclick=async()=>{
+  if(!points||!analysis){setMsg("先に正面/側面/背面画像を読み込んでください。");return;}
+  if(!imgs.front||!imgs.side||!imgs.back){setMsg("正面/側面/背面の3枚とも読み込んでください。");return;}
+  genOverlayShow();
+  try{
+    const state={
+      imgs, points, analysis, deriveFromPoints,
+      accessories: accessories.map(a=>({name:a.name,mode:a.mode,bones:a.bones,
+        regions:Object.keys(a.regions).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{})})),
+      excludeMask, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, genParams,
+    };
+    // ★フェーズ1(2026-07-07〜): 「生成」は完成GLBまで作らず、重い彫刻(marching
+    // cubes)までの中間データ(中間パッケージ)を作ってビューアに渡す。ビューア側
+    // (character_3d.html)がP3D.finishFromIntermediate()で平滑化/間引き/
+    // テクスチャ焼き込み/GLB化を行う(フェーズ2でこの部分がライブパラメータ
+    // 編集UIに置き換わる)。
+    const inter=await P3D.runToIntermediate(state, (label)=>{ $("genStage").textContent=label; });
+    const pkg={
+      landmarks_json: buildJson(),
+      raw_body: inter.rawBody,
+      raw_accessories: inter.rawAccessories,
+      bled_canvases: inter.bledCanvases,
+      pivots: inter.pivots,
+      calib: inter.calib,
+      gen_params: Object.assign({},genParams),
+      seam_angles: Object.assign({},seamAngles),
+      seam_no_side: Object.assign({},seamNoSide),
+      seam_smooth_iters: seamSmoothIters,
+      color_grad_width: colorGradWidth,
+    };
+    await P3D.saveGeneratedModel(pkg);
+    if(currentMode==="normal"){
+      saveNormalSession();
+      await saveNormalSessionImages();
+    }else if(currentMode==="sample"){
+      saveSampleSession();
+    }
+    genOverlayHide();
+    location.href="character_3d.html?source=generated";
+  }catch(e){
+    console.error(e);
+    genOverlayError((e&&e.message)||String(e));
+  }
+};
+$("paramsResetAll").onclick=()=>{
+  genParams=Object.assign({},DEFAULT_GEN_PARAMS);
+  renderParamsPanel();
+  setMsg("パラメータを全て既定値に戻しました。");
+};
+// ★Task3: 「画像境界」タブのUI要素(seamBulkApply/seamSideAllOn/seamSideAllOff/
+// seamSmoothSlider/seamSmoothVal/colorGradSlider/colorGradVal)は削除した
+// (character_3d.htmlに移管)。seamAngles/seamNoSide/seamSmoothIters/
+// colorGradWidthのデータ自体は既定値のままgenParamsと同様buildJson()経由で
+// intermediateパッケージへ渡す(applyLoadedJson()での読み込みは維持)。
+$("acAddBtn").onclick=()=>{
+  if(!points){setMsg("先に正面画像を読み込んでください。");return;}
+  if(pendingAccEditIdx!==null){accessories.splice(pendingAccEditIdx,0,pendingAccEditOriginal);pendingAccEditIdx=null;pendingAccEditOriginal=null;renderAcList();}
+  pendingAcc={name:"",mode:"rigid",bones:[],regions:{},pointCount:8};
+  renderAcForm();
+};
+[].forEach.call(document.querySelectorAll("#viewbar .viewbtn"),b=>{
+  b.onclick=()=>{
+    if(!imgs[b.dataset.view]){setMsg("先に"+b.textContent+"画像を読み込んでください。");return;}
+    curView=b.dataset.view;view={z:1,ox:0,oy:0};sel=null;syncChips();syncViewBtns();
+    draw();
+  };
+});
+function nudge(dx,dy){
+  if(!sel){setMsg("先に点（下のチップ or 画像をタップ）を選んでください");return;}
+  const p=getInteractivePoints(curView).filter(pp=>pp.key===sel)[0];
+  if(!p){setMsg("選択中の点は表示中の面にありません。");return;}
+  p.set([p.pos[0]+dx,p.pos[1]+dy]);draw();
+}
+function holdBtn(id,dx,dy){var b=$(id),t=null;
+  var run=function(){nudge(dx,dy);};
+  var start=function(e){if(b.disabled)return;e.preventDefault();run();t=setInterval(run,55);};
+  var stop=function(){if(t){clearInterval(t);t=null;}};
+  b.addEventListener("pointerdown",start);b.addEventListener("pointerup",stop);
+  b.addEventListener("pointerleave",stop);b.addEventListener("pointercancel",stop);}
+holdBtn("nLeft",-1,0);holdBtn("nUp",0,-1);holdBtn("nDown",0,1);holdBtn("nRight",1,0);
+$("viewReset").onclick=function(){view={z:1,ox:0,oy:0};draw();};
+$("lockToggle").onclick=function(){
+  pointsLocked=!pointsLocked;
+  $("lockToggle").textContent=pointsLocked?"🔒 ロック中(タップで解除)":"🔓 点をロック";
+  $("lockToggle").classList.toggle("mint",pointsLocked);
+  setMsg(pointsLocked?"点をロックしました。画像上のドラッグは常に表示の移動/拡大縮小になります。":"ロックを解除しました。");
+};
+let exToleranceVal=30, exBrushSizeVal=20;
+function syncExSlider(){
+  const s=$("exSlider");
+  if(exMode==="brush"){
+    $("exSliderLabel").textContent="ブラシサイズ";
+    s.min=4;s.max=80;s.value=exBrushSizeVal;
+  }else{
+    $("exSliderLabel").textContent="許容誤差";
+    s.min=5;s.max=100;s.value=exToleranceVal;
+  }
+}
+$("exSlider").oninput=()=>{
+  const n=parseInt($("exSlider").value,10);
+  if(exMode==="brush")exBrushSizeVal=n;else exToleranceVal=n;
+};
+[].forEach.call(document.querySelectorAll("[data-exmode]"),btn=>{
+  btn.onclick=()=>{
+    exMode=btn.dataset.exmode;
+    [].forEach.call(document.querySelectorAll(".exmode"),b=>b.classList.toggle("mint",b===btn));
+    syncExSlider();
+    // マジック⇔ブラシでスライダーの意味(許容誤差/ブラシサイズ)が入れ替わる
+    // ことに気づきやすいよう、切り替え時に一瞬色を光らせる。
+    const row=$("exSliderRow");
+    row.classList.add("flash");
+    setTimeout(()=>row.classList.remove("flash"),500);
+  };
+});
+[].forEach.call(document.querySelectorAll("[data-exact]"),btn=>{
+  btn.onclick=()=>{
+    exAction=btn.dataset.exact;
+    [].forEach.call(document.querySelectorAll(".exact"),b=>b.classList.toggle("mint",b===btn));
+  };
+});
+$("exClear").onclick=()=>{
+  if(!excludeMask[curView])return;
+  exSnapshot(curView);
+  excludeMask[curView]=null; // nullに戻し、書き出し時にこの面のマスク自体を省く
+  excludeMaskVer++;
+  draw();
+  setMsg(VIEWJP[curView]+"の除外範囲を全解除しました。");
+};
+$("exUndo").onclick=exUndoLast;
+[].forEach.call(document.querySelectorAll(".qbtn[data-help]"),b=>{
+  b.onclick=()=>{
+    const box=document.getElementById(b.dataset.help);
+    if(!box)return;
+    const willShow=box.classList.contains("hidden");
+    box.classList.toggle("hidden",!willShow);
+    b.classList.toggle("on",willShow);
+  };
+});
+function wireBoneToggle(overlayId,regionId){
+  const oEl=$(overlayId), rEl=$(regionId);
+  oEl.checked=boneOverlayOn; rEl.checked=boneRegionOn;
+  oEl.onchange=()=>{
+    boneOverlayOn=oEl.checked;
+    ["boneOverlayToggleLM","boneOverlayToggleAC"].forEach(id=>{const e=$(id);if(e)e.checked=boneOverlayOn;});
+    if(IMG_TABS.includes(curTab))draw();
+  };
+  rEl.onchange=()=>{
+    boneRegionOn=rEl.checked;
+    ["boneRegionToggleLM","boneRegionToggleAC"].forEach(id=>{const e=$(id);if(e)e.checked=boneRegionOn;});
+    if(IMG_TABS.includes(curTab))draw();
+  };
+}
+wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
+wireBoneToggle("boneOverlayToggleAC","boneRegionToggleAC");
+buildLegend();
+renderParamsPanel();
+renderOutlinePanel();
+(function(){
+  // ★初期画面(サンプルモード/通常モードの選択)。
+  // 「サンプルモード」は従来通り、同梱のimages/front.png等+landmarks_ai.jsonを
+  // 自動読込する(お試し用)。「通常モード」は自分の画像を手動アップロードする
+  // (既存の.slots UIをそのまま使う、何も自動読込しない)。
+  // ただし、モデル生成→ビューア→「戻る」で来た場合(保存済みセッションが
+  // ある場合)は、モードに関わらずこの選択画面を出さず直接復元する。
+  // サンプルは今のところ同梱のimages/*.png1組のみだが、複数サンプルを選べる
+  // よう プルダウンで選択させる作りにしておく(増やす場合はSAMPLESに追記するだけでよい)。
+  const SAMPLES=[
+    {id:"default", label:"サンプル1", imagesDir:"images/", landmarksFile:"landmarks_ai.json"},
+  ];
+  const sampleSelectEl=$("sampleSelect");
+  sampleSelectEl.innerHTML=SAMPLES.map(function(s,i){ return '<option value="'+i+'">'+s.label+'</option>'; }).join("");
+  sampleSelectEl.addEventListener("click", function(e){ e.stopPropagation(); });
+  function currentSample(){ return SAMPLES[+sampleSelectEl.value]||SAMPLES[0]; }
+  function loadImageBlobIntoSlot(slot,blob){
+    return new Promise(function(res,rej){
+      var el=new Image();
+      el.onload=function(){
+        imgs[slot]={el:el,w:el.naturalWidth,h:el.naturalHeight};
+        var id="slot"+slot.charAt(0).toUpperCase()+slot.slice(1),s=document.getElementById(id);
+        if(s){s.classList.add("on");s.querySelector("small").textContent="✓ 読込済み";}
+        res();
+      };
+      el.onerror=function(){rej(new Error("画像の読込に失敗しました: "+slot));};
+      el.src=URL.createObjectURL(blob);
+    });
+  }
+  function loadSampleImages(){
+    const sample=currentSample();
+    return Promise.all(["front","side","back"].map(function(slot){
+      return fetch(sample.imagesDir+slot+".png").then(function(r){
+        if(!r.ok)throw 0; return r.blob();
+      }).then(function(blob){ return loadImageBlobIntoSlot(slot,blob); });
+    })).then(function(){
+      runAnalyze();syncViewBtns();
+      // ★2026-07-07: サンプルモードも自動保存の対象になったため、前回
+      // サンプルモードで編集した内容(ランドマーク/パラメータ/アクセサリー等)
+      // があればそれを復元する。保存が無ければ従来通り同梱のlandmarks_ai.json
+      // (初期状態)を読み込む。画像自体は常にimages/*.pngの同梱アセットを使う。
+      let savedRaw=null;
+      try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY); }catch(e){}
+      if(savedRaw){
+        try{ applyLoadedJson(JSON.parse(savedRaw)); return; }
+        catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
+      }
+      return fetch(sample.landmarksFile).then(function(r){ if(!r.ok)throw 0; return r.json(); })
+        .then(function(d){ applyLoadedJson(d); }).catch(function(){});
+    });
+  }
+  // 「前回の続き」が選べるかどうかを、保存済みJSON(localStorage)+画像本体
+  // (IndexedDB)の両方が実際に揃っているかで判定する。片方だけ残っている
+  // 状態(保存途中の失敗等)は「無い」扱いにして、中途半端な復元を避ける。
+  async function checkContinueAvailable(){
+    let raw=null;
+    try{ raw=localStorage.getItem(NORMAL_SESSION_KEY); }catch(e){}
+    let blobs=null;
+    try{ blobs=window.P3D&&P3D.loadNormalSessionImages?await P3D.loadNormalSessionImages():null; }catch(e){}
+    const ok=!!(raw && blobs && blobs.front && blobs.side && blobs.back);
+    const card=$("modeContinueBtn");
+    card.classList.toggle("disabled",!ok);
+    $("modeContinueDesc").textContent=ok
+      ?"前回保存した通常モードの画像・ランドマークを読み込んで再開します。"
+      :"前回保存した通常モードの作業がまだありません(新規作成で3枚の画像を読み込むと、以後は自動保存されます)。";
+    return ok;
+  }
+  function refreshSampleModeCard(){
+    let hasSaved=null;
+    try{ hasSaved=localStorage.getItem(SAMPLE_SESSION_KEY); }catch(e){}
+    $("modeSampleDesc").textContent = hasSaved
+      ? "前回サンプルモードで編集した内容(ランドマーク/パラメータ等)を読み込んで再開します。"
+      : "同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。";
+    $("modeSampleResetRow").classList.toggle("hidden", !hasSaved);
+  }
+  $("modeSampleReset").onclick=(e)=>{
+    e.stopPropagation();
+    try{ localStorage.removeItem(SAMPLE_SESSION_KEY); }catch(err){}
+    refreshSampleModeCard();
+    setMsg("サンプルの編集内容を破棄しました。");
+  };
+  function showModeChoice(){
+    checkContinueAvailable();
+    refreshSampleModeCard();
+    $("modeChoice").classList.remove("hidden");
+  }
+  function startSampleMode(){
+    currentMode="sample";
+    $("modeChoice").classList.add("hidden");
+    loadSampleImages().catch(function(){
+      setMsg("サンプル画像の読込に失敗しました。新規作成で自分の画像をアップロードしてください。");
+      $("uploadArea").classList.remove("hidden");
+    });
+  }
+  function startNewNormalMode(){
+    currentMode="normal";
+    $("modeChoice").classList.add("hidden");
+    $("uploadArea").classList.remove("hidden");
+  }
+  async function startContinueNormalMode(){
+    if(!(await checkContinueAvailable())) return; // 念のための二重チェック(基本disabledでクリック不可)
+    currentMode="normal";
+    $("modeChoice").classList.add("hidden");
+    try{
+      const raw=localStorage.getItem(NORMAL_SESSION_KEY);
+      const blobs=await P3D.loadNormalSessionImages();
+      await Promise.all(["front","side","back"].map(function(slot){
+        return loadImageBlobIntoSlot(slot,blobs[slot]);
+      }));
+      runAnalyze();syncViewBtns();
+      applyLoadedJson(JSON.parse(raw));
+    }catch(e){
+      console.warn("前回の続きの復元に失敗しました:",e);
+      setMsg("前回の続きの復元に失敗しました。新規作成でやり直してください。");
+      $("uploadArea").classList.remove("hidden");
+    }
+  }
+  $("modeSampleBtn").onclick=startSampleMode;
+  $("modeNewBtn").onclick=startNewNormalMode;
+  $("modeContinueBtn").onclick=startContinueNormalMode;
+  $("backToIndex").onclick=()=>{ location.href="index.html"; };
+  // モード選択画面は常に表示する(自動復元でモード選択を省略する挙動は撤去し、
+  // 毎回必ずここから選ぶ。「前回の続き」の可否だけその都度チェックする)。
+  showModeChoice();
+  startAutosaveLoop();
+})();
+})();
+</script>
+</body></html>
