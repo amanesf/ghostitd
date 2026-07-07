@@ -500,6 +500,13 @@ function buildBasin(x,z){
   loadStaticGLB('models/chouzuya_free.glb').then(obj=>{
     normalizeToHeight(obj,postH+0.6);
     obj.position.set(x,0,z);
+    // honden(placeMainHall)と同じ屋根瓦素材(yane)を共有しており、そのままだと
+    // このシーンの控えめな照明下でほぼ真っ黒に潰れるため、同じ明度の底上げをかける。
+    const _hsl={h:0,s:0,l:0};
+    obj.traverse(o=>{ if(o.isMesh&&o.material&&o.material.color){
+      o.material.color.getHSL(_hsl);
+      o.material.color.setHSL(_hsl.h,Math.min(1,_hsl.s*1.1),Math.max(_hsl.l,0.42));
+    }});
     shrineGroup.remove(g);
     shrineGroup.add(obj);
     FREE_MODEL_CREDITS.push({name:'手水舎',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://shoshinshaworks.booth.pm/items/2660016'});
@@ -1164,11 +1171,19 @@ function frame(dt){
     // 重いPIPシーン描画はここで間引いて行い、結果をレンダーターゲットに焼き付けるだけ
     // (画面には直接出さない)。表示は下のneedsRenderブロックで毎フレーム安価に行う。
     renderer.setScissorTest(false);
+    // PIPカメラはキャラクターのすぐ近くに寄るため、メイン画面と同じ密度のホコリだと
+    // 画面手前で大きく・濃く重なって見えてしまう。PIP描画時だけ薄く/小さくする
+    // (メイン画面の見た目には一切影響しない、このブロックの中だけの一時変更)。
+    const _dustSizeOrig=dustMat.size, _dustOpOrig=dustMat.opacity;
+    dustMat.size=_dustSizeOrig*0.55;
+    dustMat.opacity=_dustOpOrig*0.4;
     renderer.setRenderTarget(selfieRT);
     renderer.render(scene,selfieCam);
     renderer.setRenderTarget(fpsRT);
     renderer.render(scene,fpsCam);
     renderer.setRenderTarget(null);
+    dustMat.size=_dustSizeOrig;
+    dustMat.opacity=_dustOpOrig;
   }
   if(needsRender){
     renderer.setScissorTest(false);
