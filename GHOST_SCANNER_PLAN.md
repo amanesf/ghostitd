@@ -73,9 +73,20 @@ front/side/back生成(タブ2〜4)は**Geminiのセッションを毎回新規�
 ## ジェネレータへの引き継ぎ
 出力(front/side/back画像+`points_px`+任意で`gen_params`/`accessories`)を
 IndexedDB経由で`landmark_tool.html`に渡し、遷移後すぐ編集画面が開くようにする
-(ダウンロード→手動アップロードより滑らかな導線)。`landmark_tool.html`側に
-読み込み分岐を1つ追加する軽微な改修が必要。基本フォーマットは`landmarks_ai.json`
-v2互換のため`applyLoadedJson`は無改修で動作するはず。
+(ダウンロード→手動アップロードより滑らかな導線)。
+
+**技術的な注意(2026-07-07のリファクタで判明)**: `js/idb.js`の
+`saveGeneratedModel`/`loadGeneratedModel`(キー`generated_model`)は
+「ジェネレータ→ビューア」専用で、契約が「完成GLB」から「彫刻後の中間
+パッケージ(生メッシュ・焼き込み済みcanvas・pivot等)」に変更済みのため、
+**この引き継ぎには使えない**。代わりに、`landmark_tool.html`が「前回の
+続きから」再開する際に使っている`saveNormalSessionImages`/
+`loadNormalSessionImages`(キー`normal_session_images`、`{front,side,back}`
+のBlob形式)と**同じ形のBlobを新しい専用キーで保存**し、
+`landmark_tool.html`起動時に`?source=scanner`のようなクエリパラメータを
+見て、①そのBlobを画像として読み込み、②`landmarks_ai.json`相当のJSONを
+`applyLoadedJson`にそのまま渡す、という2段の読み込み分岐を追加する
+(`applyLoadedJson`自体は無改修で動作する)。
 
 ## フェーズ一覧(効果/コスト/実現性)
 
