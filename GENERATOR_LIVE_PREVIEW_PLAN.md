@@ -374,3 +374,24 @@ JSONをパースし、`gen_params.body_smooth_iters===10`(ライブ調整値が�
    `#boneOverlayToggleAC`)が引き続き存在すること、全タブのクリック巡回で
    コンソールエラー0件、生成ボタン押下からcharacter_3d.htmlへの遷移まで
    一連のフローがエラーなく完走することを確認した。
+
+## Task5実施メモ(2026-07-07、ユーザー要望「サンプルモードでも生成調整タブを使いたい」)
+
+9. `character_3d.html`を直接開いて「サンプルモードで開く」を選んだ場合、
+   従来は完成品`model.glb`のみをfetchする`tryAutoLoad()`が使われ、
+   中間パッケージ(currentPackage)が存在しないため「生成調整」タブが
+   常に非表示だった。これを解消するため、リポジトリ同梱の同じサンプル
+   画像/landmarks_ai.jsonから生成した中間パッケージを静的JSONファイル
+   `sample_package.json`(Float32Array/Uint32Arrayをbase64、bled_canvases
+   をPNG data URLにシリアライズしたもの、約12.9MB)として同梱し、
+   `character_3d.html`に`loadSamplePackage()`(fetch→型復元→
+   `activateGeneratedPackage()`)を追加、「サンプルモードで開く」ボタンの
+   遷移先をこちらに変更した(取得/復元に失敗した場合のみ従来の
+   `tryAutoLoad()`にフォールバック)。IndexedDB経由の生成データ読み込みと
+   共通の`activateGeneratedPackage(pkg)`関数に処理をまとめ、コード重複を
+   避けた。
+   Playwright確認: サンプルモードで開いた直後に「生成調整」タブが表示され、
+   Tier1〜3・継ぎ目角度(体幹/左右腕/左右脚/アクセサリー個別)のパネルが
+   開けること、`body_smooth_iters`を12に変更すると再構築が走り
+   コンソールエラー0件で完走すること、下部バーの高さが引き続き450px
+   (画面900pxの50vh)であることを確認した。

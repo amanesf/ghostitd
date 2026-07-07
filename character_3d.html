@@ -547,7 +547,13 @@ function tryAutoLoad(){
 }
 document.getElementById('modeSampleBtn').onclick=()=>{
   document.getElementById('modeChoice').classList.add('hide');
-  tryAutoLoad();
+  // ★中間パッケージ(sample_package.json)があれば「生成調整」タブも使える
+  // 状態でサンプルを開く。取得できない場合は従来通り完成品model.glbのみの
+  // 表示にフォールバックする。
+  loadSamplePackage().catch((e)=>{
+    console.warn('sample_package.json load failed, falling back to model.glb', e);
+    tryAutoLoad();
+  });
 };
 document.getElementById('modeNormalBtn').onclick=()=>{
   document.getElementById('modeChoice').classList.add('hide');
@@ -569,28 +575,88 @@ let liveSeamSmoothIters=null, liveColorGradWidth=null;
 // 「境目角度」タブと同じBONE_GROUPS/seamRowHtmlパターンを移植)。
 let liveSeamAngles=null, liveSeamNoSide=null;
 document.getElementById('err').textContent='';
+// 中間パッケージ(IndexedDB経由の生成済みデータ、または同梱サンプルの
+// sample_package.json)を受け取り、実際にモデルを構築して「生成調整」タブを
+// 使える状態にする共通処理(★ユーザー要望2026-07-07: ビューア単体の
+// 「サンプルモードで開く」でも生成調整タブを使いたい、に対応するため
+// IndexedDB経由の生成データ読み込みから切り出した)。
+async function activateGeneratedPackage(pkg){
+  currentPackage = pkg;
+  liveGP = Object.assign({}, pkg.gen_params);
+  liveSeamSmoothIters = pkg.seam_smooth_iters;
+  liveColorGradWidth = pkg.color_grad_width;
+  liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
+  liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
+  document.getElementById('err').textContent='モデルを構築中…';
+  const glb = await P3D.finishFromIntermediate(pkg, {
+    gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
+    seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
+  }, (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
+  document.getElementById('err').textContent='';
+  lastModelBuf=glb;
+  loadGLB(glb,loadMotionClips);
+  document.getElementById('genTabBtn').style.display='';
+  renderGenParamsPanel();
+  renderSeamPanel();
+}
+// sample_package.json(同梱サンプルの中間パッケージ。base64/dataURLで
+// 静的ホスティング可能な形に固めたもの)をP3D.loadGeneratedModel()と同じ
+// pkg形状(Float32Array/Uint32Array、HTMLCanvasElement)に復元する。
+function b64ToTypedArray(b64, Ctor){
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+  return new Ctor(u8.buffer);
+}
+function dataUrlToCanvas(url){
+  return new Promise((resolve,reject)=>{
+    if(!url){ resolve(null); return; }
+    const img=new Image();
+    img.onload=()=>{
+      const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
+      c.getContext('2d').drawImage(img,0,0);
+      resolve(c);
+    };
+    img.onerror=reject;
+    img.src=url;
+  });
+}
+async function loadSamplePackage(){
+  const res = await fetch('sample_package.json');
+  if(!res.ok) throw new Error('sample_package.json not found');
+  const raw = await res.json();
+  const pkg = {
+    landmarks_json: raw.landmarks_json,
+    raw_body: {
+      V: b64ToTypedArray(raw.raw_body.V_b64, Float32Array),
+      F: b64ToTypedArray(raw.raw_body.F_b64, Uint32Array),
+    },
+    raw_accessories: raw.raw_accessories.map(a=>({
+      name:a.name, mode:a.mode, bones:a.bones,
+      V: b64ToTypedArray(a.V_b64, Float32Array),
+      F: b64ToTypedArray(a.F_b64, Uint32Array),
+    })),
+    bled_canvases: {
+      front: await dataUrlToCanvas(raw.bled_canvases.front),
+      back: await dataUrlToCanvas(raw.bled_canvases.back),
+      side: await dataUrlToCanvas(raw.bled_canvases.side),
+    },
+    pivots: raw.pivots,
+    calib: raw.calib,
+    gen_params: raw.gen_params,
+    seam_angles: raw.seam_angles,
+    seam_no_side: raw.seam_no_side,
+    seam_smooth_iters: raw.seam_smooth_iters,
+    color_grad_width: raw.color_grad_width,
+  };
+  await activateGeneratedPackage(pkg);
+}
 (async function(){
   try{
     const pkg = window.P3D && await P3D.loadGeneratedModel();
     if(pkg && pkg.raw_body){
       await P3D.clearGeneratedModel();
-      currentPackage = pkg;
-      liveGP = Object.assign({}, pkg.gen_params);
-      liveSeamSmoothIters = pkg.seam_smooth_iters;
-      liveColorGradWidth = pkg.color_grad_width;
-      liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
-      liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
-      document.getElementById('err').textContent='モデルを構築中…';
-      const glb = await P3D.finishFromIntermediate(pkg, {
-        gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
-        seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
-      }, (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
-      document.getElementById('err').textContent='';
-      lastModelBuf=glb;
-      loadGLB(glb,loadMotionClips);
-      document.getElementById('genTabBtn').style.display='';
-      renderGenParamsPanel();
-      renderSeamPanel();
+      await activateGeneratedPackage(pkg);
       return;
     }
   }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル構築に失敗しました: '+((e&&e.message)||e); }
