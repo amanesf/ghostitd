@@ -125,7 +125,7 @@
 <div class="drop hide" id="configPanel">
   <h2>描画設定</h2>
   <div class="cfgRow"><label>霧の濃さ
-    <input type="range" id="cfgFog" min="0" max="100" value="100">
+    <input type="range" id="cfgFog" min="0" max="100" value="80">
   </label></div>
   <div class="cfgRow"><label>明るさ
     <input type="range" id="cfgBrightness" min="10" max="150" value="50">
@@ -260,7 +260,7 @@ scene.add(ground);
 function addBoundaryLine(x1,z1,x2,z2){
   const len=Math.hypot(x2-x1,z2-z1);
   if(len<1e-6)return;
-  const w=0.12;
+  const w=0.012; // userフィードバックで太すぎたため1/10に(元は0.12)
   const geo=new THREE.PlaneGeometry(len,w);
   geo.rotateX(-Math.PI/2);
   const mat=new THREE.MeshBasicMaterial({color:0x39ff9e,transparent:true,opacity:0.85,
@@ -295,6 +295,55 @@ function buildBoundaryLines(){
   const bStart=corridorBoundsAt(PATH_MIN_Z), bEnd=corridorBoundsAt(PATH_MAX_Z);
   addBoundaryLine(bStart.left,PATH_MIN_Z,bStart.right,PATH_MIN_Z);
   addBoundaryLine(bEnd.left,PATH_MAX_Z,bEnd.right,PATH_MAX_Z);
+}
+
+// --- 空気感演出: ふわふわ浮遊するホコリ状のパーティクル ---
+// キャラクター中心の一定範囲内にパーティクルを配置し、範囲外に出たら反対側へラップさせることで
+// 常にキャラクターの周囲だけを漂っているように見せる(全マップに敷き詰める必要がないため軽量)。
+const DUST_COUNT=220;
+const DUST_RANGE_XZ=22, DUST_RANGE_Y=6;
+const dustGeo=new THREE.BufferGeometry();
+const dustPosArr=new Float32Array(DUST_COUNT*3);
+const dustSpeed=new Float32Array(DUST_COUNT);
+const dustDrift=new Float32Array(DUST_COUNT*2);
+for(let i=0;i<DUST_COUNT;i++){
+  dustPosArr[i*3+0]=(Math.random()-0.5)*DUST_RANGE_XZ;
+  dustPosArr[i*3+1]=Math.random()*DUST_RANGE_Y;
+  dustPosArr[i*3+2]=(Math.random()-0.5)*DUST_RANGE_XZ;
+  dustSpeed[i]=0.15+Math.random()*0.25;
+  dustDrift[i*2+0]=(Math.random()-0.5)*0.15;
+  dustDrift[i*2+1]=(Math.random()-0.5)*0.15;
+}
+dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPosArr,3));
+const dustCanvas=document.createElement('canvas');
+dustCanvas.width=dustCanvas.height=32;
+const dustCtx=dustCanvas.getContext('2d');
+const dustGrad=dustCtx.createRadialGradient(16,16,0,16,16,16);
+dustGrad.addColorStop(0,'rgba(255,255,255,0.9)');
+dustGrad.addColorStop(1,'rgba(255,255,255,0)');
+dustCtx.fillStyle=dustGrad;
+dustCtx.fillRect(0,0,32,32);
+const dustTex=new THREE.CanvasTexture(dustCanvas);
+const dustMat=new THREE.PointsMaterial({size:0.045,map:dustTex,transparent:true,opacity:0.35,
+  depthWrite:false,fog:true,color:0xfff2d0,blending:THREE.AdditiveBlending});
+const dustPoints=new THREE.Points(dustGeo,dustMat);
+dustPoints.frustumCulled=false;
+scene.add(dustPoints);
+function updateDust(dt){
+  const arr=dustGeo.attributes.position.array;
+  const half=DUST_RANGE_XZ/2;
+  for(let i=0;i<DUST_COUNT;i++){
+    const ix=i*3;
+    arr[ix+1]+=dustSpeed[i]*dt;
+    arr[ix+0]+=dustDrift[i*2+0]*dt;
+    arr[ix+2]+=dustDrift[i*2+1]*dt;
+    if(arr[ix+1]>DUST_RANGE_Y)arr[ix+1]-=DUST_RANGE_Y;
+    let dx=arr[ix+0]-charPos.x;
+    if(dx>half)arr[ix+0]-=DUST_RANGE_XZ;else if(dx<-half)arr[ix+0]+=DUST_RANGE_XZ;
+    let dz=arr[ix+2]-charPos.z;
+    if(dz>half)arr[ix+2]-=DUST_RANGE_XZ;else if(dz<-half)arr[ix+2]+=DUST_RANGE_XZ;
+  }
+  dustGeo.attributes.position.needsUpdate=true;
 }
 
 // --- 神社(Phase 2): 一の鳥居→境内・手水舎→本殿・拝殿→奥の院・禁足地の一直線レイアウト ---
@@ -1064,7 +1113,8 @@ function tick(){
 }
 function frame(dt){
   updateShrineEffects(dt);
-  invalidate(); // 点滅灯・吊り電球の揺れは常時アニメーションするため毎フレーム再描画
+  updateDust(dt);
+  invalidate(); // 点滅灯・吊り電球の揺れ・ホコリの浮遊は常時アニメーションするため毎フレーム再描画
 
   if(model){
     const inputVec=joyActive?joyVec:keyboardVec();
