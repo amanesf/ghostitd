@@ -130,6 +130,9 @@
   <div class="cfgRow"><label>明るさ
     <input type="range" id="cfgBrightness" min="10" max="150" value="50">
   </label></div>
+  <div class="cfgRow"><label>キャラの明るさ
+    <input type="range" id="cfgCharBrightness" min="20" max="150" value="100">
+  </label></div>
   <div class="cfgRow"><label>FPS上限
     <select id="cfgFpsLimit">
       <option value="0">無制限(画面のリフレッシュレートに追従)</option>
@@ -585,10 +588,13 @@ scene.add(characterRoot);
 let model=null, mixer=null, idleAction=null, runAction=null, handBone=null, headBone=null;
 let flashLight=null, flashProp=null, flashOn=true;
 let charHeight=1.7, charCenterY=0.9; // モデル読込後にバウンディングボックスから実測して上書き
+let characterMaterials=[]; // キャラのMeshBasicMaterial一覧。configの「キャラの明るさ」で色を一括調整するために保持
+let charBrightnessPct=100; // configパネルの現在値。モデル差し替え時にも新しいマテリアルへ再適用する
 
 function clearCharacter(){
   if(model){ characterRoot.remove(model); model=null; }
   mixer=null; idleAction=null; runAction=null; handBone=null; headBone=null;
+  characterMaterials=[];
   removeFlashlight();
 }
 
@@ -684,7 +690,9 @@ function loadCharacter(buf,onLoaded){
         toneMapped:false});
       if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
       o.material=smoothMat;
+      characterMaterials.push(smoothMat);
     }});
+    applyCharBrightness(charBrightnessPct); // configの現在値を新しいマテリアルにも反映する
     handBone=model.getObjectByName('hand_R')||null;
     headBone=model.getObjectByName('head')||null;
     model.position.y=0;
@@ -768,6 +776,15 @@ function applyBrightness(pct){
   keyLight.intensity=BASE_KEY_INTENSITY*m;
   invalidate();
 }
+function applyCharBrightness(pct){
+  // キャラはMeshBasicMaterialで常時ライティング無効のため、シーンの明るさスライダーでは
+  // 変化しない。ここではマテリアルのcolorを直接スケールして明暗を付ける
+  // (1.0超は既定でtoneMapped:falseかつHDRレンダーターゲットではないため白飛びで頭打ちになる)。
+  charBrightnessPct=pct;
+  const m=pct/100;
+  for(const mat of characterMaterials)mat.color.setScalar(m);
+  invalidate();
+}
 function applyPipEnabled(on){
   pipEnabled=on;
   document.getElementById('selfieBox').classList.toggle('visible',on&&!!model);
@@ -799,6 +816,7 @@ document.getElementById('configBtn').onclick=()=>{ document.getElementById('conf
 document.getElementById('configClose').onclick=()=>{ document.getElementById('configPanel').classList.add('hide'); };
 document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
 document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
+document.getElementById('cfgCharBrightness').oninput=e=>applyCharBrightness(+e.target.value);
 document.getElementById('cfgFpsLimit').onchange=e=>applyFpsLimit(e.target.value);
 document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; refreshPipQualityLabels(); };
 document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
@@ -1070,6 +1088,7 @@ function frame(dt){
 // それらの宣言が済んだ最後にまとめて実行する)
 applyFogDensity(+document.getElementById('cfgFog').value);
 applyBrightness(+document.getElementById('cfgBrightness').value);
+applyCharBrightness(+document.getElementById('cfgCharBrightness').value);
 applyFpsLimit(document.getElementById('cfgFpsLimit').value);
 tick();
 })();
