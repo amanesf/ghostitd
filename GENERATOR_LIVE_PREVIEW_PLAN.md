@@ -70,6 +70,19 @@
 | 2 | ビューアのライブパラメータUI | `character_3d.html`に`js/atlas.js`, `js/model_export.js`, `js/skeleton.js`, `js/carving.js`を読み込み追加。Tier1〜3の12パラメータのUIパネルを実装（`landmark_tool.html`のパラメータパネルUIを流用/移植）。依存順序（smooth→decimate→atlas bake）を守って連動再計算 | `character_3d.html` | フェーズ1 | 未着手 |
 | 3 | ビューアからの最終出力 | 「GLB書き出し」ボタン（現在のプレビュー状態を`model_export.js`でGLB化）。「JSON書き出し/コピー」ボタン（中間パッケージのJSONオブジェクトの該当フィールドをライブ調整値で上書きして`landmarks_ai.json`として出力、`landmark_tool.html`の`exportJson`/`copyJson`と同等のUI） | `character_3d.html` | フェーズ2 | 未着手 |
 
+## ビューアUIの制約（フェーズ2・3共通）
+
+`character_3d.html`は現状、キャンバス`#c`が`position:fixed;inset:0`で画面全体を占め、
+既存のコントロールは下部固定バー`.bar`（`character_3d.html:43`）のみの薄いレイアウト。
+フェーズ2・3で追加するパラメータパネル/タブ/書き出しボタンは、この`.bar`を拡張する
+形で実装するが、**画面高さの50%（50vh）を超えないこと**を制約とする。
+
+- `max-height:50vh` + `overflow-y:auto`でスクロール可能にする。
+- タブ／折りたたみ（`<details>`等）で一度に表示する項目数を絞り、縦に伸びすぎない
+  構成にする（`landmark_tool.html`のパラメータパネルの`<details class="accgroup">`
+  と同様の折りたたみ方式を踏襲する）。
+- 3Dビュー（`#c`）が常に画面上半分以上は隠れず視認できる状態を保つ。
+
 ## 運用ルール
 
 1. フェーズ0は他フェーズと完全に独立しているため、いつ着手してもよい。
