@@ -270,8 +270,15 @@ build(env){
       normalizeToHeight(obj,(tierY(zTo)-tierY(zFrom))||1.2);
       obj.rotation.y=Math.PI/2;
       const len=zTo-zFrom;
-      obj.scale.z*=len/1.34; // モデルの奥行き(登り方向)を区間長に合わせて引き伸ばす
-      obj.scale.x*=(halfW*1.7)/Math.max(0.01,obj.scale.x); // 参道全幅を跨ぐよう横方向にも引き伸ばす
+      // rotation.y=90°では local X 軸がワールドZ(登り方向)、local Z 軸がワールドX(幅方向)に
+      // 対応する(x'=z, z'=-x)。登り方向はscale.xで区間長に合わせ、幅方向は実測bboxを
+      // 基準にscale.zで参道全幅へ引き伸ばす(絶対値をそのまま割る旧実装は極端な巨大化バグの原因だった)。
+      obj.scale.x*=len/1.34;
+      obj.updateMatrixWorld(true);
+      const box0=new THREE.Box3().setFromObject(obj);
+      const curWidth=Math.max(0.01,box0.max.x-box0.min.x);
+      const desiredWidth=halfW*1.8;
+      obj.scale.z*=desiredWidth/curWidth;
       placeOnGround(obj,0,(zFrom+zTo)/2);
       group.add(obj);
     }).catch(()=>{});
@@ -335,7 +342,7 @@ build(env){
   // 参道: z=2〜18を3m間隔で(密度アップ、旧2.4m*12本→短い参道に合わせて7組=14基)
   const SANDOU_LANTERN_MODES=['lit','dark','cold','lit','dark','lit','dark'];
   for(let i=0;i<7;i++){
-    const z=2+i*2.8;
+    const z=4.5+i*2.8; // 一の鳥居(z=0)と重なって見えないよう十分な間隔を確保
     placeLantern(-4.6,z,SANDOU_LANTERN_MODES[i],i%3===0);
     placeLantern(4.6,z,SANDOU_LANTERN_MODES[(i+3)%SANDOU_LANTERN_MODES.length],i%2===0);
   }
