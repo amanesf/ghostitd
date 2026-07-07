@@ -354,3 +354,23 @@ JSONをパースし、`gen_params.body_smooth_iters===10`(ライブ調整値が�
 一連の操作でコンソールエラー0件。
 
 以上でフェーズ0〜3すべて完了。
+
+## Task4実施メモ(2026-07-07、ユーザー指示によるlandmark_tool.htmlの「ボーン」タブ削除)
+
+8. フェーズ0で「マーク」「パーツ＋」タブに「ボーン表示」/「ボーン範囲」トグル
+   (`boneOverlayToggleLM`/`boneRegionToggleLM`/`boneOverlayToggleAC`/
+   `boneRegionToggleAC`)がインライン追加され、専用の「ボーン」タブ
+   (`data-tab="bones"`、`data-tabpanel="bones"`、ボーン配置プレビュー)と
+   機能が完全に重複したため、専用タブを削除した。タブバーのボタン、
+   パネルHTML(`bonesMsg`含む)、`IMG_TABS`配列からの`"bones"`削除、
+   タブ切替/表示切替ハンドラ内の`curTab==="bones"`分岐(2箇所)、
+   `syncViewBtns()`内の`boneLocked`(側面/背面ボタンをボーンタブでのみ
+   無効化していたロジック)、`draw()`内のボーンタブ専用描画分岐を削除した。
+   `drawBoneOverlay()`/`drawBoneRegionOverlay()`関数自体とマーク/パーツ＋
+   タブのインライントグルはそのまま残置。
+   Playwright確認: サンプルモードでタブバーが`lm/ex/ac/params/gen`のみに
+   なっていること、`data-tabpanel="bones"`要素がDOMに存在しないこと、
+   マーク/パーツ＋タブのボーン表示トグル(`#boneOverlayToggleLM`/
+   `#boneOverlayToggleAC`)が引き続き存在すること、全タブのクリック巡回で
+   コンソールエラー0件、生成ボタン押下からcharacter_3d.htmlへの遷移まで
+   一連のフローがエラーなく完走することを確認した。

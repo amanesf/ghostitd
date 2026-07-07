@@ -158,7 +158,6 @@
       <button class="tabbtn on" data-tab="lm">マーク</button>
       <button class="tabbtn" data-tab="ex">領域</button>
       <button class="tabbtn" data-tab="ac">パーツ＋</button>
-      <button class="tabbtn" data-tab="bones">ボーン</button>
       <button class="tabbtn" data-tab="params">設定値</button>
       <button class="tabbtn" data-tab="gen">生成</button>
     </div>
@@ -244,16 +243,6 @@
       <div id="acList" class="aclist"></div>
       <div id="acForm"></div>
       <button class="btn mint" id="acAddBtn">+ 手動で追加</button>
-    </div>
-
-    <div class="tabpanel acpanel" data-tabpanel="bones">
-      <h2>ボーン配置プレビュー
-        <button type="button" class="qbtn" data-help="help-bones">?</button></h2>
-      <p class="helpText hidden" id="help-bones">
-        自動生成されるボーン（骨格）の位置を正面図に重ねて表示します。ボーンは
-        ランドマークと正面シルエットから自動計算され、調整はできません
-        （見た目の確認のみ）。</p>
-      <div id="bonesMsg" style="font-size:11px;color:var(--mut);margin:0 0 8px"></div>
     </div>
 
     <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
@@ -1049,13 +1038,9 @@ function draw(){
   if(ec&&curTab==="ex"){x.save();x.globalAlpha=0.45;
     x.drawImage(ec.canvas,0,0,ec.canvas.width,ec.canvas.height, view.ox,view.oy, w*sc, h*sc);
     x.restore();}
-  if(curTab==="bones"&&curView==="front"){
-    // ボーンタブでは見やすさのためランドマーク/アクセサリー領域点を隠し、
-    // ボーンのみ表示する
-    drawBoneOverlay(x,sc);
-  }else if(!previewOn){
+  if(!previewOn){
     // マーク/パーツ＋タブそれぞれの専門の点だけをgetInteractivePoints側で絞っている。
-    // 領域(除外)タブ・ボーンタブ(側面/背面)では何も重ねない。
+    // 領域(除外)タブでは何も重ねない。
     if(curTab==="ac")drawRegionOutlines(x,sc);
     getInteractivePoints(curView).forEach(p=>{
       const px=p.pos[0]*sc+view.ox, py=p.pos[1]*sc+view.oy, on=sel===p.key;
@@ -1376,7 +1361,7 @@ function loadJsonFile(file){
 let curTab="lm";
 // 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
 // タブ(画像境界/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
-const IMG_TABS=["lm","ex","ac","bones","params"];
+const IMG_TABS=["lm","ex","ac","params"];
 function syncTabs(){
   [].forEach.call(document.querySelectorAll(".tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===curTab);});
   [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{p.classList.toggle("on",p.dataset.tabpanel===curTab);});
@@ -1384,9 +1369,6 @@ function syncTabs(){
 }
 [].forEach.call(document.querySelectorAll(".tabbtn"),b=>{
   b.onclick=()=>{curTab=b.dataset.tab;syncTabs();
-    if(curTab==="bones"){
-      $("bonesMsg").textContent=(curView==="front")?"":"※ボーンは正面図でのみ表示されます(上の「正面」タブに切り替えてください)";
-    }
     syncViewBtns();
     if(IMG_TABS.includes(curTab))draw();
   };
@@ -1396,10 +1378,7 @@ function syncTabs(){
 function syncViewBtns(){
   document.querySelectorAll("#viewbar .viewbtn").forEach(b=>{
     b.classList.toggle("on",b.dataset.view===curView);
-    // ボーンタブは正面図でしか表示できないため、側面/背面は選べないことを
-    // メッセージだけでなくボタンの無効化でも明示する。
-    const boneLocked=(curTab==="bones"&&b.dataset.view!=="front");
-    b.disabled=!imgs[b.dataset.view]||boneLocked;
+    b.disabled=!imgs[b.dataset.view];
   });
 }
 const VIEWJP={front:"正面",side:"側面",back:"背面"};
@@ -1866,9 +1845,6 @@ $("acAddBtn").onclick=()=>{
   b.onclick=()=>{
     if(!imgs[b.dataset.view]){setMsg("先に"+b.textContent+"画像を読み込んでください。");return;}
     curView=b.dataset.view;view={z:1,ox:0,oy:0};sel=null;syncChips();syncViewBtns();
-    if(curTab==="bones"){
-      $("bonesMsg").textContent=(curView==="front")?"":"※ボーンは正面図でのみ表示されます(上の「正面」タブに切り替えてください)";
-    }
     draw();
   };
 });
