@@ -198,8 +198,11 @@ const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
 let PIP_FRAME_SKIP=2; // configパネルの「PIPカメラ画質」の既定値(FPS上限30fps時に約15fps相当)。変更可能
 let pipEnabled=true;
 let frameCount=0;
-const selfieRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
-const fpsRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+// レンダーターゲットのtexture.encodingは既定でLinearEncodingになり、renderer.outputEncoding
+// (sRGBEncoding)を素通りしてしまう(three.jsはレンダーターゲット描画時にrenderer.outputEncoding
+// ではなくrenderTarget.texture.encodingを使う)。メイン画面と色味を合わせるため明示的に揃える。
+const selfieRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,encoding:THREE.sRGBEncoding});
+const fpsRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,encoding:THREE.sRGBEncoding});
 const blitCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
 function makeBlitScene(rt){
   const s=new THREE.Scene();
@@ -249,6 +252,50 @@ groundGeo.translate(0,0,20); // 神社の参道がz=0からz=44付近まで伸�
 const groundMat=new THREE.MeshStandardMaterial({map:makeGroundTexture(),roughness:0.92,metalness:0});
 const ground=new THREE.Mesh(groundGeo,groundMat);
 scene.add(ground);
+
+// --- 移動可能範囲の境界(地面のみ、建物等のコライダーは対象外)に沿って光る線を引く ---
+// corridorBoundsAt(z)がzに応じて返すleft/rightの区分関数を細かくサンプリングし、
+// 値が変化する箇所ごとに区間を区切ることで、将来corridorBoundsAtの形が変わっても
+// 追従できるようにする(ハードコードした座標をここに直接書かない)。
+function addBoundaryLine(x1,z1,x2,z2){
+  const len=Math.hypot(x2-x1,z2-z1);
+  if(len<1e-6)return;
+  const w=0.12;
+  const geo=new THREE.PlaneGeometry(len,w);
+  geo.rotateX(-Math.PI/2);
+  const mat=new THREE.MeshBasicMaterial({color:0x39ff9e,transparent:true,opacity:0.85,
+    toneMapped:false,depthWrite:false,side:THREE.DoubleSide});
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.position.set((x1+x2)/2,0.03,(z1+z2)/2);
+  mesh.rotation.y=Math.atan2(-(z2-z1),(x2-x1));
+  scene.add(mesh);
+}
+function buildBoundaryLines(){
+  const STEP=0.05; // 起動時に1回だけ実行するため細かくしても負荷は問題にならない
+  let prev=corridorBoundsAt(PATH_MIN_Z);
+  let leftStart=PATH_MIN_Z, rightStart=PATH_MIN_Z;
+  for(let z=PATH_MIN_Z+STEP;z<=PATH_MAX_Z+1e-6;z+=STEP){
+    const zc=Math.min(z,PATH_MAX_Z);
+    const b=corridorBoundsAt(zc);
+    if(b.left!==prev.left){
+      addBoundaryLine(prev.left,leftStart,prev.left,zc);
+      addBoundaryLine(prev.left,zc,b.left,zc);
+      leftStart=zc;
+    }
+    if(b.right!==prev.right){
+      addBoundaryLine(prev.right,rightStart,prev.right,zc);
+      addBoundaryLine(prev.right,zc,b.right,zc);
+      rightStart=zc;
+    }
+    prev=b;
+  }
+  addBoundaryLine(prev.left,leftStart,prev.left,PATH_MAX_Z);
+  addBoundaryLine(prev.right,rightStart,prev.right,PATH_MAX_Z);
+  // 手前(参道入口)と奥(禁足地側)の端を繋ぐキャップ
+  const bStart=corridorBoundsAt(PATH_MIN_Z), bEnd=corridorBoundsAt(PATH_MAX_Z);
+  addBoundaryLine(bStart.left,PATH_MIN_Z,bStart.right,PATH_MIN_Z);
+  addBoundaryLine(bEnd.left,PATH_MAX_Z,bEnd.right,PATH_MAX_Z);
+}
 
 // --- 神社(Phase 2): 一の鳥居→境内・手水舎→本殿・拝殿→奥の院・禁足地の一直線レイアウト ---
 // 障害物ごとの当たり判定(円/AABB)はcollidersに登録し、resolveCollisionで押し出し解決する。
@@ -1090,6 +1137,7 @@ applyFogDensity(+document.getElementById('cfgFog').value);
 applyBrightness(+document.getElementById('cfgBrightness').value);
 applyCharBrightness(+document.getElementById('cfgCharBrightness').value);
 applyFpsLimit(document.getElementById('cfgFpsLimit').value);
+buildBoundaryLines(); // corridorBoundsAt/PATH_MIN_Z/PATH_MAX_Zの宣言が済んだ後でないと呼べない
 tick();
 })();
 </script>
