@@ -79,9 +79,8 @@ build(env){
   }
 
   // ================= 汎用ヘルパー =================
-  // XZ中心が原点からズレたフリーモデル(例: bush_freeは複数バリエーションが並んで
-  // x=150付近に配置されたまま書き出されている)を、指定位置に置いた時に自然な場所へ
-  // 収まるよう水平方向だけ再センタリングする(normalizeToHeightのYオフセット処理とは独立)。
+  // XZ中心が原点からズレたフリーモデルを、指定位置に置いた時に自然な場所へ収まるよう
+  // 水平方向だけ再センタリングする(normalizeToHeightのYオフセット処理とは独立)。
   function centerXZ(obj){
     obj.updateMatrixWorld(true);
     const box=new THREE.Box3().setFromObject(obj);
@@ -216,27 +215,9 @@ build(env){
     addBoundaryLine(bS.left,PATH_MIN_Z,bS.right,PATH_MIN_Z);
     addBoundaryLine(bE.left,PATH_MAX_Z,bE.right,PATH_MAX_Z);
   }
-  // 敷地の境界(移動可能範囲の縁)に沿って生け垣(茂み)を並べる。密度を増量し、
-  // 奥行き方向に2列にすることで「垣根」らしい厚みを出す(user要望、坂区間も除外しない)。
-  function buildHedge(){
-    const STEP=2.5, OUTSETS=[0.4,1.1];
-    loadStaticGLB('models/bush_free.glb').then(template=>{
-      centerXZ(template);
-      for(let z=PATH_MIN_Z+2;z<=PATH_MAX_Z-2;z+=STEP){
-        const b=corridorBoundsAt(z);
-        OUTSETS.forEach(outset=>{
-          [b.left-outset,b.right+outset].forEach(x=>{
-            const t=template.clone(true);
-            normalizeToHeight(t,0.8+Math.random()*0.6);
-            t.rotation.y=Math.random()*Math.PI*2;
-            placeOnGround(t,x,z+(Math.random()-0.5)*1.4);
-            group.add(t);
-          });
-        });
-      }
-      pushCredit(CREDIT_BUSH);
-    }).catch(()=>{});
-  }
+  // 生け垣(bush_free.glb)はuser指摘により撤去(水草のように見える浮遊バグの元だった)。
+  // 敷地境界は光る線(addBoundaryLine)のみで表現する。生け垣を復活させる場合は
+  // 別の(バグの無い)植生モデルをStep3で調達してから検討する。
 
   // ================= 設置物 =================
   function placeStatic(url,x,z,targetHeight,opts){
@@ -261,7 +242,6 @@ build(env){
   const CREDIT_SHRINE2={name:'Shrine(石柱)',author:'Kay Lousberg',license:'CC0',url:'https://poly.pizza/m/tFxdxO5clk'};
   const CREDIT_PINE={name:'Pine Tree',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/gX8WmgkeEm'};
   const CREDIT_ROCK={name:'Rock',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/4MUaQTcDdc'};
-  const CREDIT_BUSH={name:'Flower Bushes',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/1X06RgvSr6'};
   const CREDIT_BRIDGE={name:'Small Bridge',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/j4KsIuJYnq'};
   const CREDIT_FENCE={name:'Fence',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/r0n40F7FKx'};
   const CREDIT_SIGNPOST={name:'Signpost',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/3U2lj1gpeH'};
@@ -502,10 +482,8 @@ build(env){
   }
   scatterProps('models/pine_tree_free.glb',52,7.5,17,-1,Z_BOUNDARY-4,7,{collider:true,colliderR:0.35,scaleMin:0.8,scaleMax:1.5,credit:CREDIT_PINE});
   scatterProps('models/rock_free.glb',30,5.5,17,-1,Z_BOUNDARY-4,0.9,{collider:true,colliderR:0.45,scaleMin:0.7,scaleMax:1.6,credit:CREDIT_ROCK});
-  scatterProps('models/bush_free.glb',26,6,17,0,Z_BOUNDARY-4,1.1,{collider:false,scaleMin:0.6,scaleMax:1.0,centerXZ:true,credit:CREDIT_BUSH});
 
   buildBoundaryLines();
-  buildHedge();
 
   // ================= 毎フレーム更新 =================
   function update(dt,charPos){
