@@ -193,6 +193,21 @@ renderer.outputEncoding=THREE.sRGBEncoding;
 renderer.toneMapping=THREE.NoToneMapping;
 const maxAniso=renderer.capabilities.getMaxAnisotropy();
 
+// モバイル端末のスリープ復帰やGPUリソース逼迫でWebGLコンテキストが失われると、
+// 何のフィードバックもないまま画面が真っ黒/静止したままになる。最低限、
+// ユーザーに気づかせて復帰時に再描画できるようにしておく。
+let webglContextLost=false;
+cvs.addEventListener('webglcontextlost',e=>{
+  e.preventDefault(); // ブラウザ側での自動復旧を許可する
+  webglContextLost=true;
+  document.getElementById('err').textContent='描画コンテキストが失われました。復帰を待っています…';
+});
+cvs.addEventListener('webglcontextrestored',()=>{
+  webglContextLost=false;
+  document.getElementById('err').textContent='';
+  invalidate();
+});
+
 // --- 高感度ノイズ(画面全体+PIP、config「ノイズ」で強度調整可能) ---
 // 画面解像度の約半分のランダムグレースケールを毎フレーム生成し、CSSでフル画面まで
 // 引き伸ばす(image-rendering:pixelated)ことで、実際の高感度ISOノイズに近い粒状の
@@ -202,6 +217,7 @@ const noiseCanvas=document.getElementById('noiseOverlay');
 const noiseCtx=noiseCanvas.getContext('2d');
 const NOISE_SCALE=0.5;
 let noiseImgData=null;
+let noisePct=18; // config「ノイズ」の現在値(初期値はcfgNoiseのvalue属性と一致させる)
 function resizeNoise(){
   const w=Math.max(1,Math.round(innerWidth*NOISE_SCALE));
   const h=Math.max(1,Math.round(innerHeight*NOISE_SCALE));
@@ -209,6 +225,7 @@ function resizeNoise(){
   noiseImgData=noiseCtx.createImageData(w,h);
 }
 function updateNoise(){
+  if(noisePct<=0)return; // opacity 0で見えないのに毎フレーム全画素書き換えるのは無駄
   const d=noiseImgData.data;
   for(let i=0;i<d.length;i+=4){
     const v=(Math.random()*255)|0;
@@ -217,6 +234,7 @@ function updateNoise(){
   noiseCtx.putImageData(noiseImgData,0,0);
 }
 function applyNoise(pct){
+  noisePct=pct;
   noiseCanvas.style.opacity=(pct/100*0.5).toFixed(3);
 }
 
@@ -372,7 +390,13 @@ let characterMaterials=[]; // キャラのMeshBasicMaterial一覧。configの「
 let charBrightnessPct=85; // configパネルの現在値。モデル差し替え時にも新しいマテリアルへ再適用する
 
 function clearCharacter(){
-  if(model){ characterRoot.remove(model); model=null; }
+  // モデル差し替えのたびにgeometry/material/textureをdisposeしないと、
+  // three.jsはGPU側リソースの解放をJSのGCに任せられずリークする。
+  if(model){
+    model.traverse(o=>{ if(o.isMesh&&o.geometry)o.geometry.dispose(); });
+    characterRoot.remove(model); model=null;
+  }
+  for(const mat of characterMaterials){ if(mat.map)mat.map.dispose(); mat.dispose(); }
   mixer=null; idleAction=null; runAction=null; handBone=null; headBone=null;
   characterMaterials=[];
   removeFlashlight();
@@ -414,7 +438,10 @@ function attachFlashlight(){
   document.getElementById('flashToggle').classList.add('visible');
 }
 function removeFlashlight(){
-  if(flashProp&&flashProp.parent) flashProp.parent.remove(flashProp);
+  if(flashProp){
+    if(flashProp.parent) flashProp.parent.remove(flashProp);
+    flashProp.traverse(o=>{ if(o.isMesh){ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); } });
+  }
   if(flashLight){ scene.remove(flashLight); scene.remove(flashLight.target); }
   flashProp=null; flashLight=null;
   document.getElementById('flashToggle').classList.remove('visible');
@@ -728,12 +755,12 @@ function resolveCollision(pos){
   const b=currentMap.corridorBoundsAt(pos.z);
   pos.x=Math.max(b.left+CHAR_R,Math.min(b.right-CHAR_R,pos.x));
   pos.z=Math.max(currentMap.zMin+CHAR_R,Math.min(currentMap.zMax-CHAR_R,pos.z));
-  colliders.forEach(c=>{
-    if(c.type==='circle'){
-      const dx=pos.x-c.x, dz=pos.z-c.z, d=Math.hypot(dx,dz), minD=c.r+CHAR_R;
-      if(d<minD&&d>1e-5){ pos.x=c.x+dx/d*minD; pos.z=c.z+dz/d*minD; }
-    }else if(c.type==='box'){
-      const inMinX=c.minX-CHAR_R, inMaxX=c.maxX+CHAR_R, inMinZ=c.minZ-CHAR_R, inMaxZ=c.maxZ+CHAR_R;
+  colliders.forEach(col=>{
+    if(col.type==='circle'){
+      const dx=pos.x-col.x, dz=pos.z-col.z, d=Math.hypot(dx,dz), minD=col.r+CHAR_R;
+      if(d<minD&&d>1e-5){ pos.x=col.x+dx/d*minD; pos.z=col.z+dz/d*minD; }
+    }else if(col.type==='box'){
+      const inMinX=col.minX-CHAR_R, inMaxX=col.maxX+CHAR_R, inMinZ=col.minZ-CHAR_R, inMaxZ=col.maxZ+CHAR_R;
       if(pos.x>inMinX&&pos.x<inMaxX&&pos.z>inMinZ&&pos.z<inMaxZ){
         const dLeft=pos.x-inMinX, dRight=inMaxX-pos.x, dNear=pos.z-inMinZ, dFar=inMaxZ-pos.z;
         const m=Math.min(dLeft,dRight,dNear,dFar);
@@ -795,8 +822,11 @@ window.__ghostController={ get charPos(){return charPos;}, get charYaw(){return 
   get camPosition(){return cam.position;}, get camTarget(){return _camTarget;},
   setCharPos(x,z){ charPos.set(x,0,z); resolveCollision(charPos); charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z); invalidate(); } };
 
+// tick(): requestAnimationFrameループ本体(FPS上限の間引きのみ担当)。
+// 実際の状態更新/描画は毎回frame()に委譲する(名前が紛らわしいので注記)。
 function tick(){
   requestAnimationFrame(tick);
+  if(webglContextLost)return; // 復帰を待つ間はrender呼び出し自体をスキップする
   const rawDt=Math.min(clock.getDelta(),0.05);
   if(TARGET_FPS>0){
     // FPS上限が設定されている場合は、経過時間を貯めて1/TARGET_FPS秒に満たない間は
