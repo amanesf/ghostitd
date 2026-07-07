@@ -1,16 +1,16 @@
-// 神社マップ(第11弾: 再々構築版)。マップ分離アーキテクチャ(SHRINE_REDESIGN_PLAN.md参照)に従い、
-// controller.html(汎用ホスト)から呼ばれるGhostMaps.shrine.build(env)としてまとめている。
+// 神社マップ(第11弾: 再々構築版→圧縮改訂)。マップ分離アーキテクチャ(SHRINE_REDESIGN_PLAN.md参照)
+// に従い、controller.html(汎用ホスト)から呼ばれるGhostMaps.shrine.build(env)としてまとめている。
 // env = { scene, colliders, loadStaticGLB, normalizeToHeight, pushCredit }
 // THREE/GLTFLoaderはこのファイルより先に<script>で読み込まれているグローバルをそのまま使う。
 //
-// 第11弾でのレイアウト方針転換(SHRINE_REDESIGN_PLAN.md 第11弾参照):
-// 「長い一本道(182m)」をやめ、駐車場→短い参道(密度重視)→広場化した境内→本殿→
-// 短い奥の院、という約114mの構成に圧縮。境内は一本道ではなく幅34mの広場(プラザ)にし、
-// 鳥居は一の鳥居・二の鳥居の大型2基のみ(千本鳥居風の連続小鳥居・各Tier入口ゲート鳥居は廃止)。
-// 石段は参道中央を1箇所で跨ぐ単一オブジェクトに統一(旧: 左右に分裂して不自然だった問題を是正)。
-// なお、社務所・絵馬掛け・神馬・磐座・竹林・駐車場の車/自販機など新規カテゴリは
-// まだ素材調達(Step3)が済んでいないため、このコミットではゾーニング/動線のみ用意し、
-// 実オブジェクトは調達後の別コミットで追加する(TODOコメントで明記)。
+// 圧縮改訂(user指示)での主な変更:
+// - 参道の「平坦なTier0」区間を廃止し、駐車場から境内広場の高さまで一気に上る一本の坂に
+//   統合(高さ自体=境内広場のY値は変更しない。段差を減らして距離を圧縮する)。
+// - 石段の装飾オブジェクト(stairs_free.glb)はバグの温床だったため全区間で完全廃止。
+//   地面自体(groundHeightAtの線形勾配)だけで登り降りさせる、装飾のない坂にする。
+// - 参道1段目(旧Tier0)にいた狛犬代わりのキツネ像(見た目が気持ち悪いとの指摘)を撤去。
+//   本殿手前のキツネの神使像(Kurama)は意匠として維持。
+// - 生け垣・樹木の密度を増量。
 (function(global){
 "use strict";
 const GhostMaps=global.GhostMaps=global.GhostMaps||{};
@@ -22,28 +22,24 @@ build(env){
   const group=new THREE.Group();
   scene.add(group);
 
-  // ================= レイアウト定数(第11弾: 全長約114m、広場中心) =================
-  // 駐車場(Tier0,Y=0)→参道(Tier0,Y=0,短く密に)→石段(単一)→境内広場(Tier1,Y=1.8,幅34m)
-  // →石段→本殿区画(Tier2,Y=3.2)→石段(あえて下る)→奥の院(Tier1.5,Y=1.3,短縮)→しめ縄境界。
-  const PATH_MIN_Z=-14, PATH_MAX_Z=100;
-  const Z_PARKING_END=-2;      // 駐車場→参道の境目
-  const Z_SANDOU_END=20;       // 参道→石段1の境目
-  const Z_SLOPE1_S=20, Z_SLOPE1_E=24;
-  const Z_KEIDAI_END=64;       // 境内広場→石段2の境目
-  const Z_SLOPE2_S=64, Z_SLOPE2_E=68;
-  const Z_HONDEN_END=82;       // 本殿区画→石段3の境目
-  const Z_SLOPE3_S=82, Z_SLOPE3_E=86;
-  const Z_BOUNDARY=98;
+  // ================= レイアウト定数(圧縮改訂: 全長約104m) =================
+  // 駐車場(Y=0)→参道(Y=0→1.8へ一気に上る坂、Tier0の平坦区間を廃止)→境内広場(Y=1.8)
+  // →坂→本殿区画(Y=3.2)→坂(あえて下る)→奥の院(Y=1.3)→しめ縄境界。
+  const PATH_MIN_Z=-14, PATH_MAX_Z=90;
+  const Z_PARKING_END=-2;                 // 駐車場→参道(坂)の境目
+  const Z_SLOPE1_S=-2, Z_SLOPE1_E=14;     // 参道の坂: 駐車場を出た直後から境内広場の高さまで一気に上る
+  const Z_SLOPE2_S=54, Z_SLOPE2_E=58;     // 境内広場→本殿区画の坂
+  const Z_HONDEN_END=72;
+  const Z_SLOPE3_S=72, Z_SLOPE3_E=76;     // 本殿区画→奥の院の坂(あえて下る)
+  const Z_BOUNDARY=88;
 
   const Y_TIER1=1.8, Y_TIER2=3.2, Y_TIER15=1.3;
   const HALFW_PARKING=11, HALFW_SANDOU=7, HALFW_KEIDAI=17, HALFW_HONDEN=7.5, HALFW_OKU=6.5;
-  const POND_CX=11, POND_CZ=48, POND_RX=5, POND_RZ=6, POND_DEPTH=0.8;
-  const POND_EAST_RIGHT=HALFW_KEIDAI+5, POND_Z0=42, POND_Z1=54;
+  const POND_CX=11, POND_CZ=38, POND_RX=5, POND_RZ=6, POND_DEPTH=0.8;
+  const POND_EAST_RIGHT=HALFW_KEIDAI+5, POND_Z0=32, POND_Z1=44;
 
-  // 自己レビューでの是正: 段差区間はsmoothstep(S字カーブ)ではなく線形補間にする。
-  // 石段の装飾モデルは物理的にまっすぐな直線状の階段形状であり、S字カーブの地面と
-  // 組み合わせると区間の上下端でモデルと地面の傾斜が食い違って浮き/めり込みが生じ、
-  // 「階段が変」に見える原因になっていた。線形にすることで実際の階段と同じ一定勾配になる。
+  // 段差区間はsmoothstep(S字カーブ)ではなく線形補間にする(自己レビューで是正済み: 直線状の
+  // 坂と組み合わせたときに上下端で浮き/めり込みが出ないようにするため)。
   function lerpClamped(a,b,z){ const t=Math.max(0,Math.min(1,(z-a)/(b-a))); return t; }
   function tierY(z){
     if(z<Z_SLOPE1_S)return 0;
@@ -62,12 +58,10 @@ build(env){
     }
     return y;
   }
-  // 各スロープ帯(z範囲)・池の楕円内かどうかの判定(scatterPropsで散布除外に使う。
-  // 第11弾でのバグ修正: 浮遊オブジェクトはスロープ帯・池の窪みへ通常の散布ロジックが
-  // 侵入していたことが主因だったため、対象帯を明示的に除外する)。
-  function inSlopeBand(z){
-    return (z>=Z_SLOPE1_S&&z<=Z_SLOPE1_E)||(z>=Z_SLOPE2_S&&z<=Z_SLOPE2_E)||(z>=Z_SLOPE3_S&&z<=Z_SLOPE3_E);
-  }
+  // 池の楕円内かどうかの判定(scatterPropsで散布除外に使う)。
+  // 坂区間(旧inSlopeBand)は、各オブジェクトが自分自身の(x,z)で個別に地面高さを
+  // サンプリングして接地するため(placeOnGround参照)、線形勾配であれば浮遊の心配はなく、
+  // 除外は不要と判断して廃止した(自己レビュー: むしろ参道の坂に樹木が生えない原因だった)。
   function inPondEllipse(x,z){
     if(z<=POND_Z0||z>=POND_Z1)return false;
     const dx=(x-POND_CX)/(POND_RX+1.5), dz=(z-POND_CZ)/(POND_RZ+1.5);
@@ -98,7 +92,7 @@ build(env){
   // normalizeToHeight済みのobjを、地形の高さに追従させて(x,z)へ設置する。
   // normalizeToHeightはY=0の平地を前提に「最下点がY=0に来る」ようposition.yを既に
   // 調整済みなので、その値に地形の高さを加算するだけでよい(上書きしない)。
-  // さらに、bboxの最下点を実測して地面へスナップし2cm沈めることで浮遊を防ぐ(第11弾)。
+  // さらに、bboxの最下点を実測して地面へスナップし2cm沈めることで浮遊を防ぐ。
   function placeOnGround(obj,x,z){
     obj.position.x=x; obj.position.z=z;
     obj.position.y+=groundHeightAt(x,z);
@@ -141,7 +135,7 @@ build(env){
   },14);
   const dirtMossTex=makeCanvasTexture(ctx=>speckle(ctx,'#332c22',2000,0.35,1.3),26);
   // 駐車場ゾーン用のアスファルト風テクスチャ(白線つき)。「舗装された現実世界から
-  // 神域へ入っていく」導入部を表現する(第11弾、user案)。
+  // 神域へ入っていく」導入部を表現する(user案)。
   const asphaltTex=makeCanvasTexture(ctx=>{
     speckle(ctx,'#26282b',1800,0.45,1.0);
     ctx.strokeStyle='rgba(235,235,225,0.55)'; ctx.lineWidth=4;
@@ -170,16 +164,15 @@ build(env){
     group.add(mesh);
     return mesh;
   }
-  // 駐車場=アスファルト、参道〜本殿区画=玉砂利ベース(参道中央+本殿正面は石畳)、
+  // 駐車場=アスファルト、参道〜本殿区画=玉砂利ベース(正中は石畳)、
   // 奥の院=土/苔混じりの未舗装路、という実在の神社の作法+現代パートのゾーニング。
   buildGroundMesh(HALFW_PARKING,PATH_MIN_Z,Z_PARKING_END,asphaltTex,0);
   buildGroundMesh(HALFW_KEIDAI+2,Z_PARKING_END,Z_SLOPE3_S,gravelTex,0);
   buildGroundMesh(HALFW_OKU+2,Z_SLOPE3_S,PATH_MAX_Z,dirtMossTex,0);
   // 正中(せいちゅう)の石畳帯: 参道入口から本殿の手前まで、実在の神社の作法通り
-  // 一本の帯として途切れず連続させる(自己レビューで指摘: 旧実装は参道と本殿正面の
-  // 2箇所に分断されており、境内広場を横切る区間に石畳が無かった)。本殿正面のみ幅を広げる。
+  // 一本の帯として途切れず連続させる(坂の区間も含めて全区間で連続)。
   buildGroundMesh(1.6,Z_PARKING_END,Z_HONDEN_END,stonePathTex,0.01);
-  buildGroundMesh(3.2,72,80,stonePathTex,0.011); // 本殿正面だけ幅広の石畳を上乗せ
+  buildGroundMesh(3.2,Z_HONDEN_END-10,Z_HONDEN_END,stonePathTex,0.011); // 本殿正面だけ幅広の石畳を上乗せ
 
   // 水面(池、簡易な半透明の平面)
   {
@@ -223,21 +216,22 @@ build(env){
     addBoundaryLine(bS.left,PATH_MIN_Z,bS.right,PATH_MIN_Z);
     addBoundaryLine(bE.left,PATH_MAX_Z,bE.right,PATH_MAX_Z);
   }
-  // 敷地の境界(移動可能範囲の縁)に沿って生け垣(茂み)を並べ、光る線だけの無機質な
-  // 境界を緩和する。corridorBoundsAtの左右境界のすぐ外側に一定間隔で配置する(user要望)。
+  // 敷地の境界(移動可能範囲の縁)に沿って生け垣(茂み)を並べる。密度を増量し、
+  // 奥行き方向に2列にすることで「垣根」らしい厚みを出す(user要望、坂区間も除外しない)。
   function buildHedge(){
-    const STEP=4, OUTSET=0.5;
+    const STEP=2.5, OUTSETS=[0.4,1.1];
     loadStaticGLB('models/bush_free.glb').then(template=>{
       centerXZ(template);
       for(let z=PATH_MIN_Z+2;z<=PATH_MAX_Z-2;z+=STEP){
         const b=corridorBoundsAt(z);
-        if(inSlopeBand(z))continue; // 石段区間は柵・視界の妨げになるため間引く
-        [b.left-OUTSET,b.right+OUTSET].forEach(x=>{
-          const t=template.clone(true);
-          normalizeToHeight(t,0.85+Math.random()*0.5);
-          t.rotation.y=Math.random()*Math.PI*2;
-          placeOnGround(t,x,z+(Math.random()-0.5)*1.2);
-          group.add(t);
+        OUTSETS.forEach(outset=>{
+          [b.left-outset,b.right+outset].forEach(x=>{
+            const t=template.clone(true);
+            normalizeToHeight(t,0.8+Math.random()*0.6);
+            t.rotation.y=Math.random()*Math.PI*2;
+            placeOnGround(t,x,z+(Math.random()-0.5)*1.4);
+            group.add(t);
+          });
         });
       }
       pushCredit(CREDIT_BUSH);
@@ -273,74 +267,32 @@ build(env){
   const CREDIT_BRIDGE={name:'Small Bridge',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/j4KsIuJYnq'};
   const CREDIT_FENCE={name:'Fence',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/r0n40F7FKx'};
   const CREDIT_SIGNPOST={name:'Signpost',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/3U2lj1gpeH'};
-  const CREDIT_STAIRS={name:'Stairs',author:'Kenney',license:'CC0',url:'https://poly.pizza/m/lZFtRSTeKR'};
-  const CREDIT_DOOR={name:'Japanese Door',author:'Quaternius',license:'CC0',url:'https://poly.pizza/m/t4otyljz8K'};
   const CREDIT_HONDEN={name:'Shrine(本殿)',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://booth.pm/ja/items/2659982'};
   const CREDIT_CHOUZUYA={name:'手水舎',author:'つっちー',license:'商用利用・改変可(再配布不可)',url:'https://shoshinshaworks.booth.pm/items/2660016'};
 
-  // --- 一の鳥居(参道入口)。第11弾: 大型鳥居は一の鳥居/二の鳥居の2基のみに削減。
+  // --- 一の鳥居(参道入口)。大型鳥居は一の鳥居/二の鳥居の2基のみ。
   //     現行のtorii_hero_free(Jacques Fourie、提灯付き)は暫定続投だが、Step4で
   //     プロシージャル自作の明神鳥居に置き換え予定(提灯も撤去)。 ---
   const Z_ICHI_TORII=0;
   colliders.push({type:'circle',x:-2.9,z:Z_ICHI_TORII,r:0.3},{type:'circle',x:2.9,z:Z_ICHI_TORII,r:0.3});
   placeStatic('models/torii_hero_free.glb',0,Z_ICHI_TORII,5.6,{credit:CREDIT_TORII_HERO});
 
-  // --- 二の鳥居(石段2の上、本殿区画の入口) ---
+  // --- 二の鳥居(坂を上りきった、本殿区画の入口) ---
   const Z_NI_TORII=Z_SLOPE2_E+1;
   colliders.push({type:'circle',x:-3.0,z:Z_NI_TORII,r:0.3},{type:'circle',x:3.0,z:Z_NI_TORII,r:0.3});
   placeStatic('models/torii_hero_free.glb',0,Z_NI_TORII,5.0,{});
 
-  // --- 石段(単一・参道中央を跨ぐ1オブジェクトに統一。第11弾でのバグ修正: 旧実装は
-  //     左右に1個ずつ分裂配置していて不自然だったため、幅方向に引き伸ばした1枚へ統合) ---
-  function placeStairDecor(zFrom,zTo,halfW){
-    loadStaticGLB('models/stairs_free.glb').then(obj=>{
-      // 石段3(本殿→奥の院)は「あえて下る」設計でtierY(zTo)<tierY(zFrom)となり差分が負になる。
-      // normalizeToHeightは targetHeight/現在高さ をそのままscaleに掛けるため、負の値を渡すと
-      // モデルが原点を軸に上下反転し、潰れた木目色の板のように見える不具合の原因だった(自己レビュー)。
-      // 高さは常に正の絶対値を渡し、上り/下りの向きは既存のrotation.y設定にのみ依存させる。
-      normalizeToHeight(obj,Math.abs(tierY(zTo)-tierY(zFrom))||1.2);
-      obj.rotation.y=Math.PI/2;
-      const len=zTo-zFrom;
-      // rotation.y=90°では local X 軸がワールドZ(登り方向)、local Z 軸がワールドX(幅方向)に
-      // 対応する(x'=z, z'=-x)。登り方向はscale.xで区間長に合わせ、幅方向は実測bboxを
-      // 基準にscale.zで参道全幅へ引き伸ばす(絶対値をそのまま割る旧実装は極端な巨大化バグの原因だった)。
-      obj.scale.x*=len/1.34;
-      obj.updateMatrixWorld(true);
-      const box0=new THREE.Box3().setFromObject(obj);
-      const curWidth=Math.max(0.01,box0.max.x-box0.min.x);
-      const desiredWidth=halfW*1.8;
-      obj.scale.z*=desiredWidth/curWidth;
-      // 自己レビューでの是正: 中間点(mid z)の地面高さでbboxの最下点をスナップすると、
-      // モデルの実際の最下点(登り口=zFrom側)とはズレた基準になり、区間の上端 or 下端で
-      // 地面から浮く/めり込むズレが出ていた。最下点は登り口側にあると想定し、zFromの
-      // 地面高さを基準にスナップする(線形勾配化と合わせて上端もほぼ一致するはず)。
-      obj.position.x=0; obj.position.z=(zFrom+zTo)/2;
-      obj.updateMatrixWorld(true);
-      const box1=new THREE.Box3().setFromObject(obj);
-      obj.position.y+=groundHeightAt(0,zFrom)-box1.min.y;
-      group.add(obj);
-    }).catch(()=>{});
-  }
-  placeStairDecor(Z_SLOPE1_S,Z_SLOPE1_E,HALFW_SANDOU);
-  placeStairDecor(Z_SLOPE2_S,Z_SLOPE2_E,HALFW_KEIDAI*0.5);
-  placeStairDecor(Z_SLOPE3_S,Z_SLOPE3_E,HALFW_HONDEN);
-  pushCredit(CREDIT_STAIRS);
+  // 石段の装飾オブジェクトは完全廃止(user指示: 浮き/めり込みバグの温床だったため)。
+  // 昇り降りは地面自体の線形勾配(groundHeightAt)だけで表現する、装飾のない坂にする。
 
-  // --- 狛犬一対(石段1の上、境内広場の入口) ---
-  const Z_KOMAINU=Z_SLOPE1_E+2;
-  [-1,1].forEach(side=>{
-    const x=side*3.4;
-    colliders.push({type:'circle',x,z:Z_KOMAINU,r:0.5});
-    placeStatic('models/pedestal_free.glb',x,Z_KOMAINU,0.3,{});
-    placeStatic('models/fox_statue_free.glb',x,Z_KOMAINU,0.8,{rotY:side>0?-Math.PI/2:Math.PI/2,
-      onLoaded:o=>{o.position.y+=0.3;},credit:CREDIT_FOX});
-  });
-  pushCredit(CREDIT_PEDESTAL);
+  // TODO(Step3素材調達後に実装): 狛犬(現状は無地の坂のまま。以前はfox_statue_freeを
+  // 代用していたが「狛犬のような狐で気持ち悪い」との指摘で撤去した。ちゃんとした
+  // 狛犬モデルが見つかるまでは何も置かない)。
 
-  // --- 手水舎(境内広場入口すぐ) ---
+  // --- 手水舎(参道の坂を上りきってすぐ) ---
   let basinBulb=null, basinSwingT=0;
   {
-    const x=4.5, z=30;
+    const x=4.5, z=Z_SLOPE1_E+6;
     colliders.push({type:'circle',x,z,r:0.55});
     const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8),new THREE.MeshBasicMaterial({color:0xffe9b0,toneMapped:false}));
     placeOnGround(bulb,x,z); bulb.position.y+=1.7;
@@ -359,8 +311,9 @@ build(env){
       pushCredit(CREDIT_CHOUZUYA);
     }).catch(()=>{});
   }
+  const CHOUZUYA_Z=Z_SLOPE1_E+6;
 
-  // --- 石灯籠(参道は3〜4m間隔で密に、境内広場は周囲を囲むように配置) ---
+  // --- 石灯籠(参道の坂は密に、境内広場は周囲を囲むように配置) ---
   function placeLantern(x,z,mode,alt){ // mode: 'lit'|'cold'|'dark'
     colliders.push({type:'circle',x,z,r:0.3});
     loadStaticGLB(alt?'models/lantern_alt_free.glb':'models/lantern_free.glb').then(obj=>{
@@ -377,20 +330,20 @@ build(env){
     }).catch(()=>{});
   }
   pushCredit(CREDIT_LANTERN); pushCredit(CREDIT_LANTERN_ALT);
-  // 参道: z=2〜18を3m間隔で(密度アップ、旧2.4m*12本→短い参道に合わせて7組=14基)
+  // 参道の坂(z=-2〜14の16m)に7組を1.8m間隔で密に配置(圧縮後も物量は維持)
   const SANDOU_LANTERN_MODES=['lit','dark','cold','lit','dark','lit','dark'];
   for(let i=0;i<7;i++){
-    const z=4.5+i*2.8; // 一の鳥居(z=0)と重なって見えないよう十分な間隔を確保
+    const z=2+i*1.8;
     placeLantern(-4.6,z,SANDOU_LANTERN_MODES[i],i%3===0);
     placeLantern(4.6,z,SANDOU_LANTERN_MODES[(i+3)%SANDOU_LANTERN_MODES.length],i%2===0);
   }
   // 境内広場: 周囲を囲む配置(広場感を出す)
-  const KEIDAI_RING=[[-14,30],[14,30],[-14,60],[14,60],[-15,45],[15,45],[0,32]];
+  const KEIDAI_RING=[[-14,20],[14,20],[-14,50],[14,50],[-15,35],[15,35],[0,22]];
   KEIDAI_RING.forEach((p,i)=>placeLantern(p[0],p[1],i%2===0?'lit':'cold',i%2===1));
 
   // --- 御神木(境内広場、幹の胸の高さに注連縄+紙垂) ---
   {
-    const x=-13, z=40;
+    const x=-13, z=30;
     colliders.push({type:'circle',x,z,r:0.9});
     loadStaticGLB('models/pine_tree_free.glb').then(obj=>{
       normalizeToHeight(obj,11);
@@ -421,8 +374,8 @@ build(env){
       placeLantern(x+ox,z-0.8+oz,'dark',true);
     });
   }
-  placeSubShrineSet(13,36,'models/shrine_small1_free.glb',1.9);
-  placeSubShrineSet(13,56,'models/shrine_small2_free.glb',2.4);
+  placeSubShrineSet(13,26,'models/shrine_small1_free.glb',1.9);
+  placeSubShrineSet(13,46,'models/shrine_small2_free.glb',2.4);
   pushCredit(CREDIT_SHRINE1); pushCredit(CREDIT_SHRINE2);
 
   // --- 池+太鼓橋(境内広場西側の見どころ) ---
@@ -445,11 +398,11 @@ build(env){
   }
 
   // TODO(Step3素材調達後に実装): 社務所/授与所、絵馬掛け所、おみくじ結び所、神馬の銅像、
-  // 蔵/井戸、篝火、提灯スタンド、駐車場の放置車・自動販売機・社号標・掲示板。
+  // 蔵/井戸、篝火、提灯スタンド、駐車場の放置車・自動販売機・社号標・掲示板、正式な狛犬。
   // いずれも本レイアウトの各ゾーン内に配置スペースは確保済み(境内広場の外周・駐車場ゾーン等)。
 
   // --- 本殿参道: 玉垣(低い柵)で囲われた区画、キツネの神使像+台座を対で配置 ---
-  const Z_FOX=76;
+  const Z_FOX=Z_NI_TORII+7;
   {
     const zFrom=Z_NI_TORII+3, zTo=Z_HONDEN_END-2;
     [-1,1].forEach(side=>{
@@ -482,7 +435,7 @@ build(env){
 
   // --- 本殿(最高地点。前後反転バグを是正: モデルの正面はローカル+Zを向いているため
   //     参道側(-Z方向)を向かせるにはY軸180度回転が必要) ---
-  const Z_HONDEN=80;
+  const Z_HONDEN=Z_SLOPE3_S-2;
   let sensorLight=null, sensorLightOn=false, hallFrontZ=0;
   {
     const halfW=4.0, halfD=4.0;
@@ -501,9 +454,6 @@ build(env){
     }).catch(()=>console.warn('[shrine] failed to load honden_free.glb'));
 
     hallFrontZ=Z_HONDEN-halfD;
-    // 自己レビューで撤去: shoji_door_freeを本殿の正面に壁なしで単独設置していたため、
-    // 「謎の格子が本殿手前に浮いている」ように見えるバグだった。honden_free.glb自体に
-    // 引き戸は含まれているため、この単独オブジェクトは不要と判断し削除する。
 
     sensorLight=new THREE.SpotLight(0xfff0d0,0,11,THREE.MathUtils.degToRad(48),0.4,1.2);
     sensorLight.position.set(0,groundHeightAt(0,hallFrontZ)+3.3,hallFrontZ-0.3);
@@ -543,8 +493,9 @@ build(env){
   entranceLight.position.set(0,3.6,-8);
   scene.add(entranceLight);
 
-  // --- 杉の木・岩・茂み(参道〜奥の院まで散布。スロープ帯・池の楕円内は除外して
-  //     浮遊オブジェクトのバグを防ぐ) ---
+  // --- 杉の木・岩・茂み(駐車場〜奥の院まで散布。密度を増量し、坂の区間も除外せず
+  //     生やす。個々のオブジェクトはplaceOnGroundで自分の(x,z)ごとに接地するため、
+  //     線形勾配の坂であれば浮遊は起きない) ---
   function scatterProps(url,count,minDist,maxDist,zMin,zMax,targetHeight,opts){
     opts=opts||{};
     loadStaticGLB(url).then(template=>{
@@ -556,7 +507,6 @@ build(env){
         const side=Math.random()<0.5?-1:1;
         const x=side*(minDist+Math.random()*(maxDist-minDist));
         const z=zMin+Math.random()*(zMax-zMin);
-        if(inSlopeBand(z))continue;
         if(inPondEllipse(x,z))continue;
         const t=template.clone(true);
         const s=(opts.scaleMin||0.8)+Math.random()*((opts.scaleMax||1.3)-(opts.scaleMin||0.8));
@@ -571,9 +521,9 @@ build(env){
       if(opts.credit)pushCredit(opts.credit);
     }).catch(()=>{});
   }
-  scatterProps('models/pine_tree_free.glb',34,7.5,16,-1,Z_BOUNDARY-4,7,{collider:true,colliderR:0.35,scaleMin:0.8,scaleMax:1.5,credit:CREDIT_PINE});
-  scatterProps('models/rock_free.glb',22,5.5,16,-1,Z_BOUNDARY-4,0.9,{collider:true,colliderR:0.45,scaleMin:0.7,scaleMax:1.6,credit:CREDIT_ROCK});
-  scatterProps('models/bush_free.glb',16,6,16,0,Z_BOUNDARY-4,1.1,{collider:false,scaleMin:0.6,scaleMax:1.0,centerXZ:true,credit:CREDIT_BUSH});
+  scatterProps('models/pine_tree_free.glb',52,7.5,17,-1,Z_BOUNDARY-4,7,{collider:true,colliderR:0.35,scaleMin:0.8,scaleMax:1.5,credit:CREDIT_PINE});
+  scatterProps('models/rock_free.glb',30,5.5,17,-1,Z_BOUNDARY-4,0.9,{collider:true,colliderR:0.45,scaleMin:0.7,scaleMax:1.6,credit:CREDIT_ROCK});
+  scatterProps('models/bush_free.glb',26,6,17,0,Z_BOUNDARY-4,1.1,{collider:false,scaleMin:0.6,scaleMax:1.0,centerXZ:true,credit:CREDIT_BUSH});
 
   buildBoundaryLines();
   buildHedge();
@@ -588,7 +538,7 @@ build(env){
     basinSwingT+=dt;
     if(basinBulb){
       basinBulb.position.x=4.5+Math.sin(basinSwingT*1.3)*0.035;
-      basinBulb.position.z=30+Math.cos(basinSwingT*0.9)*0.025;
+      basinBulb.position.z=CHOUZUYA_Z+Math.cos(basinSwingT*0.9)*0.025;
     }
 
     const d=Math.hypot(charPos.x,charPos.z-hallFrontZ);
