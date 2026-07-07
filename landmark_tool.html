@@ -60,6 +60,9 @@
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
   .modeCard.disabled{cursor:default;opacity:.45;pointer-events:none}
   .modeCard.disabled b{color:var(--mut)}
+  .modeCard .sampleSelectRow{margin-top:10px}
+  .modeCard .sampleSelectRow select{width:100%;height:32px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(255,255,255,.06);color:var(--txt);font-size:12px}
   .nudge{margin-top:12px;display:flex;flex-direction:column;gap:8px;align-items:center}
   .nudge .sel{font-size:12px;color:var(--mut)}
   .nudge .sel b{color:#ffe14d}
@@ -295,6 +298,7 @@
     <div class="modeCard mint" id="modeSampleBtn">
       <b>サンプルモードで開く</b>
       <span id="modeSampleDesc">同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。</span>
+      <span class="sampleSelectRow"><select id="sampleSelect"></select></span>
       <span id="modeSampleResetRow" class="hidden" style="margin-top:6px">
         <button type="button" class="btn sm" id="modeSampleReset" style="flex:0 0 auto;height:28px;font-size:11px">前回のサンプル編集を破棄して初期状態に戻す</button>
       </span>
@@ -1969,6 +1973,15 @@ renderOutlinePanel();
   // (既存の.slots UIをそのまま使う、何も自動読込しない)。
   // ただし、モデル生成→ビューア→「戻る」で来た場合(保存済みセッションが
   // ある場合)は、モードに関わらずこの選択画面を出さず直接復元する。
+  // サンプルは今のところ同梱のimages/*.png1組のみだが、複数サンプルを選べる
+  // よう プルダウンで選択させる作りにしておく(増やす場合はSAMPLESに追記するだけでよい)。
+  const SAMPLES=[
+    {id:"default", label:"サンプル1", imagesDir:"images/", landmarksFile:"landmarks_ai.json"},
+  ];
+  const sampleSelectEl=$("sampleSelect");
+  sampleSelectEl.innerHTML=SAMPLES.map(function(s,i){ return '<option value="'+i+'">'+s.label+'</option>'; }).join("");
+  sampleSelectEl.addEventListener("click", function(e){ e.stopPropagation(); });
+  function currentSample(){ return SAMPLES[+sampleSelectEl.value]||SAMPLES[0]; }
   function loadImageBlobIntoSlot(slot,blob){
     return new Promise(function(res,rej){
       var el=new Image();
@@ -1983,8 +1996,9 @@ renderOutlinePanel();
     });
   }
   function loadSampleImages(){
+    const sample=currentSample();
     return Promise.all(["front","side","back"].map(function(slot){
-      return fetch("images/"+slot+".png").then(function(r){
+      return fetch(sample.imagesDir+slot+".png").then(function(r){
         if(!r.ok)throw 0; return r.blob();
       }).then(function(blob){ return loadImageBlobIntoSlot(slot,blob); });
     })).then(function(){
@@ -1999,7 +2013,7 @@ renderOutlinePanel();
         try{ applyLoadedJson(JSON.parse(savedRaw)); return; }
         catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
       }
-      return fetch("landmarks_ai.json").then(function(r){ if(!r.ok)throw 0; return r.json(); })
+      return fetch(sample.landmarksFile).then(function(r){ if(!r.ok)throw 0; return r.json(); })
         .then(function(d){ applyLoadedJson(d); }).catch(function(){});
     });
   }

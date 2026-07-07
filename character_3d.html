@@ -38,6 +38,8 @@
   .modeCard.mint{border-color:rgba(91,230,255,.4)}
   .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
   .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+  .modeCard .sampleSelectRow{margin-top:10px}
+  .modeCard .sampleSelectRow select{width:100%;height:32px;font-size:12px}
 
   /* single bottom control bar (slides up from below; hidden by default) */
   /* フェーズ2: パラメータパネルが増えても画面上半分の3Dビューは必ず見える
@@ -124,6 +126,7 @@
   <div class="modeCard mint" id="modeSampleBtn">
     <b>サンプルモードで開く</b>
     <span>同梱のサンプルmodel.glb/モーションを自動読込してお試しできます。</span>
+    <span class="sampleSelectRow"><select id="sampleSelect"></select></span>
   </div>
   <div class="modeCard" id="modeNormalBtn">
     <b>通常モード</b>
@@ -530,19 +533,28 @@ document.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f&&/\.(g
 // だけで自動再生はしない(autoplayMotion=false)。手動で「＋」ボタンから読み込んだ
 // 場合はすぐプレビュー再生したいのでそちらは従来通り自動再生のまま。
 const MOTION_NAMES=['idle','wave','moshimoshi','dance','idol','run'];
+// サンプルは今のところ同梱のmodel.glb1個のみだが、複数サンプルを選べるよう
+// プルダウンで選択させる作りにしておく(増やす場合はSAMPLESに追記するだけでよい)。
+const SAMPLES=[
+  {id:'default', label:'サンプル1', model:'model.glb', motionPrefix:'motion_'},
+];
+const sampleSelectEl=document.getElementById('sampleSelect');
+sampleSelectEl.innerHTML=SAMPLES.map((s,i)=>`<option value="${i}">${s.label}</option>`).join('');
+sampleSelectEl.addEventListener('click', e=>e.stopPropagation());
 // character_3d.htmlと同じ場所に置かれたmotion_<name>.glb(メッシュを持たず
 // ボーン階層+アニメーションのみ)を全種fetchし、既に読み込み済みのモデルへ
 // ボーン名で紐付けて追加する。tryAutoLoad(サンプルmodel.glb)・生成済みGLB
 // (IndexedDB経由)のどちらの読み込み後でも同じものを使う。
-function loadMotionClips(){
+function loadMotionClips(sample){
   MOTION_NAMES.forEach(n=>{
-    fetch('motion_'+n+'.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
+    fetch(sample.motionPrefix+n+'.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
       .then(mbuf=>loadGLB(mbuf,undefined,false)).catch(()=>{});
   });
 }
 function tryAutoLoad(){
-  fetch('model.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); }).then(buf=>{
-    loadGLB(buf,loadMotionClips);
+  const sample=SAMPLES[+sampleSelectEl.value]||SAMPLES[0];
+  fetch(sample.model).then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); }).then(buf=>{
+    loadGLB(buf,()=>loadMotionClips(sample));
   }).catch(()=>{
     // サンプルmodel.glbが無い(コミットされていない等)場合は通常モードの
     // アップロード画面にフォールバックする。
