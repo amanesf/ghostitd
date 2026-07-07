@@ -389,8 +389,31 @@ function frameModel(obj){
   groundDecal.position.set(0,-size.y/2+0.002,0);
   invalidate();
 }
-function clearModel(){ if(model){root.remove(model);model=null;} mixer=null;clips=[];action=null;playing=false; clearSkelViz(); }
-function clearSkelViz(){ if(skelHelper){ scene.remove(skelHelper); skelHelper=null; } }
+// モデル再読込(ライブパラメータ編集での再構築等)のたびにgeometry/material/
+// textureを解放しないと、three.jsはGPU側リソースをGCに任せられずリークする。
+// flatMat.map/toonMat.map/アウトラインmaterialのmapは同一テクスチャを共有して
+// いる(loadGLBでold.mapを使い回している)ため、テクスチャのdispose()は1回だけ行う。
+function disposeMeshResources(o){
+  if(o.geometry)o.geometry.dispose();
+  const flatMat=o.userData.flatMat, toonMat=o.userData.toonMat;
+  if(flatMat){ if(flatMat.map)flatMat.map.dispose(); flatMat.dispose(); }
+  if(toonMat)toonMat.dispose();
+  const outline=o.userData.outline;
+  if(outline){ if(outline.geometry)outline.geometry.dispose(); if(outline.material)outline.material.dispose(); }
+}
+function disposeObject3D(obj){
+  if(!obj)return;
+  obj.traverse(o=>{ if(o.isMesh)disposeMeshResources(o); });
+}
+function clearModel(){ if(model){disposeObject3D(model);root.remove(model);model=null;} mixer=null;clips=[];action=null;playing=false; clearSkelViz(); }
+function clearSkelViz(){
+  if(skelHelper){
+    scene.remove(skelHelper);
+    if(skelHelper.geometry)skelHelper.geometry.dispose();
+    if(skelHelper.material)skelHelper.material.dispose();
+    skelHelper=null;
+  }
+}
 function buildSkelViz(m){
   clearSkelViz();
   let sm=null;
@@ -495,7 +518,15 @@ function loadGLB(buf,onLoaded,autoplayMotion,keepView){
     }
     invalidate();
     if(onLoaded)onLoaded();
-  }, e=>{ document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e); });
+  }, e=>{
+    document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e);
+    // 既にモデルが表示中の再読込失敗ならそのまま表示を維持し、何も表示できて
+    // いない状態(初回読込失敗等)の時だけファイル選択画面に戻して操作不能を防ぐ。
+    if(!model){
+      document.getElementById('modeChoice').classList.add('hide');
+      document.getElementById('drop').classList.remove('hide');
+    }
+  });
 }
 function setClip(i,autoplay){
   const p=document.getElementById('play');
@@ -519,10 +550,15 @@ const fileEl=document.getElementById('file');
 document.getElementById('pick').onclick=()=>fileEl.click();
 document.getElementById('load2').onclick=()=>fileEl.click();
 document.getElementById('loadMotion').onclick=()=>fileEl.click();
-fileEl.onchange=e=>{const f=e.target.files[0];if(f)read(f);};
-function read(f){const r=new FileReader();r.onload=()=>loadGLB(r.result);r.readAsArrayBuffer(f);}
+fileEl.onchange=e=>{const f=e.target.files[0];if(f)readGlbFile(f);};
+function readGlbFile(f){
+  const r=new FileReader();
+  r.onload=()=>loadGLB(r.result);
+  r.onerror=()=>{ document.getElementById('err').textContent='ファイルの読込に失敗しました: '+f.name; };
+  r.readAsArrayBuffer(f);
+}
 ['dragover','drop'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
-document.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f&&/\.(glb|gltf)$/i.test(f.name))read(f);});
+document.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f&&/\.(glb|gltf)$/i.test(f.name))readGlbFile(f);});
 
 // 起動時オートロード: character_3d.htmlと同じ場所に model.glb / motion_<name>.glb が
 // コミットされていれば(GitHub Pages等でホストしている場合)自動で読み込む。
@@ -590,7 +626,6 @@ document.getElementById('err').textContent='';
   try{
     const pkg = window.P3D && await P3D.loadGeneratedModel();
     if(pkg && pkg.raw_body){
-      await P3D.clearGeneratedModel();
       currentPackage = pkg;
       liveGP = Object.assign({}, pkg.gen_params);
       liveSeamSmoothIters = pkg.seam_smooth_iters;
@@ -598,10 +633,12 @@ document.getElementById('err').textContent='';
       liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
       liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
       document.getElementById('err').textContent='モデルを構築中…';
-      const glb = await P3D.finishFromIntermediate(pkg, {
-        gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
-        seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
-      }, (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
+      const glb = await P3D.finishFromIntermediate(pkg, currentLiveParams(),
+        (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
+      // ★構築成功後に初めてIndexedDBの中間パッケージを消費する。失敗時に先に
+      // 消してしまうと、失敗の原因を直さないままページを再読込しても二度と
+      // 復元できなくなる(以前はfinishFromIntermediate呼び出し前にclearしていた)。
+      await P3D.clearGeneratedModel();
       document.getElementById('err').textContent='';
       lastModelBuf=glb;
       loadGLB(glb,loadMotionClips);
@@ -827,6 +864,13 @@ function scheduleGenRecompute(){
   clearTimeout(genRecomputeTimer);
   genRecomputeTimer=setTimeout(doGenRecompute, 250);
 }
+// doGenRecompute()(自動更新)とexportGlbBtn(手動書き出し)の両方が同じ
+// ライブ調整状態からGLBを焼き直すため、finishFromIntermediate()に渡す
+// パラメータオブジェクトをここに集約する(重複定義でどちらかの更新漏れを防ぐ)。
+function currentLiveParams(){
+  return {gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
+    seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth};
+}
 async function doGenRecompute(){
   if(!currentPackage) return;
   if(genRecomputeBusy){ genRecomputeQueued=true; return; }
@@ -834,10 +878,8 @@ async function doGenRecompute(){
   const statusEl=document.getElementById('genPanelStatus');
   try{
     statusEl.textContent='更新中…';
-    const glb=await P3D.finishFromIntermediate(currentPackage, {
-      gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
-      seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
-    }, (label)=>{ statusEl.textContent='更新中: '+label; });
+    const glb=await P3D.finishFromIntermediate(currentPackage, currentLiveParams(),
+      (label)=>{ statusEl.textContent='更新中: '+label; });
     lastModelBuf=glb;
     loadGLB(glb, undefined, false, true); // keepView=true: 視点を維持したまま差し替え
     statusEl.textContent='';
@@ -860,10 +902,8 @@ document.getElementById('exportGlbBtn').onclick=async()=>{
   const statusEl=document.getElementById('genPanelStatus');
   try{
     statusEl.textContent='GLBを書き出し中…';
-    const glb=await P3D.finishFromIntermediate(currentPackage, {
-      gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
-      seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
-    }, (label)=>{ statusEl.textContent='書き出し中: '+label; });
+    const glb=await P3D.finishFromIntermediate(currentPackage, currentLiveParams(),
+      (label)=>{ statusEl.textContent='書き出し中: '+label; });
     lastModelBuf=glb;
     const blob=new Blob([glb],{type:'model/gltf-binary'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
@@ -961,7 +1001,10 @@ function rebuildOutlines(thickness){
   if(!model)return;
   model.traverse(o=>{
     if(o.isSkinnedMesh&&o.userData.outline){
-      model.remove(o.userData.outline);
+      const oldOut=o.userData.outline;
+      model.remove(oldOut);
+      if(oldOut.geometry)oldOut.geometry.dispose();
+      if(oldOut.material)oldOut.material.dispose(); // mapは元メッシュのマテリアルと共有のためdisposeしない
       const newOut=buildOutline(o,thickness);
       newOut.visible=outlineOn;
       model.add(newOut);

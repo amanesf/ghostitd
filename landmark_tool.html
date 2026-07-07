@@ -936,8 +936,8 @@ function computeBonePivots(){
     return P3D.computePivots(analysis.mask,analysis.W,analysis.H,analysis.ytop,analysis.ybot,analysis.cx,derivedLandmarks);
   }catch(e){ console.error("computeBonePivots failed",e); return null; }
 }
-function drawBoneOverlay(x,sc){
-  const bp=computeBonePivots();
+function drawBoneOverlay(x,sc,bp){
+  bp=bp||computeBonePivots();
   if(!bp)return;
   const pivots=Object.assign({},bp.pivots,bp.extraPivots);
   const BH=analysis.BH, CX=analysis.cx, YBOT=analysis.ybot;
@@ -980,8 +980,8 @@ function pointSegDist2(px,py,ax,ay,bx,by){
 // 骨線分ごとに、粗いグリッド(既定40x60)の各セル中心から最も近い骨線分を
 // 求めてその骨の色で塗る、Voronoi風の担当領域プレビュー。フル解像度で
 // 毎フレーム計算しないことで負荷を抑える(セル単位のfillRectのみ)。
-function drawBoneRegionOverlay(x,sc){
-  const bp=computeBonePivots();
+function drawBoneRegionOverlay(x,sc,bp){
+  bp=bp||computeBonePivots();
   if(!bp||!imgs.front)return;
   const pivots=Object.assign({},bp.pivots,bp.extraPivots);
   const BH=analysis.BH, CX=analysis.cx, YBOT=analysis.ybot;
@@ -1075,8 +1075,11 @@ function draw(){
   // 「マーク」「パーツ＋」タブ用のボーン表示/範囲トグル(既存のボーン専用
   // タブに切り替えなくても、ランドマーク/アクセサリー配置中に確認できる)。
   if((curTab==="lm"||curTab==="ac")&&curView==="front"){
-    if(boneOverlayOn)drawBoneOverlay(x,sc);
-    if(boneRegionOn)drawBoneRegionOverlay(x,sc);
+    // 両方ONの場合にcomputeBonePivots()を2回計算しないよう、1回だけ求めて共有する
+    // (ドラッグ中はdraw()が毎pointermoveで呼ばれるため、二重計算の削減効果が大きい)。
+    const sharedBp=(boneOverlayOn||boneRegionOn)?computeBonePivots():null;
+    if(boneOverlayOn)drawBoneOverlay(x,sc,sharedBp);
+    if(boneRegionOn)drawBoneRegionOverlay(x,sc,sharedBp);
   }
   if(brushCursor&&curTab==="ex"&&exMode==="brush"){
     const bx=brushCursor[0]*sc+view.ox, by=brushCursor[1]*sc+view.oy;
