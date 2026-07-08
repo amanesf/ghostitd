@@ -34,8 +34,8 @@ const EXPECTED_BODY_ONLY = {
   sha256: "0515842c162df7de1ecbff2cc8967942b52a67c029730c15b170c0e3e40dabe5",
 };
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 902132,
-  sha256: "dfff05209554406948b5772d38875b1dd9aaafc7b325dba009acee239e56b12a",
+  byteLength: 952356,
+  sha256: "8401480a1dc082181fa7b5c328db3a613df5f1c45427213edbe7b96bdbdc49e8",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

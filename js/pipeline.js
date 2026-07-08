@@ -240,7 +240,9 @@ async function runCarvingStages(state, report){
       // 分けて渡す。
       faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
       SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
-      frontCont:frontCont, backCont:backCont, sideCont:sideCont,
+      // ★2026-07-09: frontCont/backCont/sideCont(元写真の白背景しきい値による
+      // サブピクセル補正用データ)はstageAccessories側で使わなくなった
+      // (js/accessories.jsのcarveRegion呼び出し部のコメント参照)ため渡さない。
       pivots:pivots, gp:gp,
     });
   }else{

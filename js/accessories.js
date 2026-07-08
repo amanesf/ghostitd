@@ -108,7 +108,6 @@ P3D.pixelBboxToModelBbox = pixelBboxToModelBbox;
  *   faW,faH: front/backの画像サイズ(carving.jsの前提通りback/frontは同サイズ)
  *   saW,saH: side画像のサイズ(front/backとは別サイズでよい)
  *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション
- *   frontCont,backCont,sideCont: front/back用はfaW*faH、side用はsaW*saHのFloat32Array
  *   pivots: skeleton pivots(soft skinning用)
  *   gp: gen_params
  * }
@@ -187,9 +186,16 @@ function stageAccessories(opts){
 
     var result = P3D.carveRegion({
       fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:saW, saH:saH,
-      faCont: gp.subpixel ? opts.frontCont : null,
-      baCont: gp.subpixel ? opts.backCont : null,
-      saCont: gp.subpixel ? opts.sideCont : null,
+      // ★2026-07-09バグ修正: opts.frontCont/backCont/sideContは元写真(front.png等)
+      // そのものの明度(min(R,G,B))で、体本体の白背景しきい値(white_thr)による
+      // 境界サブピクセル補正専用のデータ。マスク形式のアクセサリーはパレット色
+      // 由来の正確な2値マスク(fa/ba/sa)を既に持っているため、この補正を適用すると
+      // マスクで見つけた境界が元写真の明度が white_thr を横切る位置へズラされて
+      // しまう。ツインテールのように白背景でない体・服の上に重なる行では、
+      // その明度が白から大きく外れるため境界が不規則に暴れ、ねじれたリボン状の
+      // 破綻したメッシュになっていた(ユーザー指摘により発覚)。マスク形式の
+      // アクセサリーではこの補正自体が無意味なので常にnullにする。
+      faCont: null, baCont: null, saCont: null,
       SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:SYTOP, SYBOT:SYBOT, SIDE_REF:SIDE_REF,
       backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:sideOffsetX, sideOffsetY:sideOffsetY,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
