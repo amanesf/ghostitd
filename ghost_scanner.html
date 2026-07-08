@@ -135,6 +135,9 @@
         <button class="btn sm" id="frontRetryBtn" disabled>リトライ</button>
         <button class="btn sm green" id="frontConfirmBtn" disabled>この画像で確定</button>
       </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="frontUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="frontUploadFile" accept="image/*"/>
       <button class="btn green" id="frontNextBtn" disabled>次へ(側面生成)</button>
     </div>
   </div>
@@ -151,6 +154,9 @@
         <button class="btn sm" id="sideRetryBtn" disabled>リトライ</button>
         <button class="btn sm green" id="sideConfirmBtn" disabled>この画像で確定</button>
       </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="sideUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="sideUploadFile" accept="image/*"/>
       <button class="btn green" id="sideNextBtn" disabled>次へ(背面生成)</button>
     </div>
   </div>
@@ -167,6 +173,9 @@
         <button class="btn sm" id="backRetryBtn" disabled>リトライ</button>
         <button class="btn sm green" id="backConfirmBtn" disabled>この画像で確定</button>
       </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="backUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="backUploadFile" accept="image/*"/>
       <button class="btn green" id="backNextBtn" disabled>次へ(ランドマーク)</button>
     </div>
   </div>
@@ -341,6 +350,45 @@ $("modelListFetchBtn").onclick=function(){
     $("modelListStatus").textContent="モデル一覧の取得に失敗しました: "+((e&&e.message)||e);
   });
 };
+
+/* ==================== 汎用: プロンプトパネルにコピーボタンを付与 ==================== */
+// GHOST_SCANNER_PLAN.mdの「送信するプロンプト全文を隠さず表示」に加え、外部
+// (AI Studio等)へそのまま貼り付けて使えるようコピー機能を用意する。
+function copyTextToClipboard(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(text);
+  }
+  // クリップボードAPIが使えない環境向けのフォールバック
+  return new Promise(function(resolve,reject){
+    try{
+      var ta=document.createElement("textarea");
+      ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      var ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error("execCommand(copy)に失敗しました"));
+    }catch(e){ reject(e); }
+  });
+}
+function attachPromptCopyButtons(){
+  var panels=document.querySelectorAll("details.promptPanel");
+  panels.forEach(function(panel){
+    var summary=panel.querySelector("summary");
+    var pre=panel.querySelector("pre");
+    if(!summary || !pre || summary.querySelector(".copyBtn")) return;
+    var btn=document.createElement("button");
+    btn.type="button"; btn.className="btn sm copyBtn"; btn.textContent="コピー";
+    btn.style.cssText="margin:0 0 0 8px;padding:2px 10px;font-size:11px;vertical-align:middle";
+    btn.onclick=function(ev){
+      ev.preventDefault(); ev.stopPropagation();
+      copyTextToClipboard(pre.textContent).then(function(){
+        var orig=btn.textContent; btn.textContent="コピーしました";
+        setTimeout(function(){ btn.textContent=orig; }, 1500);
+      }).catch(function(e){ setMsg("コピーに失敗しました: "+((e&&e.message)||e),true); });
+    };
+    summary.appendChild(btn);
+  });
+}
 
 /* ==================== 汎用: canvasにdataURLを表示 ==================== */
 function showImageOnCanvas(canvasEl, dataUrl){
@@ -621,13 +669,34 @@ $("backPromptText").textContent=promptBack();
 $("lmPromptText").textContent=PROMPT_D;
 $("paramsPromptText").textContent=PROMPT_E;
 $("accPromptText").textContent=PROMPT_F;
+attachPromptCopyButtons();
 
 /* ==================== タブ2〜4共通: front/side/back生成(常に新規セッション) ==================== */
 // GHOST_SCANNER_PLAN.md: front/side/back生成は毎回新規セッション(会話履歴を持ち越さない)。
 // 単一責務: 「生成する」「確定する」「次へ進む」をそれぞれ別関数に分ける。
 function makeGenTab(name, promptText, refDataUrlFn, nextTabName){
   var genBtn=$(name+"GenBtn"), retryBtn=$(name+"RetryBtn"), confirmBtn=$(name+"ConfirmBtn"),
-      nextBtn=$(name+"NextBtn"), preview=$(name+"Preview");
+      nextBtn=$(name+"NextBtn"), preview=$(name+"Preview"),
+      uploadBtn=$(name+"UploadBtn"), uploadFile=$(name+"UploadFile");
+  // API生成に失敗した場合の代替手段: 外部(AI Studio等)で手動生成した画像を
+  // このタブの結果として取り込む(コピーしたプロンプトをそのまま使う想定)。
+  // 取り込み後は生成成功時と同じ状態(dataUrl設定・確定待ち)にする。
+  if(uploadBtn && uploadFile){
+    uploadBtn.onclick=function(){ uploadFile.click(); };
+    uploadFile.onchange=function(e){
+      var f=e.target.files && e.target.files[0];
+      if(!f) return;
+      setMsg("画像を読み込み中...");
+      P3D.scannerFileToDataUrl(f).then(function(dataUrl){
+        state[name].dataUrl=dataUrl; state[name].confirmed=false;
+        return showImageOnCanvas(preview, dataUrl);
+      }).then(function(){
+        confirmBtn.disabled=false;
+        setMsg((TAB_LABEL[name]||name)+"を手動でアップロードしました。問題なければ「この画像で確定」してください。");
+      }).catch(function(e){ setMsg("画像の読み込みに失敗しました: "+e.message,true); });
+      uploadFile.value="";
+    };
+  }
   function doGenerate(){
     var ref=refDataUrlFn();
     if(!ref){ setMsg("参照画像がありません。前のタブを確認してください。",true); return; }
