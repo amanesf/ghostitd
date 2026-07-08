@@ -33,7 +33,11 @@ function localAlphaBand(fullRgba, fullW, fullH, x0,y0,x1,y1, whiteThr){
   return out;
 }
 
-// accessories.py _local_alpha相当(帯分割)
+// accessories.py _local_alpha相当(帯分割)。2026-07-09の多角形(regions)形式
+// 廃止に伴いstageAccessories自体はもう呼ばなくなったが、gen_paramsの
+// white_thr/band_h/band_overlapは移行期間中の互換のためそのまま残す方針
+// (GHOST_SCANNER_PLAN.md「gen_paramsは維持」節)に合わせ、この関数自体も
+// 削除せず残している。
 function localAlpha(fullRgba, fullW, fullH, x0,y0,x1,y1, whiteThr, bandH, bandOverlap, pad){
   pad = (pad===undefined) ? 25 : pad;
   var x0i=Math.max(0,x0-pad), x1i=Math.min(fullW,x1+pad);
@@ -64,6 +68,8 @@ function rectAlpha(fullW, fullH, x0,y0,x1,y1){
   return out;
 }
 
+// front画像ピクセル座標からモデル座標への変換(pixelBboxToModelBboxの
+// toModelFn引数として使う。多角形(regions)形式廃止後もmask.*.bboxの変換に使う)。
 function frontPointsToModel(pts, CX, SCALE, YBOT){
   return pts.map(function(p){ return [(p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
 }
@@ -97,7 +103,7 @@ P3D.pixelBboxToModelBbox = pixelBboxToModelBbox;
 
 /**
  * opts: {
- *   accs: [{name,mode,bones,regions:{front:{points},back:{points},side:{points}}}, ...]
+ *   accs: [{name,mode,bones,mask:{front:{maskDataUrl,bbox,alpha},back:{...},side:{...}}}, ...]
  *   frontRgba,backRgba,sideRgba: Uint8ClampedArray(*4) 元画像(front.png等)そのまま
  *   faW,faH: front/backの画像サイズ(carving.jsの前提通りback/frontは同サイズ)
  *   saW,saH: side画像のサイズ(front/backとは別サイズでよい)
@@ -130,86 +136,53 @@ function stageAccessories(opts){
     var name = acc.name || 'accessory';
     var mode = acc.mode || 'rigid';
     var bones = acc.bones || [];
-    // accessoryは多角形(regions[view].points、手動編集)かマスク(mask[view].bbox、
-    // 色分けマップ由来・自動抽出のみ)のどちらか一方の形式で範囲を持つ
-    // (GHOST_SCANNER_PLAN.md「データモデル」節: 統合せず並存させる)。
-    // どちらの場合も実際の3D彫刻自体はbbox範囲内のアルファ検出(localAlpha/
-    // carveRegion)で行われるため、ここでの分岐はbbox算出方法の違いだけで済む。
-    var regions = acc.regions || {};
-    var isMaskAcc = !!acc.mask;
+    // accessoryはマスク(mask[view].bbox、色分けマップ由来・自動抽出のみ)形式
+    // だけを持つ(多角形(regions)形式は2026-07-09に廃止)。実際の3D彫刻は
+    // bbox範囲内のアルファ検出(carveRegion)で行われる。
     var mask = acc.mask || {};
-    var fr=regions.front, bk=regions.back, sd=regions.side;
-    var frontPolygon=null, backPolygon=null, sidePolygon=null;
     var mxMin,mxMax,myMin,myMax,mzMin,mzMax;
-    if(fr && fr.points && fr.points.length){
-      frontPolygon = frontPointsToModel(fr.points, CX, SCALE, YBOT);
-      var bb=bboxOf(frontPolygon); mxMin=bb[0];mxMax=bb[1];myMin=bb[2];myMax=bb[3];
-    }else if(bk && bk.points && bk.points.length){
-      backPolygon = backPointsToModel(bk.points, CX, SCALE, YBOT, faW, backOffsetX, backOffsetY);
-      var bb2=bboxOf(backPolygon); mxMin=bb2[0];mxMax=bb2[1];myMin=bb2[2];myMax=bb2[3];
-    }else if(mask.front && mask.front.bbox){
+    var usedBackOnly=false;
+    if(mask.front && mask.front.bbox){
       var bbm=P3D.pixelBboxToModelBbox(mask.front.bbox, function(pts){ return frontPointsToModel(pts, CX, SCALE, YBOT); });
       mxMin=bbm[0];mxMax=bbm[1];myMin=bbm[2];myMax=bbm[3];
     }else if(mask.back && mask.back.bbox){
       var bbm2=P3D.pixelBboxToModelBbox(mask.back.bbox, function(pts){ return backPointsToModel(pts, CX, SCALE, YBOT, faW, backOffsetX, backOffsetY); });
       mxMin=bbm2[0];mxMax=bbm2[1];myMin=bbm2[2];myMax=bbm2[3];
+      usedBackOnly=true;
     }else{
       console.log("  accessories: skip", name, "(front/back範囲なし)");
       return;
     }
-    if(sd && sd.points && sd.points.length){
-      sidePolygon = sidePointsToModel(sd.points, SIDE_REF, SCALE, SYTOP, SYBOT);
-      var bb3=bboxOf(sidePolygon); mzMin=bb3[0];mzMax=bb3[1];
-    }else if(mask.side && mask.side.bbox){
+    if(mask.side && mask.side.bbox){
       var bbm3=P3D.pixelBboxToModelBbox(mask.side.bbox, function(pts){ return sidePointsToModel(pts, SIDE_REF, SCALE, SYTOP, SYBOT); });
       mzMin=bbm3[0];mzMax=bbm3[1];
     }else{
       var hw=(mxMax-mxMin)/2; mzMin=-hw*0.6; mzMax=hw*0.6;
     }
 
-    // ★2026-07-08バグ修正: mask形式(色分けマップ由来)のアクセサリーは、
-    // パレット色によるピクセル単位の正確なマスク(mask[view].alpha、
-    // pipeline.jsで事前にmaskDataUrlをラスタライズ済み)があればそれを
-    // そのまま使う。従来はbbox内を「白背景でないか」で塗り直すlocalAlphaだけに
+    // ★2026-07-08バグ修正: パレット色によるピクセル単位の正確なマスク
+    // (mask[view].alpha、pipeline.jsで事前にmaskDataUrlをラスタライズ済み)を
+    // そのまま使う。従来はbbox内を「白背景でないか」で塗り直すlocalAlphaに
     // 頼っていたため、bbox内にある体側のピクセル(肌・髪・他の服等)まで拾って
     // 本体位置まで彫ってしまっていた。
     //
-    // ★2026-07-09バグ修正(GHOST_SCANNER_PLAN.md 原因①): mask形式のアクセサリー
-    // は片面(front/back/side)にしかマスクが存在しないことが普通にある(例:
-    // 前髪は背面写真に映らないのでmask.backが無い)。この場合に元画像を粗い
-    // 閾値(localAlpha)で走査すると、前髪と無関係な後ろ髪・地肌等まで
-    // 「背面側のアルファ」として拾ってしまい、front/back合成(和集合)後に
-    // 本物の前髪と無関係な塊が両方彫られて斜め視点で二重に見える不具合が
-    // あった。mask形式のアクセサリーはlocalAlphaへフォールバックせず、
-    // front/backは情報なし(全ゼロ、和集合に寄与しない)、sideは実画像を
-    // 見ずに粗い深さ推定の矩形をそのまま塗りつぶす。regions(多角形)形式の
-    // アクセサリーは従来通りlocalAlphaを使う。
-    var faAcc, baAcc;
-    if(mask.front && mask.front.alpha){
-      faAcc = mask.front.alpha;
-    }else if(isMaskAcc){
-      faAcc = new Uint8Array(faW*faH);
-    }else{
-      faAcc = localAlpha(opts.frontRgba, faW, faH, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
-                 gp.white_thr, gp.band_h, gp.band_overlap);
-    }
-    if(mask.back && mask.back.alpha){
-      baAcc = mask.back.alpha;
-    }else if(isMaskAcc){
-      baAcc = new Uint8Array(faW*faH);
-    }else{
-      baAcc = localAlpha(opts.backRgba, faW, faH, faW-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, faW-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
-                 gp.white_thr, gp.band_h, gp.band_overlap);
-    }
+    // ★2026-07-09バグ修正(GHOST_SCANNER_PLAN.md 原因①): 片面(front/back/side)
+    // にしかマスクが存在しないことが普通にある(例: 前髪は背面写真に映らない
+    // のでmask.backが無い)。この場合に元画像を粗い閾値(localAlpha)で走査
+    // すると、前髪と無関係な後ろ髪・地肌等まで「背面側のアルファ」として
+    // 拾ってしまい、front/back合成(和集合)後に本物の前髪と無関係な塊が
+    // 両方彫られて斜め視点で二重に見える不具合があった。localAlphaへは
+    // フォールバックせず、front/backは情報なし(全ゼロ、和集合に寄与しない)、
+    // sideは実画像を見ずに粗い深さ推定の矩形をそのまま塗りつぶす。
+    var faAcc = (mask.front && mask.front.alpha) ? mask.front.alpha : new Uint8Array(faW*faH);
+    var baAcc = (mask.back && mask.back.alpha) ? mask.back.alpha : new Uint8Array(faW*faH);
     var saAcc;
     if(mask.side && mask.side.alpha){
       saAcc = mask.side.alpha;
     }else{
       var sx0=SIDE_REF+mzMin*SCALE+sideOffsetX, sx1=SIDE_REF+mzMax*SCALE+sideOffsetX;
       var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP)+sideOffsetY, sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP)+sideOffsetY;
-      saAcc = isMaskAcc ?
-        rectAlpha(saW, saH, sx0, sy0, sx1, sy1) :
-        localAlpha(opts.sideRgba, saW, saH, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
+      saAcc = rectAlpha(saW, saH, sx0, sy0, sx1, sy1);
     }
 
     var result = P3D.carveRegion({
@@ -231,7 +204,6 @@ function stageAccessories(opts){
       // carveRegion自体には常にsmoothIters:0を渡し、平滑化はfinishAccessoryMesh
       // 側で別途適用する。
       smoothIters: 0,
-      frontPolygon: frontPolygon, backPolygon: backPolygon, sidePolygon: sidePolygon,
       whiteThr: gp.white_thr,
     });
     if(!result){ console.warn("  accessories: carve失敗、このアクセサリーはモデルに含まれません:", name); return; }
@@ -253,8 +225,7 @@ function stageAccessories(opts){
     for(var i=0;i<F.length;i++) allF.push(F[i]+voff);
     allJ.push(skin.J); allW.push(skin.W);
     var nv=V.length/3;
-    var nf = (frontPolygon===null);
-    for(var i2=0;i2<nv;i2++){ allNF.push(nf); allAccName.push(name); }
+    for(var i2=0;i2<nv;i2++){ allNF.push(usedBackOnly); allAccName.push(name); }
     voff += nv;
     console.log("  accessories:", name, "verts", nv, "tris", F.length/3, "mode", mode, "bones", bones);
   });

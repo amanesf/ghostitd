@@ -2,11 +2,19 @@
 // 生成パイプライン(js/pipeline.js, carving.js, skeleton.js, atlas.js,
 // accessories.js, visual_hull.js, marching_cubes.js)の回帰検知テスト。
 //
-// ★これは「golden master」テストです。同梱サンプル(images/*.png +
-// landmarks_ai.json)から生成したGLBのSHA-256ハッシュを固定値と比較し、
+// ★これは「golden master」テストです。同梱サンプル(images2/*.png +
+// landmarks_ai_2.json)から生成したGLBのSHA-256ハッシュを固定値と比較し、
 // 1バイトでも変わったら失敗させる。彫刻・スキニングのアルゴリズムは
 // 数式が複雑で自動テストの無いプロジェクトのため、「意図しない変更が
 // 無いこと」を機械的に検知するのが目的。
+//
+// ★2026-07-09: 多角形(手動パーツ)アクセサリー機能廃止に伴い、サンプル1
+// (images/+landmarks_ai.json、多角形形式)を削除し、唯一のサンプルである
+// サンプル2(images2/+landmarks_ai_2.json、マスク形式、アクセサリー7点内蔵)
+// を使うよう作り直した。「body-only」の生成経路も引き続き検証するため、
+// サンプル2のJSONをそのまま使う代わりに、テスト内でaccessoriesを空にした
+// 一時JSONを組み立てて「JSON読み込み」機能経由で読み込ませている(手動で
+// アクセサリーを追加するUI(旧「パーツ＋」タブ)は廃止済みのため)。
 //
 // 生成結果を意図的に変える変更(例: 彫刻アルゴリズムの改善、パラメータ
 // 既定値の変更)をした場合は、このテストが失敗するのが正しい挙動です。
@@ -15,40 +23,38 @@
 "use strict";
 const assert = require("assert");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 const { chromium } = require("playwright");
-const { startServer, openPage } = require("./lib/testkit");
+const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 
 const EXPECTED_BODY_ONLY = {
-  byteLength: 1235620,
-  sha256: "ffdb515f29976582952697bb6d19f2c79c9d425c57147f2259f6ae4d23198bae",
+  byteLength: 536912,
+  sha256: "0515842c162df7de1ecbff2cc8967942b52a67c029730c15b170c0e3e40dabe5",
 };
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1356172,
-  sha256: "ea0d890746bb644dc04f0fcf4a575ebc01085bdadf76615ef6263462ebbb528a",
+  byteLength: 902132,
+  sha256: "dfff05209554406948b5772d38875b1dd9aaafc7b325dba009acee239e56b12a",
 };
 
-async function generateAndExportGlb(server, browser, addAccessory) {
+async function generateAndExportGlb(server, browser, bodyOnly) {
   const { page, errors } = await openPage(browser, server.url + "/landmark_tool.html");
   await page.click("#modeSampleBtn b");
   await page.waitForTimeout(1500);
 
-  if (addAccessory) {
-    // 5タブ再編(GHOST_SCANNER_PLAN.md「色分けマップ」方式): 旧「パーツ＋」(ac)は
-    // 「手動マスク」(manualmask)配下のサブタブになり、編集にはロック解除が要る。
-    await page.click('.tabbtn[data-tab="manualmask"]');
-    await page.check("#manualMaskUnlock");
-    await page.click('[data-subtab="ac"]');
+  if (bodyOnly) {
+    // サンプル2のJSONからaccessoriesだけを空にした一時JSONを作り、
+    // 「JSON読み込み」機能経由で読み込ませる(画像は先に読み込み済みのものを使う)。
+    const srcJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "landmarks_ai_2.json"), "utf8"));
+    srcJson.accessories = [];
+    const tmpPath = path.join(os.tmpdir(), "landmarks_ai_2_body_only_" + Date.now() + ".json");
+    fs.writeFileSync(tmpPath, JSON.stringify(srcJson));
+    await page.click('.tabbtn[data-tab="gen"]');
     await page.waitForTimeout(200);
-    await page.click("#acAddBtn");
-    await page.waitForTimeout(200);
-    await page.fill("#acName", "TestAccessory");
-    await page.waitForTimeout(100);
-    await page.click(".bonesGroups input[type=checkbox]");
-    await page.waitForTimeout(200);
-    await page.click("#acPlaceAll");
-    await page.waitForTimeout(200);
-    await page.click("#acConfirm");
-    await page.waitForTimeout(200);
+    await page.setInputFiles("#jsonFile", tmpPath);
+    await page.waitForTimeout(500);
+    fs.unlinkSync(tmpPath);
   }
 
   await page.click('.tabbtn[data-tab="gen"]');
@@ -84,13 +90,13 @@ async function run() {
   const server = await startServer();
   const browser = await chromium.launch();
   try {
-    const bodyOnly = await generateAndExportGlb(server, browser, false);
+    const bodyOnly = await generateAndExportGlb(server, browser, true);
     assert.strictEqual(bodyOnly.byteLength, EXPECTED_BODY_ONLY.byteLength,
       "body-only GLB byteLength changed: " + bodyOnly.byteLength + " (expected " + EXPECTED_BODY_ONLY.byteLength + ")");
     assert.strictEqual(bodyOnly.sha256, EXPECTED_BODY_ONLY.sha256,
       "body-only GLB sha256 changed: " + bodyOnly.sha256 + " (expected " + EXPECTED_BODY_ONLY.sha256 + ") -- if this change was intentional, update EXPECTED_BODY_ONLY in this file");
 
-    const withAccessory = await generateAndExportGlb(server, browser, true);
+    const withAccessory = await generateAndExportGlb(server, browser, false);
     assert.strictEqual(withAccessory.byteLength, EXPECTED_WITH_ACCESSORY.byteLength,
       "with-accessory GLB byteLength changed: " + withAccessory.byteLength + " (expected " + EXPECTED_WITH_ACCESSORY.byteLength + ")");
     assert.strictEqual(withAccessory.sha256, EXPECTED_WITH_ACCESSORY.sha256,

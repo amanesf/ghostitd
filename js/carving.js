@@ -24,25 +24,6 @@ function medianFilter(vals, win){
   return out;
 }
 
-// polyXY: [[x,y],...] (モデル座標の閉多角形), y: 水平線
-// 戻り値: [[x0,x1],...] (偶奇則によるx区間)
-function polygonRowIntervals(polyXY, y){
-  var n=polyXY.length, xs=[];
-  for(var i=0;i<n;i++){
-    var x1=polyXY[i][0], y1=polyXY[i][1];
-    var j=(i+1)%n, x2=polyXY[j][0], y2=polyXY[j][1];
-    if(y1===y2) continue;
-    if(Math.min(y1,y2)<=y && y<Math.max(y1,y2)){
-      var t=(y-y1)/(y2-y1);
-      xs.push(x1+t*(x2-x1));
-    }
-  }
-  xs.sort(function(a,b){return a-b;});
-  var out=[];
-  for(var k=0;k+1<xs.length - (xs.length%2);k+=2) out.push([xs[k],xs[k+1]]);
-  return out;
-}
-
 function intersectIntervals(runs, allowed){
   if(!allowed || !allowed.length) return runs;
   var out=[];
@@ -357,7 +338,6 @@ P3D.linspace = linspace;
  *     部位分けが不要な呼び出し元はpsqHead/psqTorso/psqLegs/psqArms/psqHandsに
  *     同じ値を渡せばよい)
  *   neckY,hipsY: 頭/胴体、胴体/脚の境界となるモデル座標y(省略可)
- *   frontPolygon, backPolygon, sidePolygon: [[x,y],...] | null (アクセサリー用)
  *   armLines: [[[x0,y0],[x1,y1]],...] | null (肩→肘→手首の骨線分。腕の円形断面用)
  *   armMaxHw: 腕とみなす断面半径(傾き補正後)の上限
  *   handLines: [[[x0,y0],[x1,y1]],...] | null (手首→指先方向の線分。手の押し出し用)
@@ -385,7 +365,6 @@ function carveRegion(opts){
     return psqTorso;
   }
   var smoothIters=opts.smoothIters||0;
-  var frontPolygon=opts.frontPolygon||null, backPolygon=opts.backPolygon||null, sidePolygon=opts.sidePolygon||null;
   var armLines=opts.armLines||null, armMaxHw=opts.armMaxHw||0.07;
   var handLines=opts.handLines||null, handDepthHw=opts.handDepthHw||0.02, handMaxHw=opts.handMaxHw||0.06;
   var whiteThr=opts.whiteThr!==undefined?opts.whiteThr:250;
@@ -413,10 +392,9 @@ function carveRegion(opts){
   }
   var mxLim=[[mx[0],mx[nx-1]]];
   var mzLim=[[mz[0],mz[nz-1]]];
-  var xyPolygon = frontPolygon || backPolygon;
 
   // ---- 1) 行ごとの幅セグメント(front/back)、行トラッキング+中央値フィルタ ----
-  // carveRegionのローカル変数(fa/ba/fy/byBack/CX/SCALE/mxLim/xyPolygon等)を
+  // carveRegionのローカル変数(fa/ba/fy/byBack/CX/SCALE/mxLim等)を
   // クロージャでそのまま参照する内部関数として切り出す(引数の受け渡しミスに
   // よる数値ズレを避けるため、あえてトップレベル関数への外出しはしない)。
   function buildWidthTracks(){
@@ -433,7 +411,6 @@ function carveRegion(opts){
       // (front基準の幅からbackが「引き算」していた)。和集合ならbackはfrontに
       // 無い範囲を「足す」方向にしか働かず、食い違いがあっても穴にならない。
       var runsVal = intersectIntervals(unionIntervals(fr,br), mxLim);
-      if(xyPolygon) runsVal = intersectIntervals(runsVal, polygonRowIntervals(xyPolygon, my[iy]));
       var segs=[];
       for(var i=0;i<runsVal.length;i++){
         var r0=runsVal[i][0], r1=runsVal[i][1];
@@ -482,17 +459,6 @@ function carveRegion(opts){
     var saPx = saCont ? Common.findRunsSubpixel(saRow, rowOf1d(saCont,saW,spy[iy2]), whiteThr) : Common.findRuns(saRow);
     var zrunsMz = saPx.map(function(pq){ return [(pq[0]-SIDE_REF-sideOffsetX)/SCALE, (pq[1]-SIDE_REF-sideOffsetX)/SCALE]; });
     zrunsMz = intersectIntervals(zrunsMz, mzLim);
-    if(sidePolygon){
-      // ★2026-07-04: アクセサリーの側面ポリゴンが指定されている行では、side画像
-      // の描線が薄い/途切れている等でrunが取れなくても行を捨てず、描いた側面
-      // ポリゴンの区間そのものを奥行きとして使う(側面領域を「必ず」奥行きに
-      // 反映する)。従来はrunが取れない行が丸ごと欠落し、アクセサリーが歯抜け
-      // の薄い円盤状になることがあった。
-      var polyIv = intersectIntervals(polygonRowIntervals(sidePolygon, my[iy2]), mzLim);
-      if(!polyIv.length) continue; // ポリゴンの縦範囲外
-      var clipped = intersectIntervals(zrunsMz, polyIv);
-      zrunsMz = clipped.length ? clipped : polyIv;
-    }
     if(!zrunsMz.length) continue;
     // ★2026-07-04(改): 以前は「最大幅のrunを採用」(+vox*3以内の隙間の橋渡し)
     // だったが、顎先と首の間のような実在の凹みで顎側runが分離すると、隙間が

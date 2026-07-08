@@ -227,20 +227,18 @@
       <p class="hint" id="automaskEmptyHint" style="font-size:11px;color:var(--mut)"></p>
     </div>
 
-    <!-- 手動マスク(既存の「領域」ex・「パーツ＋」acを内部サブ切り替えとして格納。
-         GHOST_SCANNER_PLAN.md「UI変更」節の通り、既存ロジックはほぼ無改修のまま
-         移設し、明示的なチェックボックスをオンにしないと編集できないようにする
-         (誤操作防止、自動マスクと役割が違うことを意識させるため)。 -->
+    <!-- 手動マスク(除外範囲=excludeMaskによる体シルエット除外機能のみ)。
+         多角形(手動パーツ)によるアクセサリー編集機能は維持コストが高いため
+         2026-07-09に廃止し、色分けマップ由来の自動マスク方式に一本化した
+         (GHOST_SCANNER_PLAN.md「仕様変更」節)。明示的なチェックボックスを
+         オンにしないと編集できないようにしている(誤操作防止、自動マスクと
+         役割が違うことを意識させるため)。 -->
     <div class="tabpanel acpanel" data-tabpanel="manualmask" id="manualMaskPanel">
       <div class="acitem" style="margin-bottom:10px">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px">
           <input type="checkbox" id="manualMaskUnlock">
-          編集を有効にする(誤操作防止のロック。オフの間は下の「領域」「パーツ＋」を編集できません)
+          編集を有効にする(誤操作防止のロック。オフの間は下の「領域」を編集できません)
         </label>
-      </div>
-      <div class="tabbar" id="manualMaskSubTabbar" style="margin-bottom:10px">
-        <button class="tabbtn on" data-subtab="ex">領域</button>
-        <button class="tabbtn" data-subtab="ac">パーツ＋</button>
       </div>
       <div id="manualMaskEditArea">
     <div class="tabpanel acpanel" data-tabpanel="ex">
@@ -271,20 +269,6 @@
         <button class="btn" id="exUndo">↩ 元に戻す</button>
         <button class="btn" id="exClear">全解除</button>
       </div>
-    </div>
-
-    <div class="tabpanel acpanel" data-tabpanel="ac">
-      <h2>アクセサリー（ヘッドホン・猫耳・カメラ小物・スカート等）</h2>
-      <div class="acitem" style="margin-bottom:10px">
-        <span class="nm">ボーン表示/範囲プレビュー</span>
-        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
-          <input type="checkbox" id="boneOverlayToggleAC">ボーン表示</label>
-        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
-          <input type="checkbox" id="boneRegionToggleAC">ボーン範囲</label>
-      </div>
-      <div id="acList" class="aclist"></div>
-      <div id="acForm"></div>
-      <button class="btn mint" id="acAddBtn">+ 手動で追加</button>
     </div>
       </div><!-- #manualMaskEditArea -->
     </div><!-- #manualMaskPanel -->
@@ -398,27 +382,12 @@ const BONE_GROUPS=[
 let imgs={front:null,side:null,back:null};
 let curView="front";
 function curImg(){return imgs[curView];}
-let accessories=[], pendingAcc=null, pendingAccEditIdx=null, pendingAccEditOriginal=null;
+let accessories=[];
 const BONE_JP={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
   clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
   clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
   thigh_L:"腿L",shin_L:"すねL",foot_L:"足L",toe_L:"つま先L",
   thigh_R:"腿R",shin_R:"すねR",foot_R:"足R",toe_R:"つま先R"};
-// アクセサリー取付部位の初期配置を前面ランドマークから求めるためのアンカー
-// (各部位の位置算出方法。anchorFrontPos()参照)。
-const OV_ANCHOR={
-  hips:{mid:["hip"]}, torso:{mid:["waist_L","waist_R"]}, chest:{mid:["clavicle_L","clavicle_R"]},
-  head:{mid:["head_top","chin"]},
-  clavicle_L:{mid:["clavicle_L"]}, clavicle_R:{mid:["clavicle_R"]},
-  upperarm_L:{mid:["shoulder_L","elbow_L"]}, upperarm_R:{mid:["shoulder_R","elbow_R"]},
-  forearm_L:{mid:["elbow_L","wrist_L"]}, forearm_R:{mid:["elbow_R","wrist_R"]},
-  wrist_L:{mid:["wrist_L"]}, wrist_R:{mid:["wrist_R"]},
-  hand_L:{extrap:["elbow_L","wrist_L"]}, hand_R:{extrap:["elbow_R","wrist_R"]},
-  thigh_L:{mid:["hip","knee_L"]}, thigh_R:{mid:["hip","knee_R"]},
-  shin_L:{mid:["knee_L","ankle_L"]}, shin_R:{mid:["knee_R","ankle_R"]},
-  foot_L:{mid:["ankle_L","toe_L"]}, foot_R:{mid:["ankle_R","toe_R"]},
-  toe_L:{mid:["toe_L"]}, toe_R:{mid:["toe_R"]},
-};
 let seamAngles={};
 let seamNoSide={}; // {boneName:true} または {"acc:"+名前:true} = 側面画像を使わない
 let seamSmoothIters=8; // 境界線平滑化の反復回数(atlas.jsのSEAM_DEFAULT_SMOOTHと一致)
@@ -913,16 +882,9 @@ function cleanJpeg(img,W,H,maxDim){
 // 切り出し済み(ゴーストスキャナーの簡易プレビューと見た目を共有するため)。
 const drawCross=P3D.drawCross;
 const drawLabel=P3D.drawLabel;
-// アクセサリーごとに枠線/点の色を変える(全パーツ同色だと見分けが付かない
-// との指摘のため)。パレットを順番に割り当て、編集中(pendingAcc)は
-// 選択ハイライトと同じ色で常に区別できるようにする。
-const ACC_COLOR_PALETTE=["#7aa2ff","#ff6ad5","#52e0c4","#ffb454","#ff8a8a","#b48cff","#8cffb4","#5be6ff"];
-const ACC_PENDING_COLOR="#ffe14d";
-function accColorFor(idx){ return ACC_COLOR_PALETTE[idx % ACC_COLOR_PALETTE.length]; }
-
 /* ---------- 汎用「操作可能な点」レジストリ ----------
-   19個の解剖学的ランドマーク(front専用)・アクセサリー範囲(可変N点多角形)を、
-   タップ選択/ドラッグ/十字キー微調整という同じ操作で扱えるように統一する。 */
+   19個の解剖学的ランドマーク(front専用)を、タップ選択/ドラッグ/十字キー
+   微調整という同じ操作で扱えるように統一する。 */
 function getInteractivePoints(view){
   // タブごとに「そのタブの専門」の点だけを対象にする(表示・タップ選択・ドラッグ
   // すべて共通でこの一覧を使うため、ここで絞ればマークタブでアクセサリー点に
@@ -932,34 +894,7 @@ function getInteractivePoints(view){
     LM.forEach(d=>{const p=points[d.k];if(!p)return;
       out.push({key:"lm:"+d.k, pos:p, set:np=>{points[d.k]=np;}, color:GCOL[d.g], label:d.jp});});
   }
-  if(curTab==="ac"){
-    const pushRegionPts=(regions,prefix,name,color)=>{
-      if(!regions)return; // マスク形式のaccessoryは多角形の点ドラッグ編集対象外
-      Object.keys(regions).forEach(v=>{if(v!==view)return;
-        const r=regions[v];
-        r.points.forEach((p,i)=>{
-          out.push({key:prefix+":"+v+":"+i, pos:p, set:np=>{r.points[i]=np;}, color, label:name+"-"+(i+1)});
-        });});
-    };
-    if(pendingAcc)pushRegionPts(pendingAcc.regions,"pend","新規",ACC_PENDING_COLOR);
-    accessories.forEach((a,i)=>pushRegionPts(a.regions,"acc"+i,a.name||"?",accColorFor(i)));
-  }
   return out;
-}
-// 実際の線描画はP3D.drawPolygonOutline(汎用・座標のみ受け取る)に委譲し、
-// ここではregions/pendingAcc/accessories等このツール固有の状態からビュー座標
-// への変換だけを担当する(フェーズ0切り出し)。
-function drawRegionOutlines(x,sc){
-  const toPx=p=>[p[0]*sc+view.ox, p[1]*sc+view.oy];
-  const drawRegions=(regions,color)=>{
-    if(!regions)return; // マスク形式のaccessoryは輪郭線を持たない(ラスタマスクのため)
-    Object.keys(regions).forEach(v=>{if(v!==curView)return;
-      const pts=regions[v].points; if(!pts||pts.length<2)return;
-      P3D.drawPolygonOutline(x, pts.map(toPx), color);
-    });
-  };
-  if(pendingAcc)drawRegions(pendingAcc.regions,ACC_PENDING_COLOR);
-  accessories.forEach((a,i)=>drawRegions(a.regions,accColorFor(i)));
 }
 // ボーンタブ用: 現在のランドマークからP3D.computePivots()を呼び、
 // 生成時と同じロジックでボーン位置(モデル座標)を求める(表示のみ、調整不可)。
@@ -1090,10 +1025,9 @@ function drawExcludeMaskOverlay(x,sc,w,h){
   x.drawImage(ec.canvas,0,0,ec.canvas.width,ec.canvas.height, view.ox,view.oy, w*sc, h*sc);
   x.restore();
 }
-// マーク/パーツ＋タブそれぞれの専門の点だけをgetInteractivePoints側で絞っている。
+// マークタブの点だけをgetInteractivePoints側で絞っている。
 // 領域(除外)タブでは何も重ねない。
 function drawLandmarkPoints(x,sc){
-  if(curTab==="ac")drawRegionOutlines(x,sc);
   getInteractivePoints(curView).forEach(p=>{
     const px=p.pos[0]*sc+view.ox, py=p.pos[1]*sc+view.oy, on=sel===p.key;
     drawCross(x,px,py,on,p.color);
@@ -1162,7 +1096,7 @@ function runAnalyze(){
   if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
   analysis=A;points=placeAll(A);sel=null;curView="front";
   $("editor").classList.remove("hidden");$("hint").classList.add("hidden");
-  renderAcList();syncViewBtns();
+  syncViewBtns();
   resyncAnalysisToProfile();
   draw();
   setMsg("前処理OK  shoulder v="+A.shoulder_v.toFixed(3)+"(det="+A.shoulder_detected+") waist v="+A.waist_v.toFixed(3)+" hip v="+A.hip_v.toFixed(3));
@@ -1355,11 +1289,7 @@ function buildJson(){
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones};
-      if(a.mask&&Object.keys(a.mask).length){
-        out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
-      }else{
-        out.regions=Object.keys(a.regions||{}).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{});
-      }
+      out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
     exclude_masks:(function(){
@@ -1399,26 +1329,16 @@ function applyLoadedJson(d){
   if(d.points_px){
     LM.forEach(lm=>{const p=d.points_px[lm.k];if(p)points[lm.k]=[p.x,p.y];});
   }
-  // accessoryは多角形(regions、既存・手動編集可)かマスク(mask、色分けマップ由来・
-  // 新規・自動抽出のみ)のどちらか一方の形式を持つ(統合せず並存させる、
-  // GHOST_SCANNER_PLAN.md「データモデル」節)。既存の多角形形式の保存済みJSONとの
-  // 互換性は維持しない方針のため、旧形式の救済処理は行わない。
+  // accessoryはマスク(mask、色分けマップ由来・自動抽出のみ)形式のみを持つ
+  // (多角形(regions)形式は2026-07-09に廃止。既存の多角形形式の保存済みJSONとの
+  // 互換性は維持しない方針のため、旧形式の救済処理は行わない)。
   accessories=(d.accessories||[]).map(a=>{
-    const hasMask=a.mask&&Object.keys(a.mask).length>0;
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[]};
-    if(hasMask){
-      out.mask=Object.keys(a.mask).reduce((o,v)=>{
-        const m=a.mask[v];
-        if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
-        return o;
-      },{});
-    }else{
-      out.regions=Object.keys(a.regions||{}).reduce((o,v)=>{
-        const pts=a.regions[v]&&a.regions[v].points;
-        if(pts&&pts.length)o[v]={points:pts.map(p=>[p[0],p[1]])};
-        return o;
-      },{});
-    }
+    out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
+      const m=a.mask[v];
+      if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
+      return o;
+    },{});
     return out;
   });
   seamAngles=Object.assign({},d.seam_angles||{});
@@ -1450,8 +1370,8 @@ function applyLoadedJson(d){
     };
     im.src=masks[v];
   });
-  sel=null;pendingAcc=null;
-  syncChips();renderAcList();syncViewBtns();draw();
+  sel=null;
+  syncChips();syncViewBtns();draw();
   setMsg("landmarks_ai.json を読み込みました(正面/側面/背面画像は別途読み込み済みのものを使います)。");
 }
 function loadJsonFile(file){
@@ -1464,18 +1384,19 @@ function loadJsonFile(file){
 }
 
 /* ---------- タブ(ランドマーク/アクセサリー/幅奥行き/境目角度を切り替え、縦スクロールを短縮) ---------- */
-// curTabは既存の値("lm"/"ex"/"ac"/"params"/"gen")をそのまま使い続ける
+// curTabは既存の値("lm"/"ex"/"params"/"gen")をそのまま使い続ける
 // (CLAUDE.mdの通り、単一の巨大IIFEスコープでの変数衝突リスクを避けるため
-// 全体grep済み。他に"curTab"という名前の別意味の変数は無い)。「領域」(ex)
-// 「パーツ＋」(ac)は、5タブ再編後は最上段のタブバーには出さず、「手動マスク」
-// (data-tab="manualmask")配下のサブタブとして選ぶ形にする。トップレベルの
-// タブボタン一覧には無いcurTab値("ex"/"ac")のときにどのタブボタン/パネルを
-// 「on」にするかは、この配列を使って特別扱いする。
-const MANUAL_MASK_SUBTABS=["ex","ac"];
+// 全体grep済み。他に"curTab"という名前の別意味の変数は無い)。「領域」(ex)は、
+// 5タブ再編後は最上段のタブバーには出さず、「手動マスク」(data-tab="manualmask")
+// 配下の唯一のパネルとして選ぶ形にする(2026-07-09、多角形アクセサリー編集
+// 機能「パーツ＋」(ac)廃止に伴いサブタブ切り替え自体が不要になったが、
+// トップレベルのタブボタン一覧には無いcurTab値("ex")のときにどのタブボタン/
+// パネルを「on」にするかの特別扱いの仕組みはそのまま残している)。
+const MANUAL_MASK_SUBTABS=["ex"];
 let curTab="lm";
 // 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
 // タブ(自動マスク/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
-const IMG_TABS=["lm","ex","ac","params"];
+const IMG_TABS=["lm","ex","params"];
 function syncTabs(){
   const topLevelTab = MANUAL_MASK_SUBTABS.includes(curTab) ? "manualmask" : curTab;
   [].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===topLevelTab);});
@@ -1519,182 +1440,15 @@ function syncViewBtns(){
   });
 }
 const VIEWJP={front:"正面",side:"側面",back:"背面"};
-function distributeBoxPoints(n,cx0,cy0,halfW,halfH){
-  // n点を矩形の辺に沿って周長比例で均等配置する(既定の標準形状=直方体の
-  // 輪郭。多角形の内側だけが彫られる=検出ウィンドウなので、まずは単純な
-  // 箱から始めて各点をドラッグ/十字キーで実際の輪郭に合わせてもらう)。
-  n=Math.max(3,Math.min(25,n||8));
-  const pts=[];
-  for(let i=0;i<n;i++){
-    let d=(4*(halfW+halfH))*(i/n), x,y;
-    if(d<halfW*2){x=-halfW+d;y=-halfH;}
-    else if((d-=halfW*2)<halfH*2){x=halfW;y=-halfH+d;}
-    else if((d-=halfH*2)<halfW*2){x=halfW-d;y=halfH;}
-    else{d-=halfW*2;x=-halfW;y=halfH-d;}
-    pts.push([Math.round(cx0+x),Math.round(cy0+y)]);
-  }
-  return pts;
-}
-function anchorForBones(bones){
-  for(const b of (bones||[])){const a=anchorFrontPos(b); if(a)return a;}
-  return null;
-}
-function defaultAccRegion(view,pointCount,bones){
-  const img=imgs[view]; if(!img)return null;
-  const anc=anchorForBones(bones);
-  const baseHalf=(analysis?analysis.shoulder_hw:img.w*0.12)*0.5;
-  let cx0,cy0,halfW,halfH;
-  if(view==="front"){
-    if(anc){cx0=anc.cx;cy0=anc.cy;}else{cx0=img.w/2;cy0=img.h*0.15;}
-    halfW=baseHalf;halfH=baseHalf*0.7;
-  }else{
-    // side/back: 前面アンカーの高さ比率をその面の画像自身のシルエットで
-    // 較正しなおして揃える(本体幅/奥行き上書きと同じ3面連動の考え方)。
-    let vFront=0.1;
-    if(anc&&analysis)vFront=(anc.cy-analysis.ytop)/analysis.BH;
-    const ext=imgYExtent(view);
-    cy0=ext?ext.ytop+vFront*(ext.ybot-ext.ytop):img.h*0.15;
-    cx0=img.w/2;
-    halfW=baseHalf*0.6;halfH=baseHalf*0.7;
-  }
-  return{points:distributeBoxPoints(pointCount,cx0,cy0,halfW,halfH)};
-}
-function buildAcFormHtml(){
-  const bonesHtml=BONE_GROUPS.map(grp=>{
-    const rowHtml=grp.bones.map(b=>{
-      const checked=pendingAcc.bones.includes(b)?"checked":"";
-      return '<label><input type="checkbox" value="'+b+'" '+checked+'> '+(BONE_JP[b]||b)+'</label>';
-    }).join("");
-    return '<div class="subhead">'+grp.label+'</div><div class="bonesRow">'+rowHtml+'</div>';
-  }).join("");
-  const canAdd=!!(pendingAcc.regions.front||pendingAcc.regions.back);
-  const drawBtns=["front","side","back"].map(v=>{
-    const has=!!pendingAcc.regions[v], avail=!!imgs[v];
-    const label=v==="side"?"側面(奥行き)":VIEWJP[v];
-    return '<button class="btn'+(has?" mint":"")+'" data-drawview="'+v+'"'+(avail?"":" disabled")+'>'+label+(has?" 編集":" に配置")+'</button>';
-  }).join("");
-  let selBtns="";
-  if(pendingAcc.regions[curView]){
-    const n=pendingAcc.regions[curView].points.length, btns=[];
-    for(let i=0;i<n;i++){
-      const key="pend:"+curView+":"+i;
-      btns.push('<button class="btn sm'+(sel===key?" mint":"")+'" data-pt-sel="'+i+'">'+(i+1)+'</button>');
-    }
-    selBtns='<div class="row" style="flex-wrap:wrap">'+btns.join("")+'</div>';
-  }
-  return '<div class="acform">'+
-    '<label>名前<input type="text" id="acName" value="'+pendingAcc.name+'" placeholder="例: ヘッドホン"></label>'+
-    '<label>取り付け方式</label>'+
-    '<div class="row">'+
-    '<button type="button" class="btn sm'+(pendingAcc.mode==="rigid"?" mint":"")+'" data-acmode="rigid">rigid(1ボーン固定)</button>'+
-    '<button type="button" class="btn sm'+(pendingAcc.mode==="soft"?" mint":"")+'" data-acmode="soft">soft(複数ボーン追従)</button>'+
-    '</div>'+
-    '<label>取り付けボーン('+(pendingAcc.mode==="rigid"?"1つ選択":"複数選択可")+')'+
-    '<div class="bonesGroups">'+bonesHtml+'</div></label>'+
-    '<label>点数(3〜25、多いほど複雑な輪郭を再現できます)'+
-    '<input type="number" id="acPointCount" min="3" max="25" value="'+(pendingAcc.pointCount||8)+'"></label>'+
-    '<div style="font-size:11px;color:var(--mut)">「まとめて配置」を押すと、選んだボーン付近に標準形状(直方体)の輪郭が'+
-    '前面/側面/背面へ連動して配置されます(正面か背面のどちらか+側面(奥行き)があれば十分)。'+
-    '各点をドラッグ/十字キーで実際の輪郭に合わせてください。多角形の内側だけが検出・彫り込みの対象になります。</div>'+
-    '<div class="row"><button class="btn mint" id="acPlaceAll">まとめて配置(直方体)</button></div>'+
-    '<div class="row">'+drawBtns+'</div>'+
-    selBtns+
-    '<div class="row">'+
-    '<button class="btn mint" id="acConfirm"'+(canAdd?"":" disabled")+'>'+(pendingAccEditIdx!==null?"この内容で保存する":"この内容で追加する")+'</button>'+
-    '<button class="btn" id="acCancel">キャンセル</button>'+
-    '</div></div>';
-}
-function wireAcFormEvents(){
-  $("acName").oninput=e=>{pendingAcc.name=e.target.value;};
-  [].forEach.call(document.querySelectorAll("#acForm [data-acmode]"),btn=>{
-    btn.onclick=()=>{
-      pendingAcc.mode=btn.dataset.acmode;
-      if(pendingAcc.mode==="rigid"&&pendingAcc.bones.length>1)pendingAcc.bones=pendingAcc.bones.slice(0,1);
-      renderAcForm();
-    };
-  });
-  $("acPointCount").oninput=e=>{
-    pendingAcc.pointCount=Math.max(3,Math.min(25,parseInt(e.target.value,10)||8));
-  };
-  [].forEach.call(document.querySelectorAll("#acForm .bonesGroups input"),cb=>{
-    cb.onchange=()=>{
-      if(pendingAcc.mode==="rigid"){
-        pendingAcc.bones=cb.checked?[cb.value]:[];renderAcForm();
-      }else{
-        if(cb.checked){if(pendingAcc.bones.indexOf(cb.value)<0)pendingAcc.bones.push(cb.value);}
-        else{pendingAcc.bones=pendingAcc.bones.filter(x=>x!==cb.value);}
-      }
-    };
-  });
-  $("acPlaceAll").onclick=()=>{
-    const n=pendingAcc.pointCount||8;
-    ["front","side","back"].forEach(v=>{
-      if(imgs[v])pendingAcc.regions[v]=defaultAccRegion(v,n,pendingAcc.bones);
-    });
-    curView=pendingAcc.regions.front?"front":(pendingAcc.regions.side?"side":"back");
-    syncViewBtns();
-    sel=pendingAcc.regions[curView]?"pend:"+curView+":0":null;
-    syncChips();renderAcForm();draw();
-    setMsg("前面/側面/背面に標準形状(直方体、"+n+"点)を配置しました。各点をドラッグ/十字キーで輪郭に合わせて調整してください。");
-  };
-  [].forEach.call(document.querySelectorAll("#acForm [data-drawview]"),btn=>{
-    const v=btn.dataset.drawview;
-    btn.onclick=()=>{
-      if(!imgs[v]){setMsg("先に"+VIEWJP[v]+"画像を読み込んでください。");return;}
-      if(!pendingAcc.regions[v])pendingAcc.regions[v]=defaultAccRegion(v,pendingAcc.pointCount||8,pendingAcc.bones);
-      curView=v;syncViewBtns();
-      sel="pend:"+v+":0";
-      syncChips();renderAcForm();draw();
-      setMsg(VIEWJP[v]+"画像上で点を十字キー/ドラッグで動かして輪郭を囲んでください。");
-    };
-  });
-  [].forEach.call(document.querySelectorAll("#acForm [data-pt-sel]"),btn=>{
-    btn.onclick=()=>{
-      sel="pend:"+curView+":"+btn.dataset.ptSel;
-      syncChips();renderAcForm();draw();
-    };
-  });
-  $("acConfirm").onclick=()=>{
-    if(!(pendingAcc.regions.front||pendingAcc.regions.back)){setMsg("正面か背面の少なくとも一方に範囲が必要です。");return;}
-    const wasEdit=pendingAccEditIdx!==null;
-    const targetIdx=wasEdit?pendingAccEditIdx:accessories.length;
-    if(wasEdit){accessories.splice(pendingAccEditIdx,0,pendingAcc);}
-    else{accessories.push(pendingAcc);}
-    pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
-    curView="front";syncViewBtns();sel=null;
-    renderAcList();renderAcForm();syncChips();draw();
-    setMsg(wasEdit?"アクセサリーを更新しました。":"アクセサリーを追加しました。");
-    highlightAcListItem(targetIdx);
-  };
-  $("acCancel").onclick=()=>{
-    if(pendingAccEditIdx!==null){accessories.splice(pendingAccEditIdx,0,pendingAccEditOriginal);}
-    pendingAcc=null;pendingAccEditIdx=null;pendingAccEditOriginal=null;
-    sel=null;renderAcList();renderAcForm();syncChips();draw();
-  };
-}
-function renderAcForm(){
-  const el=$("acForm");
-  if(!pendingAcc){el.innerHTML="";return;}
-  el.innerHTML=buildAcFormHtml();
-  wireAcFormEvents();
-}
-function highlightAcListItem(idx){
-  const el=$("acList").children[idx];
-  if(!el)return;
-  el.scrollIntoView({behavior:"smooth",block:"center"});
-  el.classList.add("flash");
-  setTimeout(()=>el.classList.remove("flash"),1200);
-}
 // 「自動マスク」タブ: front/side/backの画像に、色分けマップ由来のマスク
 // (acc.mask[view].maskDataUrl、白RGB+アルファ=前景のラスタ)を重ね描きした
 // プレビューと、抽出済みパーツ一覧を同時表示する(GHOST_SCANNER_PLAN.md
 // 「自動マスク」タブ節)。このタブでは再抽出はできない(ゴーストスキャナー側
 // でやり直してから、改めて引き継ぐ)。
 let automaskRendered=false;
-// マスク由来accessoryの名前・取付ボーンは、多角形(パーツ＋タブ)側のように
-// 点編集を伴わないため、自動マスクタブ側でも直接編集できるようにする
-// (パーツ＋タブのbuildAcFormHtml/wireAcFormEventsと同じBONE_GROUPS/BONE_JPを
-// 使い、多角形操作(まとめて配置・点選択等)に相当する部分だけを省いた簡易フォーム)。
+// マスク由来accessoryの名前・取付ボーンは、点編集を伴わないため、
+// 自動マスクタブ側で直接編集できるようにする(BONE_GROUPS/BONE_JPを使った
+// 簡易フォーム)。
 function buildAutomaskItemHtml(a, idx){
   const views=["front","side","back"].filter(v=>a.mask[v]);
   const bonesHtml=BONE_GROUPS.map(grp=>{
@@ -1785,94 +1539,6 @@ function renderAutomaskTab(){
   listWrap.innerHTML=maskAccs.map(({a,i})=>buildAutomaskItemHtml(a,i)).join("");
   wireAutomaskItemEvents();
 }
-function renderAcList(){
-  const el=$("acList");
-  // マスク形式(色分けマップ由来・自動抽出)のaccessoryは、この「パーツ＋」タブでは
-  // 多角形の点ドラッグ編集ができない(データモデルが違うため)。「変更」ボタンは
-  // 出さず、代わりに由来を示すタグを表示する(実データは「自動マスク」タブ側で
-  // 再抽出することで更新する)。
-  el.innerHTML=accessories.map((a,i)=>{
-    const isMask=!!(a.mask&&Object.keys(a.mask).length);
-    return '<div class="acitem"><input type="text" class="acNameEdit" data-i="'+i+'" '+
-    'value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)">'+
-    '<span class="tag">'+a.mode+'/'+(a.bones.join(",")||"未設定")+(isMask?"/自動マスク":"")+'</span>'+
-    (isMask?'':'<span class="ed" data-i="'+i+'">変更</span>')+
-    '<span class="rm" data-i="'+i+'">削除</span></div>';
-  }).join("");
-  [].forEach.call(el.querySelectorAll(".acNameEdit"),inp=>{
-    inp.oninput=()=>{
-      const i=+inp.dataset.i, oldKey="acc:"+(accessories[i].name||"accessory");
-      accessories[i].name=inp.value;
-      const newKey="acc:"+(accessories[i].name||"accessory");
-      if(oldKey!==newKey && seamAngles[oldKey]!==undefined){
-        seamAngles[newKey]=seamAngles[oldKey];delete seamAngles[oldKey];
-      }
-    };
-  });
-  [].forEach.call(el.querySelectorAll(".ed"),s=>{
-    s.onclick=()=>{
-      const i=+s.dataset.i;
-      pendingAccEditIdx=i;
-      pendingAccEditOriginal=accessories[i];
-      pendingAcc=JSON.parse(JSON.stringify(accessories[i]));
-      accessories.splice(i,1);
-      curView=pendingAcc.regions.front?"front":(pendingAcc.regions.side?"side":"back");
-      syncViewBtns();
-      sel=pendingAcc.regions[curView]?"pend:"+curView+":0":null;
-      renderAcList();renderAcForm();syncChips();draw();
-      setMsg("アクセサリーを編集中です。各点を調整して保存してください。");
-    };
-  });
-  [].forEach.call(el.querySelectorAll(".rm"),s=>{s.onclick=()=>{accessories.splice(+s.dataset.i,1);renderAcList();draw();};});
-}
-function imgYExtent(view){
-  // その面(side/back)の画像自身のシルエット上端/下端(px)を求め、img
-  // オブジェクトにキャッシュする(新しい画像が読み込まれるとimgs[view]自体が
-  // 差し替わるため、キャッシュは自動的に無効化される)。前面と同じ「身長に
-  // 対する高さの比率」で位置を揃えるために使う。
-  const im=imgs[view];
-  if(!im)return null;
-  if(im.ytop!==undefined)return{ytop:im.ytop,ybot:im.ybot};
-  const mask=buildMask(im.el,im.w,im.h);
-  let ytop=-1,ybot=-1;
-  for(let y=0;y<im.h;y++){
-    let has=false;
-    for(let x=0;x<im.w;x++){if(mask[y*im.w+x]){has=true;break;}}
-    if(has){if(ytop<0)ytop=y;ybot=y;}
-  }
-  if(ytop<0){ytop=0;ybot=im.h-1;}
-  im.ytop=ytop;im.ybot=ybot;
-  return{ytop,ybot};
-}
-function anchorFrontPos(joint){
-  // そのパーツの前面ランドマークから、標準形状の中心位置・傾き・基準長さを
-  // 求める。首は専用処理(肩と顎の中間、既存の実装を踏襲)。2点(mid)指定の
-  // 部位は2点の中点を中心・2点を結ぶ線の角度を傾きの初期値にする(前腕/上腕
-  // 等、画面上で斜めに写るパーツに標準形状を沿わせるため)。
-  if(!points)return null;
-  if(joint==="neck"){
-    if(!(points.shoulder_L&&points.shoulder_R&&points.chin))return null;
-    const cx=(points.shoulder_L[0]+points.shoulder_R[0])/2;
-    const cy=points.shoulder_L[1]-Math.abs(points.shoulder_L[1]-points.chin[1])*0.3;
-    return{cx,cy,angle:0,len:Math.abs(points.shoulder_L[1]-points.chin[1])*0.5};
-  }
-  const a=OV_ANCHOR[joint]; if(!a)return null;
-  if(a.mid){
-    if(a.mid.length===1){
-      const p=points[a.mid[0]]; if(!p)return null;
-      return{cx:p[0],cy:p[1],angle:0,len:null};
-    }
-    const p0=points[a.mid[0]],p1=points[a.mid[1]]; if(!p0||!p1)return null;
-    const dx=p1[0]-p0[0],dy=p1[1]-p0[1];
-    return{cx:(p0[0]+p1[0])/2,cy:(p0[1]+p1[1])/2,angle:Math.atan2(dy,dx)*180/Math.PI,len:Math.hypot(dx,dy)};
-  }
-  if(a.extrap){
-    const p0=points[a.extrap[0]],p1=points[a.extrap[1]]; if(!p0||!p1)return null;
-    const dx=p1[0]-p0[0],dy=p1[1]-p0[1];
-    return{cx:p1[0]+dx*0.35,cy:p1[1]+dy*0.35,angle:Math.atan2(dy,dx)*180/Math.PI,len:Math.hypot(dx,dy)*0.5};
-  }
-  return null;
-}
 /* ---------- 凡例チップ ---------- */
 function buildLegend(){
   const wrapEl=$("legend");wrapEl.innerHTML="";
@@ -1958,17 +1624,13 @@ $("generateBtn").onclick=async()=>{
       imgs, points, analysis, deriveFromPoints,
       accessories: accessories.map(a=>{
         const out={name:a.name,mode:a.mode,bones:a.bones};
-        if(a.mask&&Object.keys(a.mask).length){
-          // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
-          // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
-          // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による
-          // ピクセル単位の正確なマスクraster(maskDataUrl)も渡し、
-          // pipeline.jsでUint8Arrayにラスタライズしてaccessories.js側で直接
-          // 使えるようにする。
-          out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
-        }else{
-          out.regions=Object.keys(a.regions||{}).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{});
-        }
+        // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
+        // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
+        // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による
+        // ピクセル単位の正確なマスクraster(maskDataUrl)も渡し、
+        // pipeline.jsでUint8Arrayにラスタライズしてaccessories.js側で直接
+        // 使えるようにする。
+        out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
         return out;
       }),
       excludeMask, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, genParams,
@@ -2016,12 +1678,6 @@ $("paramsResetAll").onclick=()=>{
 // (character_3d.htmlに移管)。seamAngles/seamNoSide/seamSmoothIters/
 // colorGradWidthのデータ自体は既定値のままgenParamsと同様buildJson()経由で
 // intermediateパッケージへ渡す(applyLoadedJson()での読み込みは維持)。
-$("acAddBtn").onclick=()=>{
-  if(!points){setMsg("先に正面画像を読み込んでください。");return;}
-  if(pendingAccEditIdx!==null){accessories.splice(pendingAccEditIdx,0,pendingAccEditOriginal);pendingAccEditIdx=null;pendingAccEditOriginal=null;renderAcList();}
-  pendingAcc={name:"",mode:"rigid",bones:[],regions:{},pointCount:8};
-  renderAcForm();
-};
 [].forEach.call(document.querySelectorAll("#viewbar .viewbtn"),b=>{
   b.onclick=()=>{
     if(!imgs[b.dataset.view]){setMsg("先に"+b.textContent+"画像を読み込んでください。");return;}
@@ -2105,32 +1761,31 @@ function wireBoneToggle(overlayId,regionId){
   oEl.checked=boneOverlayOn; rEl.checked=boneRegionOn;
   oEl.onchange=()=>{
     boneOverlayOn=oEl.checked;
-    ["boneOverlayToggleLM","boneOverlayToggleAC"].forEach(id=>{const e=$(id);if(e)e.checked=boneOverlayOn;});
+    ["boneOverlayToggleLM"].forEach(id=>{const e=$(id);if(e)e.checked=boneOverlayOn;});
     if(IMG_TABS.includes(curTab))draw();
   };
   rEl.onchange=()=>{
     boneRegionOn=rEl.checked;
-    ["boneRegionToggleLM","boneRegionToggleAC"].forEach(id=>{const e=$(id);if(e)e.checked=boneRegionOn;});
+    ["boneRegionToggleLM"].forEach(id=>{const e=$(id);if(e)e.checked=boneRegionOn;});
     if(IMG_TABS.includes(curTab))draw();
   };
 }
 wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
-wireBoneToggle("boneOverlayToggleAC","boneRegionToggleAC");
 buildLegend();
 renderParamsPanel();
 renderOutlinePanel();
 (function(){
   // ★初期画面(サンプルモード/通常モードの選択)。
-  // 「サンプルモード」は従来通り、同梱のimages/front.png等+landmarks_ai.jsonを
+  // 「サンプルモード」は同梱のimages2/front.png等+landmarks_ai_2.jsonを
   // 自動読込する(お試し用)。「通常モード」は自分の画像を手動アップロードする
   // (既存の.slots UIをそのまま使う、何も自動読込しない)。
   // ただし、モデル生成→ビューア→「戻る」で来た場合(保存済みセッションが
   // ある場合)は、モードに関わらずこの選択画面を出さず直接復元する。
   // 複数サンプルをプルダウンで選べる作りになっている(増やす場合はSAMPLESに
   // 追記するだけでよい)。サンプル2(images2/+landmarks_ai_2.json)は髪飾り・
-  // ツインテール・マフラー・スカート等アクセサリーが多い実データ検証用。
+  // ツインテール・マフラー・スカート等アクセサリーが多い実データ検証用で、
+  // 唯一のサンプル(旧サンプル1=多角形形式は2026-07-09に廃止)。
   const SAMPLES=[
-    {id:"default", label:"サンプル1", imagesDir:"images/", landmarksFile:"landmarks_ai.json"},
     {id:"sample2", label:"サンプル2", imagesDir:"images2/", landmarksFile:"landmarks_ai_2.json"},
   ];
   const sampleSelectEl=$("sampleSelect");
