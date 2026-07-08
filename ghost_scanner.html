@@ -19,6 +19,11 @@
     letter-spacing:.22em;margin:5px 0 0;opacity:.85;font-weight:400}
   .sub{font-size:11.5px;color:var(--mut);margin:6px 0 14px}
   a.back{color:var(--mut);font-size:11.5px;text-decoration:none}
+  .headRow{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .apiKeyBtn{flex:0 0 auto;font-size:11px;padding:6px 10px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--mut);white-space:nowrap}
+  .apiKeyBtn.on{border-color:var(--cyan);color:var(--cyan)}
+  #apiKeyPanel[hidden]{display:none}
 
   /* タブ */
   .tabs{display:flex;gap:4px;margin:14px 0 12px;overflow-x:auto;padding-bottom:2px}
@@ -62,7 +67,7 @@
     background:rgba(255,255,255,.04);color:var(--txt);padding:0 10px;font-size:12px}
   .apiKeyRow .btn{width:auto;flex:0 0 auto;padding:0 12px;margin-bottom:0}
 
-  /* チャットUI(ランドマーク/パラメータタブ) */
+  /* チャットUI(ランドマーク/アクセサリータブ) */
   .chatLog{max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;
     background:rgba(0,0,0,.25);padding:8px;margin-bottom:8px;font-size:12px}
   .chatMsg{margin-bottom:8px;line-height:1.6}
@@ -86,10 +91,13 @@
 <body>
 <div class="page">
   <a class="back" href="index.html">← ゴースト イン ザ デバイス</a>
-  <h1>ゴーストスキャナー<span class="eng">GHOST SCANNER</span></h1>
+  <div class="headRow">
+    <h1>ゴーストスキャナー<span class="eng">GHOST SCANNER</span></h1>
+    <button class="apiKeyBtn" id="apiKeyToggleBtn" type="button">⚙ APIキー</button>
+  </div>
   <p class="sub">1枚のイラストから front/side/back の3面図と骨格情報をAIで推定し、ジェネレータへ引き継ぐ前処理ツール。</p>
 
-  <div class="card">
+  <div class="card" id="apiKeyPanel" hidden>
     <h2>Gemini APIキー</h2>
     <div class="apiKeyRow">
       <input id="apiKeyInput" type="password" placeholder="APIキーを入力してlocalStorageに保存"/>
@@ -203,32 +211,20 @@
       </div>
       <button class="btn sm" id="lmOffsetReset">リセット</button>
       <button class="btn sm mint" id="lmOffsetApply">この位置で反映</button>
-      <p class="hint">この補正(位置+倍率)は、ランドマークだけでなく除外マスク・アクセサリー領域指定(タブ6b)にも同じ値を自動適用します(Geminiの座標のズレは面ごとに共通の傾向であることが多いため)。</p>
+      <p class="hint">この補正(位置+倍率)は、ランドマークだけでなく除外マスク・アクセサリー領域指定(タブ6)にも同じ値を自動適用します(Geminiの座標のズレは面ごとに共通の傾向であることが多いため)。</p>
       <div class="chatLog" id="lmChatLog"></div>
       <div class="chatRow">
         <input id="lmChatInput" placeholder="例: 右肘をもう少し下に" disabled/>
         <button class="btn sm mint" id="lmChatSend" disabled>送信</button>
       </div>
-      <button class="btn green" id="lmNextBtn" disabled style="margin-top:8px">この内容で確定 → 次へ(パラメータ)</button>
+      <button class="btn green" id="lmNextBtn" disabled style="margin-top:8px">この内容で確定 → 次へ(アクセサリー)</button>
     </div>
   </div>
 
-  <!-- 6. パラメータ/アクセサリー(任意) -->
+  <!-- 6. アクセサリー(任意) -->
   <div class="tabpanel" data-tabpanel="params">
     <div class="card">
-      <h2>6a. 生成パラメータ提案(任意)</h2>
-      <p class="hint">既定値からの変更が必要そうな項目だけをAIが提案します(スキップ可)。</p>
-      <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="paramsPromptText"></pre></details>
-      <button class="btn mint" id="paramsRunBtn">提案を取得</button>
-      <div id="paramsSuggestions" class="hint"></div>
-      <div class="chatLog" id="paramsChatLog"></div>
-      <div class="chatRow">
-        <input id="paramsChatInput" placeholder="例: もっと丸みを出して" disabled/>
-        <button class="btn sm mint" id="paramsChatSend" disabled>送信</button>
-      </div>
-    </div>
-    <div class="card">
-      <h2>6b-1. アクセサリー検出(名称のみ、任意)</h2>
+      <h2>6-1. アクセサリー検出(名称のみ、任意)</h2>
       <p class="hint">まず「何を抽出するか」の一覧だけを決める(精度を上げるため、範囲指定は次のステップで1件ずつ個別に行う)。front/side/back 3枚同時入力でbody/accessoryを二分類します(スキップ可)。</p>
       <p class="hint"><b>「アクセサリー」と「除外マスク」は別の分類です。</b>アクセサリーは「体の輪郭からはみ出るかどうか」で決まる3Dパーツの分割単位(スカート・髪の房・尻尾など、体に密着していない全て)。除外マスクは、そのアクセサリーのうち<b>体そのもののシルエット計測を狂わせる、体の輪郭より外側に完全にはみ出た部分だけ</b>が対象になる別基準のフラグです(下の一覧の「除外マスク」欄を参照。例: 前髪・後ろ髪はアクセサリーだが体の地肌を覆っているため除外マスク対象外、ツインテールは体の外側にはみ出ているため除外マスク対象)。</p>
       <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="accPromptText"></pre></details>
@@ -242,8 +238,8 @@
       <button class="btn green" id="accConfirmListBtn" disabled style="margin-top:8px">この一覧で確定 → 領域指定へ</button>
     </div>
     <div class="card">
-      <h2>6b-2. アクセサリー領域指定(1件ずつ、任意)</h2>
-      <p class="hint">確定した一覧を1件ずつ個別にAPI呼び出しし、各面25点の多角形で範囲を精密に抽出します(6b-1の確定後に押せます)。</p>
+      <h2>6-2. アクセサリー領域指定(1件ずつ、任意)</h2>
+      <p class="hint">確定した一覧を1件ずつ個別にAPI呼び出しし、各面25点の多角形で範囲を精密に抽出します(6-1の確定後に押せます)。</p>
       <button class="btn mint" id="accRegionRunBtn" disabled>各アクセサリーの領域を検出(1件ずつ)</button>
       <p class="hint" id="accRegionProgress"></p>
       <canvas class="imgPreview" id="accPreview" width="512" height="512"></canvas>
@@ -255,7 +251,7 @@
   <div class="tabpanel" data-tabpanel="out">
     <div class="card">
       <h2>7. 出力/ジェネレータへ</h2>
-      <p class="hint">front/side/back画像とランドマーク(+任意でパラメータ/アクセサリー)を、ゴーストジェネレータ(landmark_tool.html)へIndexedDB経由で引き継ぎます。</p>
+      <p class="hint">front/side/back画像とランドマーク(+任意でアクセサリー)を、ゴーストジェネレータ(landmark_tool.html)へIndexedDB経由で引き継ぎます。</p>
       <button class="btn mint" id="outSendBtn">ジェネレータへ引き継ぐ</button>
     </div>
   </div>
@@ -268,7 +264,7 @@
 
 /* ==================== 状態管理(1箇所にまとめる、GHOST_SCANNER_PLAN.md方針) ==================== */
 var TAB_ORDER=["upload","front","side","back","lm","params","out"];
-var TAB_LABEL={upload:"1.画像投入",front:"2.正面",side:"3.側面",back:"4.背面",lm:"5.ランドマーク",params:"6.パラメータ",out:"7.出力"};
+var TAB_LABEL={upload:"1.画像投入",front:"2.正面",side:"3.側面",back:"4.背面",lm:"5.ランドマーク",params:"6.アクセサリー",out:"7.出力"};
 var state={
   curTab:"upload",
   unlockedUpTo:0, // TAB_ORDERのindex。ここまでは行き来自由
@@ -277,10 +273,9 @@ var state={
   side:{dataUrl:null, confirmed:false},
   back:{dataUrl:null, confirmed:false},
   landmarks:{pointsPx:null, imageWH:null, history:[], confirmed:false},
-  params:{suggestions:null, history:[]},
   accessories:{list:null, history:[], confirmed:false},
   // タブ5で「反映」した位置ズレ補正(平行移動+倍率)の累積値。ランドマーク
-  // だけでなく、タブ6b-2で取得するアクセサリー領域(regions)にも同じ値を
+  // だけでなく、タブ6-2で取得するアクセサリー領域(regions)にも同じ値を
   // 自動適用する(Geminiの座標系のズレは面ごとに共通の傾向であることが
   // 多いため、一度計測した補正を使い回す)。
   calibration:{dx:0, dy:0, scale:1},
@@ -312,6 +307,14 @@ function unlockNext(tabName){
 }
 
 /* ==================== APIキーUI ==================== */
+// 常時表示だとタブを切り替えるたびに場所を取るため、右上のボタンで
+// 開閉するパネルにしてある(中身のHTML/ロジックは元のまま移設しただけ)。
+$("apiKeyToggleBtn").onclick=function(){
+  var panel=$("apiKeyPanel");
+  var opening = panel.hidden;
+  panel.hidden = !opening;
+  $("apiKeyToggleBtn").classList.toggle("on", opening);
+};
 function refreshApiKeyStatus(){
   var k=P3D.getGeminiApiKey();
   $("apiKeyStatus").textContent = k ? "APIキーを保存済み(localStorage)です。" : "APIキー未設定です。生成/推定を行うには入力・保存してください。";
@@ -643,21 +646,6 @@ var PROMPT_D =
 "  }\n"+
 "}";
 
-var PROMPT_E =
-"添付のキャラクター正面画像を見て、3Dモデル生成時のパラメータについて\n"+
-"簡単な提案をしてください。以下の既定値からの変更が必要と思われる項目のみ、\n"+
-"理由と共に挙げてください(変更不要な項目は既定値のままでよい、無理に\n"+
-"全項目を変えようとしないこと):\n\n"+
-"- psq_torso/psq_legs/psq_arms(断面の丸み、1.2〜6、2に近いほど丸く自然、\n"+
-"  大きいほど角ばる): キャラクターの体型・衣装が丸みのあるシルエットか、\n"+
-"  ローブや鎧のような角ばった衣装かで判断\n"+
-"- arm_circle(腕を円筒形にする、true/false): 腕が単純な円筒に近い形状か、\n"+
-"  袖や籠手で複雑な形状かで判断\n"+
-"- hand_extrude(手を厚み付き平面として押し出す、true/false): 手が画像内で\n"+
-"  明確に確認できるかどうかで判断\n\n"+
-'出力はJSON形式のみ({"suggestions": [{"key": "...", "value": ..., "reason": "..."}]})\n'+
-"としてください。判断材料が無い項目は含めないでください。";
-
 var PROMPT_F =
 "添付の3枚の画像(front=正面、side=側面、back=背面)は、同一キャラクターの\n"+
 "Tポーズ立ち絵です。これらを横断的に見て、以下の2種類に分類してください。\n\n"+
@@ -744,7 +732,7 @@ var PROMPT_F =
 "  ]\n"+
 "}";
 
-// ステップ2(タブ6b後半): ステップ1で確定した1件のaccessoryについて、
+// ステップ2(タブ6後半): ステップ1で確定した1件のaccessoryについて、
 // front/side/back画像から実際の領域(多角形)を精密に抽出する。1回のAPI呼び出しで
 // 全accessoryをまとめて処理していた旧版は精度が低かったため、1件ずつ個別に
 // 呼び出す(新規セッション、対象を絞ることで注意を集中させる)。
@@ -787,7 +775,6 @@ $("frontPromptText").textContent=PROMPT_A;
 $("sidePromptText").textContent=promptSide();
 $("backPromptText").textContent=promptBack();
 $("lmPromptText").textContent=PROMPT_D;
-$("paramsPromptText").textContent=PROMPT_E;
 $("accPromptText").textContent=PROMPT_F;
 attachPromptCopyButtons();
 
@@ -883,7 +870,7 @@ function detectionPointsToNatural(pointsPx, resize){
 // 手動で補正できるようにする、全点一括の平行移動+倍率(画像中心基準の拡大縮小)。
 // プレビュー上のドラッグ/ホイール/ピンチでdx,dy,scaleを対話的に決め、
 // 「この位置で反映」でstate.landmarks.pointsPxに焼き込む。この確定値は
-// state.calibrationに累積し、タブ6b-2のアクセサリー領域取得にも同じ値を
+// state.calibrationに累積し、タブ6-2のアクセサリー領域取得にも同じ値を
 // 自動適用する(除外マスク・アクセサリーもGemini由来の座標なので、同じ
 // ズレの傾向を持つことが多いため)。
 // pt: {x,y}(画像原寸ピクセル座標)、center: {cx,cy}(倍率の基準点、通常は画像中心)
@@ -1062,59 +1049,7 @@ $("lmNextBtn").onclick=function(){
   unlockNext("lm"); switchTab("params");
 };
 
-/* ==================== タブ6a: パラメータ提案(会話継続、任意) ==================== */
-function renderParamSuggestions(list){
-  var el=$("paramsSuggestions"); el.innerHTML="";
-  if(!list || !list.length){ el.textContent="(提案なし、または未取得)"; return; }
-  list.forEach(function(s){
-    var d=document.createElement("div");
-    d.className="accItem";
-    d.innerHTML="<b>"+s.key+" → "+JSON.stringify(s.value)+"</b>"+(s.reason||"");
-    el.appendChild(d);
-  });
-}
-function runParamsInitial(){
-  if(!state.front.dataUrl){ setMsg("先に正面(front)を確定してください。",true); return; }
-  $("paramsRunBtn").disabled=true;
-  setMsg("パラメータ提案を取得中...");
-  P3D.scannerCallTextTurn(PROMPT_E, [state.front.dataUrl], []).then(function(res){
-    state.params.history=res.history;
-    var d=P3D.parseJsonResponse(res.text);
-    state.params.suggestions=d.suggestions||[];
-    renderParamSuggestions(state.params.suggestions);
-    appendChatLine($("paramsChatLog"),"model","(初回提案)"+state.params.suggestions.length+"件の提案。");
-    $("paramsRunBtn").disabled=false;
-    $("paramsChatInput").disabled=false; $("paramsChatSend").disabled=false;
-    setMsg("パラメータ提案を取得しました(任意項目です、次へ進んでスキップも可能)。");
-  }).catch(function(e){
-    $("paramsRunBtn").disabled=false;
-    setMsg("パラメータ提案の取得に失敗しました: "+e.message,true);
-  });
-}
-$("paramsRunBtn").onclick=runParamsInitial;
-function sendParamsChat(){
-  var text=$("paramsChatInput").value.trim();
-  if(!text) return;
-  appendChatLine($("paramsChatLog"),"user",text);
-  $("paramsChatInput").value="";
-  $("paramsChatSend").disabled=true;
-  var followup=text+'\n\n(直前のJSONを踏まえ、修正後の同じ形式のJSON({"suggestions":[...]})のみを出力してください。)';
-  P3D.scannerCallTextTurn(followup, [state.front.dataUrl], state.params.history).then(function(res){
-    state.params.history=res.history;
-    var d=P3D.parseJsonResponse(res.text);
-    state.params.suggestions=d.suggestions||[];
-    renderParamSuggestions(state.params.suggestions);
-    appendChatLine($("paramsChatLog"),"model","修正しました。");
-    $("paramsChatSend").disabled=false;
-  }).catch(function(e){
-    appendChatLine($("paramsChatLog"),"model","エラー: "+e.message);
-    $("paramsChatSend").disabled=false;
-  });
-}
-$("paramsChatSend").onclick=sendParamsChat;
-$("paramsChatInput").addEventListener("keydown",function(e){ if(e.key==="Enter") sendParamsChat(); });
-
-/* ==================== タブ6b-1: アクセサリー一覧検出(会話継続、regionsなし、任意) ==================== */
+/* ==================== タブ6-1: アクセサリー一覧検出(会話継続、regionsなし、任意) ==================== */
 function renderAccList(list){
   var el=$("accList"); el.innerHTML="";
   (list||[]).forEach(function(a){
@@ -1181,7 +1116,7 @@ $("accConfirmListBtn").onclick=function(){
   setMsg("一覧を確定しました。次は各アクセサリーの領域を1件ずつ検出してください。");
 };
 
-/* ==================== タブ6b-2: アクセサリー領域指定(1件ずつ、新規セッション、任意) ==================== */
+/* ==================== タブ6-2: アクセサリー領域指定(1件ずつ、新規セッション、任意) ==================== */
 // 旧版はfront/side/back+全accessoryを1回のAPI呼び出しでまとめて処理していたが、
 // 精度が低かった(対象が多すぎて注意が分散する)。1件ずつ個別に新規セッションで
 // 呼び出すことで、各呼び出しの対象を1つのaccessoryに絞り込む。
@@ -1282,11 +1217,6 @@ async function buildLandmarksAiJson(){
     version:2, generator:"ghost-scanner",
     points_px:state.landmarks.pointsPx || {},
   };
-  if(state.params.suggestions && state.params.suggestions.length){
-    var gp={};
-    state.params.suggestions.forEach(function(s){ gp[s.key]=s.value; });
-    out.gen_params=gp;
-  }
   if(state.accessories.list && state.accessories.list.length){
     // exclude_from_body_silhouetteは内部処理用の一時フィールドなので、
     // landmarks_ai.json側のaccessoriesからは除く(GHOST_SCANNER_PLAN.md指示通り)。
