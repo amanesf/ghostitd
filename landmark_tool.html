@@ -126,7 +126,9 @@
   .tabpanel.on{display:block}
   .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
   #manualMaskEditArea.locked{opacity:.45;pointer-events:none;filter:grayscale(.4)}
-  #automaskColormaps img{max-width:110px;border-radius:8px;border:1px solid var(--line)}
+  #automaskColormaps{display:flex;flex-wrap:wrap;gap:8px}
+  #automaskColormaps .automaskItem{flex:0 0 auto;max-width:140px}
+  #automaskColormaps canvas,#automaskColormaps img{max-width:140px;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block}
   .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
   .acitem{display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,.04);
     border:1px solid var(--line);border-radius:9px;padding:7px 9px;transition:background .6s ease,border-color .6s ease}
@@ -1678,9 +1680,67 @@ function highlightAcListItem(idx){
 // 「自動マスク」タブ節)。このタブでは再抽出はできない(ゴーストスキャナー側
 // でやり直してから、改めて引き継ぐ)。
 let automaskRendered=false;
+// マスク由来accessoryの名前・取付ボーンは、多角形(パーツ＋タブ)側のように
+// 点編集を伴わないため、自動マスクタブ側でも直接編集できるようにする
+// (パーツ＋タブのbuildAcFormHtml/wireAcFormEventsと同じBONE_GROUPS/BONE_JPを
+// 使い、多角形操作(まとめて配置・点選択等)に相当する部分だけを省いた簡易フォーム)。
+function buildAutomaskItemHtml(a, idx){
+  const views=["front","side","back"].filter(v=>a.mask[v]);
+  const bonesHtml=BONE_GROUPS.map(grp=>{
+    const rowHtml=grp.bones.map(b=>{
+      const checked=(a.bones||[]).includes(b)?"checked":"";
+      return '<label><input type="checkbox" class="automaskBoneChk" data-i="'+idx+'" value="'+b+'" '+checked+'> '+(BONE_JP[b]||b)+'</label>';
+    }).join("");
+    return '<div class="subhead">'+grp.label+'</div><div class="bonesRow">'+rowHtml+'</div>';
+  }).join("");
+  return '<div class="acform" style="margin-bottom:8px">'+
+    '<span class="tag">自動マスク / 面: '+views.join(",")+'</span>'+
+    '<label>名前<input type="text" class="automaskNameEdit" data-i="'+idx+'" value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)"></label>'+
+    '<label>取り付け方式</label>'+
+    '<div class="row">'+
+    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="rigid"?" mint":"")+'" data-i="'+idx+'" data-mode="rigid">rigid(1ボーン固定)</button>'+
+    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="soft"?" mint":"")+'" data-i="'+idx+'" data-mode="soft">soft(複数ボーン追従)</button>'+
+    '</div>'+
+    '<label>取り付けボーン('+(a.mode==="rigid"?"1つ選択":"複数選択可")+')'+
+    '<div class="bonesGroups">'+bonesHtml+'</div></label>'+
+    '</div>';
+}
+function wireAutomaskItemEvents(){
+  [].forEach.call(document.querySelectorAll(".automaskNameEdit"),inp=>{
+    inp.oninput=()=>{
+      const i=+inp.dataset.i, oldKey="acc:"+(accessories[i].name||"accessory");
+      accessories[i].name=inp.value;
+      const newKey="acc:"+(accessories[i].name||"accessory");
+      if(oldKey!==newKey && seamAngles[oldKey]!==undefined){
+        seamAngles[newKey]=seamAngles[oldKey];delete seamAngles[oldKey];
+      }
+    };
+  });
+  [].forEach.call(document.querySelectorAll(".automaskModeBtn"),btn=>{
+    btn.onclick=()=>{
+      const i=+btn.dataset.i, a=accessories[i];
+      a.mode=btn.dataset.mode;
+      if(a.mode==="rigid"&&a.bones.length>1)a.bones=a.bones.slice(0,1);
+      renderAutomaskTab();
+    };
+  });
+  [].forEach.call(document.querySelectorAll(".automaskBoneChk"),cb=>{
+    cb.onchange=()=>{
+      const i=+cb.dataset.i, a=accessories[i];
+      if(a.mode==="rigid"){
+        a.bones=cb.checked?[cb.value]:[];
+        renderAutomaskTab();
+      }else{
+        if(cb.checked){if(a.bones.indexOf(cb.value)<0)a.bones.push(cb.value);}
+        else{a.bones=a.bones.filter(x=>x!==cb.value);}
+      }
+    };
+  });
+}
 function renderAutomaskTab(){
   const colWrap=$("automaskColormaps"), listWrap=$("automaskList"), hint=$("automaskEmptyHint");
-  const maskAccs=accessories.filter(a=>a.mask&&Object.keys(a.mask).length);
+  const maskAccs=[];
+  accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
   colWrap.innerHTML="";
   listWrap.innerHTML="";
   if(!maskAccs.length){
@@ -1695,7 +1755,7 @@ function renderAutomaskTab(){
     c.width=im.w; c.height=im.h;
     const cx=c.getContext("2d");
     cx.drawImage(im.el,0,0,im.w,im.h);
-    maskAccs.forEach((a,i)=>{
+    maskAccs.forEach(({a})=>{
       const m=a.mask[v];
       if(!m||!m.maskDataUrl)return;
       const mi=new Image();
@@ -1703,6 +1763,7 @@ function renderAutomaskTab(){
       mi.src=m.maskDataUrl;
     });
     const wrap=document.createElement("div");
+    wrap.className="automaskItem";
     const label=document.createElement("div");
     label.style.cssText="font-size:10.5px;color:var(--mut);margin-bottom:2px";
     label.textContent=VIEWJP[v]||v;
@@ -1710,12 +1771,8 @@ function renderAutomaskTab(){
     wrap.appendChild(c);
     colWrap.appendChild(wrap);
   });
-  listWrap.innerHTML=maskAccs.map(a=>{
-    const views=["front","side","back"].filter(v=>a.mask[v]);
-    return '<div class="acitem"><b>'+(a.name||"?")+'</b>'+
-      '<span class="tag">'+a.mode+'/'+((a.bones||[]).join(",")||"未設定")+'</span>'+
-      '<span class="tag">面: '+views.join(",")+'</span></div>';
-  }).join("");
+  listWrap.innerHTML=maskAccs.map(({a,i})=>buildAutomaskItemHtml(a,i)).join("");
+  wireAutomaskItemEvents();
 }
 function renderAcList(){
   const el=$("acList");
