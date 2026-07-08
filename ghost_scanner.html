@@ -740,21 +740,19 @@ var PROMPT_F =
 "除外すると頭部の基準サイズが求められなくなります。\n\n"+
 "## 出力手順(このステップでは領域(regions)は出力不要です。まず「何を\n"+
 "抽出するか」の一覧を確定させ、各accessoryの範囲指定は後続のステップで\n"+
-"1件ずつ個別に行います)\n"+
-"1. 検出したaccessoryそれぞれに、以下のパレットから重複しないよう\n"+
-"   順に色を割り当ててください: #7aa2ff, #ff6ad5, #52e0c4, #ffb454,\n"+
-"   #ff8a8a, #b48cff, #8cffb4, #5be6ff\n"+
-"2. 各accessoryについて、取付ボーンを以下から1つ以上選んでください:\n"+
+"1件ずつ個別に行います。色の割当はこちら側で機械的に行うため、colorフィールド\n"+
+"は出力不要です)\n"+
+"1. 各accessoryについて、取付ボーンを以下から1つ以上選んでください:\n"+
 "   hips, torso, chest, neck, head, clavicle_L, upperarm_L, forearm_L,\n"+
 "   wrist_L, hand_L, clavicle_R, upperarm_R, forearm_R, wrist_R, hand_R,\n"+
 "   thigh_L, shin_L, foot_L, toe_L, thigh_R, shin_R, foot_R, toe_R\n"+
 '   (1つのボーンに固定なら"rigid"、複数ボーンにまたがり体の動きに追従\n'+
 '   するなら"soft"。例: スカート→hips+thigh_L+thigh_R、soft。\n'+
 '   ヘッドホン→head、rigid。尻尾→hips、rigid)\n'+
-"3. 各accessoryについて、上記の「除外マスク用フラグ」を判定してください\n"+
-"4. 各accessoryについて、front/side/backのうちどの面に実際に写っているか\n"+
+"2. 各accessoryについて、上記の「除外マスク用フラグ」を判定してください\n"+
+"3. 各accessoryについて、front/side/backのうちどの面に実際に写っているか\n"+
 "   (visible_views)を挙げてください(隠れて見えない面は含めない)\n\n"+
-"## 出力形式(JSONのみ、説明文・コードフェンス不要。regionsフィールドは\n"+
+"## 出力形式(JSONのみ、説明文・コードフェンス不要。regions/colorフィールドは\n"+
 "含めないでください)\n"+
 "{\n"+
 '  "accessories": [\n'+
@@ -762,7 +760,6 @@ var PROMPT_F =
 '      "name": "例: スカート",\n'+
 '      "mode": "soft",\n'+
 '      "bones": ["hips", "thigh_L", "thigh_R"],\n'+
-'      "color": "#7aa2ff",\n'+
 '      "reason": "腰から広がり、脚のシルエットの外側に張り出しているため",\n'+
 '      "exclude_from_body_silhouette": true,\n'+
 '      "visible_views": ["front", "side", "back"]\n'+
@@ -1058,6 +1055,16 @@ $("lmNextBtn").onclick=function(){
 };
 
 /* ==================== タブ6-1: アクセサリー一覧検出(会話継続、regionsなし、任意) ==================== */
+// アクセサリーの色は、検出のたびにGemini任せで決まると毎回ランダムに見えて
+// しまう(ユーザー指摘)。並び順そのものを完全に固定するのは難しいが、
+// 「一覧内の何番目か(index)」と色の対応だけは常にこちら側で決定的に固定する
+// (1件目は常にパレット先頭の色、2件目は常に次の色…という単純な規則)。
+// PROMPT_Fからも色の割当指示自体を外し(下記参照)、Geminiが返したcolorが
+// あっても常にこちらの値で上書きする。
+var ACC_COLOR_PALETTE = ["#7aa2ff","#ff6ad5","#52e0c4","#ffb454","#ff8a8a","#b48cff","#8cffb4","#5be6ff"];
+function assignAccessoryColors(list){
+  (list||[]).forEach(function(a,i){ a.color = ACC_COLOR_PALETTE[i % ACC_COLOR_PALETTE.length]; });
+}
 function renderAccList(list){
   var el=$("accList"); el.innerHTML="";
   (list||[]).forEach(function(a){
@@ -1083,6 +1090,7 @@ function runAccInitial(){
     state.accessories.history=res.history;
     var d=P3D.parseJsonResponse(res.text);
     state.accessories.list=d.accessories||[];
+    assignAccessoryColors(state.accessories.list);
     renderAccList(state.accessories.list);
     appendChatLine($("accChatLog"),"model","(初回検出)"+state.accessories.list.length+"件のaccessory(名称のみ、範囲は未取得)。");
     $("accRunBtn").disabled=false;
@@ -1108,6 +1116,7 @@ function sendAccChat(){
     state.accessories.history=res.history;
     var d=P3D.parseJsonResponse(res.text);
     state.accessories.list=d.accessories||[];
+    assignAccessoryColors(state.accessories.list);
     renderAccList(state.accessories.list);
     appendChatLine($("accChatLog"),"model","修正しました。");
     $("accConfirmListBtn").disabled = state.accessories.list.length===0;
