@@ -119,6 +119,7 @@
       <button class="btn mint" id="uploadBtn">画像を選ぶ</button>
       <input type="file" id="uploadFile" accept="image/*"/>
       <canvas class="imgPreview" id="uploadPreview" width="512" height="512"></canvas>
+      <button class="btn sm" id="uploadDownloadBtn" disabled>リサイズ画像をダウンロード</button>
       <button class="btn green" id="uploadNextBtn" disabled>次へ(正面生成)</button>
     </div>
   </div>
@@ -138,6 +139,7 @@
       <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
       <button class="btn sm" id="frontUploadBtn">手動で画像をアップロード</button>
       <input type="file" id="frontUploadFile" accept="image/*"/>
+      <button class="btn sm" id="frontDownloadBtn" disabled>この画像をダウンロード</button>
       <button class="btn green" id="frontNextBtn" disabled>次へ(側面生成)</button>
     </div>
   </div>
@@ -157,6 +159,7 @@
       <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
       <button class="btn sm" id="sideUploadBtn">手動で画像をアップロード</button>
       <input type="file" id="sideUploadFile" accept="image/*"/>
+      <button class="btn sm" id="sideDownloadBtn" disabled>この画像をダウンロード</button>
       <button class="btn green" id="sideNextBtn" disabled>次へ(背面生成)</button>
     </div>
   </div>
@@ -176,6 +179,7 @@
       <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
       <button class="btn sm" id="backUploadBtn">手動で画像をアップロード</button>
       <input type="file" id="backUploadFile" accept="image/*"/>
+      <button class="btn sm" id="backDownloadBtn" disabled>この画像をダウンロード</button>
       <button class="btn green" id="backNextBtn" disabled>次へ(ランドマーク)</button>
     </div>
   </div>
@@ -400,6 +404,15 @@ function showImageOnCanvas(canvasEl, dataUrl){
   });
 }
 
+/* ==================== 汎用: dataURLをファイルとしてダウンロード ==================== */
+// 手動フォールバック運用(外部のAI Studio等にプロンプト+画像を持ち込む)のため、
+// 各タブの画像をローカルに保存できるようにする。
+function downloadDataUrl(dataUrl, filename){
+  var a=document.createElement("a");
+  a.href=dataUrl; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
 /* ==================== タブ1: 画像投入 ==================== */
 $("uploadBtn").onclick=function(){ $("uploadFile").click(); };
 $("uploadFile").onchange=function(e){
@@ -414,8 +427,13 @@ $("uploadFile").onchange=function(e){
     var c=$("uploadPreview"); c.width=1024; c.height=1024;
     c.getContext("2d").drawImage(resized.canvas,0,0);
     $("uploadNextBtn").disabled=false;
+    $("uploadDownloadBtn").disabled=false;
     setMsg("1024×1024にリサイズしました。");
   }).catch(function(e){ setMsg("画像の読み込みに失敗しました: "+e.message,true); });
+};
+$("uploadDownloadBtn").onclick=function(){
+  if(!state.sourceDataUrl){ setMsg("先に画像を選んでください。",true); return; }
+  downloadDataUrl(state.sourceDataUrl, "ghost_scanner_source_1024.png");
 };
 $("uploadNextBtn").onclick=function(){
   unlockNext("upload"); switchTab("front");
@@ -677,7 +695,13 @@ attachPromptCopyButtons();
 function makeGenTab(name, promptText, refDataUrlFn, nextTabName){
   var genBtn=$(name+"GenBtn"), retryBtn=$(name+"RetryBtn"), confirmBtn=$(name+"ConfirmBtn"),
       nextBtn=$(name+"NextBtn"), preview=$(name+"Preview"),
-      uploadBtn=$(name+"UploadBtn"), uploadFile=$(name+"UploadFile");
+      uploadBtn=$(name+"UploadBtn"), uploadFile=$(name+"UploadFile"), downloadBtn=$(name+"DownloadBtn");
+  if(downloadBtn){
+    downloadBtn.onclick=function(){
+      if(!state[name].dataUrl){ setMsg("先に生成/アップロードしてください。",true); return; }
+      downloadDataUrl(state[name].dataUrl, "ghost_scanner_"+name+".png");
+    };
+  }
   // API生成に失敗した場合の代替手段: 外部(AI Studio等)で手動生成した画像を
   // このタブの結果として取り込む(コピーしたプロンプトをそのまま使う想定)。
   // 取り込み後は生成成功時と同じ状態(dataUrl設定・確定待ち)にする。
@@ -692,6 +716,7 @@ function makeGenTab(name, promptText, refDataUrlFn, nextTabName){
         return showImageOnCanvas(preview, dataUrl);
       }).then(function(){
         confirmBtn.disabled=false;
+        if(downloadBtn) downloadBtn.disabled=false;
         setMsg((TAB_LABEL[name]||name)+"を手動でアップロードしました。問題なければ「この画像で確定」してください。");
       }).catch(function(e){ setMsg("画像の読み込みに失敗しました: "+e.message,true); });
       uploadFile.value="";
@@ -707,6 +732,7 @@ function makeGenTab(name, promptText, refDataUrlFn, nextTabName){
       return showImageOnCanvas(preview, dataUrl);
     }).then(function(){
       genBtn.disabled=false; retryBtn.disabled=false; confirmBtn.disabled=false;
+      if(downloadBtn) downloadBtn.disabled=false;
       setMsg("生成しました。問題なければ「この画像で確定」してください。");
     }).catch(function(e){
       genBtn.disabled=false;
