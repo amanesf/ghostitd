@@ -162,7 +162,7 @@ async function runCarvingStages(state, report){
 
   report("profile/core(キャリブレーション)");
   var prof = P3D.stageProfile(alphaFull.front, sizes.front.w, sizes.front.h, alphaFull.side, sizes.side.w, sizes.side.h);
-  var core = P3D.stageCore(alphaFull.side, sizes.side.w, sizes.side.h, prof.YTOP, prof.YBOT);
+  var core = P3D.stageCore(alphaFull.side, sizes.side.w, sizes.side.h, prof.SYTOP, prof.SYBOT);
   var SCALE = prof.YBOT-prof.YTOP;
   console.log("  profile: CX",prof.CX,"YTOP",prof.YTOP,"YBOT",prof.YBOT,"SIDE_REF",core.SIDE_REF);
   await tick();

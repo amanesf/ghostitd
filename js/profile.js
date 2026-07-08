@@ -75,9 +75,10 @@ function boxSmoothEdgePad(arr, k){
 
 /**
  * sideAlpha: Uint8Array(sw*sh) side_cut相当(1=前景)
- * YTOP,YBOT: stageProfile()の戻り値(front基準のv境界だが、Python版もside画像の
- * 行indexとしてそのまま使っている=front/sideの縦キャリブレーションが概ね一致
- * している前提。元のPythonの挙動をそのまま踏襲する)
+ * YTOP,YBOT: 呼び出し側からside画像自身の行範囲(stageProfile()の戻り値の
+ * SYTOP/SYBOT)を渡すこと。front測定値を流用するとfront/sideのフレーミング差
+ * によりSIDE_REFがズレ、モデル全体が前後(Z)に一様にズレる不具合があった
+ * (2026-07-09修正)。
  * 戻り値: {SIDE_REF}
  */
 function stageCore(sideAlpha, sw, sh, YTOP, YBOT){
