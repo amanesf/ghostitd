@@ -120,15 +120,15 @@ IndexedDB経由で`landmark_tool.html`に渡し、遷移後すぐ編集画面が
 
 | # | フェーズ | 内容 | 効果 | コスト | 実現性 | 状態 |
 |---|---|---|---|---|---|---|
-| 0 | プレビュー描画ロジックの共通化(先行リファクタ) | `landmark_tool.html`内の`LM`/`GCOL`/`drawCross`/`drawLabel`/`drawRegionOutlines`を`js/common.js`に切り出し | 中(保守性・見た目統一) | S〜M | 高 | 未着手 |
-| 1 | タブUI骨格+APIキー入力/保存+index.htmlへのカード追加 | 7タブのウィザード枠組み、localStorage管理 | - | M | 高 | 未着手 |
-| 2 | 画像リサイズ処理(1024×1024) | canvas APIでの前処理(タブ1) | 高 | S | 高 | 未着手 |
-| 3 | front生成(タブ2)+プロンプト可視化+新規セッション必須 | 単発リクエスト(履歴を持たない) | 高 | M | 中(要プロンプト調整) | 未着手 |
-| 4 | side生成(タブ3)/back生成(タブ4)+新規セッション必須 | 確定frontを参照に都度新規セッション、個別リトライ | 高 | M | 中(frontの質に依存) | 未着手 |
-| 5 | ランドマーク自動配置+簡易プレビュー+チャット微調整(タブ5) | 検証済みプロンプトで初回推定→チャットで反復修正→点オーバーレイで確認 | 高 | M | 高 | 未着手 |
-| 6 | パラメータ/アクセサリー自動提案+除外マスク導出+簡易プレビュー+チャット微調整(タブ6、任意スキップ可) | body/accessory二分類(front+side+back同時入力)でaccessories JSONを取得(髪は房ごとに分割)、`exclude_from_body_silhouette===true`のものだけをexclude_masksにcanvas描画(頭を覆う前髪/後ろ髪は対象外)。チャットで反復修正、領域オーバーレイ表示 | 中 | M〜L | 中 | 未着手 |
-| 7 | 出力/ジェネレータへの受け渡し(タブ7) | IndexedDB経由で`landmark_tool.html`へ遷移、読み込み分岐を軽微追加 | 高 | M | 高 | 未着手 |
-| 8 | index.htmlへのカード追加(導線) | 4枚目のカード | 中 | S | 高 | 未着手 |
+| 0 | プレビュー描画ロジックの共通化(先行リファクタ) | `landmark_tool.html`内の`LM`/`GCOL`/`drawCross`/`drawLabel`/`drawRegionOutlines`を`js/common.js`に切り出し | 中(保守性・見た目統一) | S〜M | 高 | 完了 |
+| 1 | タブUI骨格+APIキー入力/保存+index.htmlへのカード追加 | 7タブのウィザード枠組み、localStorage管理 | - | M | 高 | 完了 |
+| 2 | 画像リサイズ処理(1024×1024) | canvas APIでの前処理(タブ1) | 高 | S | 高 | 完了 |
+| 3 | front生成(タブ2)+プロンプト可視化+新規セッション必須 | 単発リクエスト(履歴を持たない) | 高 | M | 中(要プロンプト調整) | 完了 |
+| 4 | side生成(タブ3)/back生成(タブ4)+新規セッション必須 | 確定frontを参照に都度新規セッション、個別リトライ | 高 | M | 中(frontの質に依存) | 完了 |
+| 5 | ランドマーク自動配置+簡易プレビュー+チャット微調整(タブ5) | 検証済みプロンプトで初回推定→チャットで反復修正→点オーバーレイで確認 | 高 | M | 高 | 完了 |
+| 6 | パラメータ/アクセサリー自動提案+除外マスク導出+簡易プレビュー+チャット微調整(タブ6、任意スキップ可) | body/accessory二分類(front+side+back同時入力)でaccessories JSONを取得(髪は房ごとに分割)、`exclude_from_body_silhouette===true`のものだけをexclude_masksにcanvas描画(頭を覆う前髪/後ろ髪は対象外)。チャットで反復修正、領域オーバーレイ表示 | 中 | M〜L | 中 | 完了 |
+| 7 | 出力/ジェネレータへの受け渡し(タブ7) | IndexedDB経由で`landmark_tool.html`へ遷移、読み込み分岐を軽微追加 | 高 | M | 高 | 完了 |
+| 8 | index.htmlへのカード追加(導線) | 4枚目のカード | 中 | S | 高 | 完了 |
 
 ## body/accessory の定義(アクセサリー自動検出の判断基準)
 
@@ -457,3 +457,20 @@ accessoryに含めないでください。迷った場合は「取り除いて�
 ===true`のaccessoryについてのみ、`regions[view].points`をcanvas上に赤で塗りつぶし
 `exclude_masks[view]`(PNG dataURL)として合成する(`false`のもの、特に前髪・後ろ髪は
 除外マスクに含めない)。
+
+## 実装時の追記(2026-07-07、フェーズ0〜8実装完了)
+
+- フェーズ0〜8を一通り実装(`js/common.js`への切り出し、`js/scanner_api.js`、
+  `js/scanner_render.js`、`ghost_scanner.html`、`index.html`のカード追加、
+  `landmark_tool.html`の`?source=scanner`読み込み分岐、`js/idb.js`の
+  `SCANNER_IMAGES_KEY`専用キー追加)。
+- **不確実要素**: 実際のGemini APIキーでの動作検証ができていない。特に
+  `js/scanner_api.js`のエンドポイントURL形式(`v1beta/models/{model}:generateContent`)、
+  レスポンスの`inline_data`/`inlineData`キー名、`responseModalities`パラメータの
+  厳密な指定方法は公開ドキュメントに基づくbest-effort実装であり、実際に叩いて
+  形が違えば調整が必要(エラー時は本文をそのままUIに出すようにしてあるので、
+  そこから原因を特定できる設計にしてある)。
+- ジェネレータへの引き継ぎは`js/idb.js`の`saveScannerHandoffImages`/
+  `loadScannerHandoffImages`/`clearScannerHandoffImages`(専用キー
+  `scanner_handoff_images`)+ `sessionStorage`の`scanner_handoff_json`
+  (ページ遷移一回きりのJSON受け渡し)という形で実装した。

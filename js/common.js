@@ -423,6 +423,70 @@ function concatTypedArrays(Ctor, arrs){
 }
 P3D.concatTypedArrays = concatTypedArrays;
 
+// ---- ランドマーク点描画(landmark_tool.htmlベタ書きからの切り出し、フェーズ0) ----
+// ゴーストスキャナー(ghost_scanner.html)側の簡易プレビューでも同じ見た目の
+// 点/ラベルを描きたいため、canvasコンテキストと座標だけを受け取る汎用関数として
+// ここに集約する(landmark_tool.html側はこの関数を呼ぶだけにする)。
+// x: CanvasRenderingContext2D, px/py: 描画先の点(px座標), on: 選択中か, color: 通常色
+function drawCross(x,px,py,on,color){
+  const r=on?9:6.5;
+  x.lineWidth=on?3.4:2.4;x.strokeStyle="rgba(0,0,0,.65)";
+  x.beginPath();x.moveTo(px-r,py);x.lineTo(px+r,py);x.moveTo(px,py-r);x.lineTo(px,py+r);x.stroke();
+  x.lineWidth=on?1.8:1.2;x.strokeStyle=on?"#ffe14d":color;
+  x.beginPath();x.moveTo(px-r,py);x.lineTo(px+r,py);x.moveTo(px,py-r);x.lineTo(px,py+r);x.stroke();
+}
+P3D.drawCross = drawCross;
+function drawLabel(x,text,px,py,color){
+  x.font="bold 11px sans-serif";x.textAlign="center";
+  x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.75)";x.strokeText(text,px,py);
+  x.fillStyle=color;x.fillText(text,px,py);
+}
+P3D.drawLabel = drawLabel;
+// アクセサリー等の可変N点多角形の輪郭線描画。呼び出し側で既にビュー座標
+// (拡大/パン込みのpx座標)に変換した点配列を渡す想定(このツール自体は
+// ビュー変換の詳細を知らない、純粋な描画プリミティブ)。
+// x: CanvasRenderingContext2D, ptsPx: [[px,py],...] (2点未満は何もしない), color: 線色
+function drawPolygonOutline(x,ptsPx,color){
+  if(!ptsPx||ptsPx.length<2)return;
+  x.save();x.lineWidth=2;x.strokeStyle=color;x.beginPath();
+  x.moveTo(ptsPx[0][0],ptsPx[0][1]);
+  for(let i=1;i<ptsPx.length;i++){ x.lineTo(ptsPx[i][0],ptsPx[i][1]); }
+  x.closePath();x.stroke();x.restore();
+}
+P3D.drawPolygonOutline = drawPolygonOutline;
+
+// ---- ランドマーク定義/色(landmark_tool.htmlベタ書きからの切り出し、フェーズ0) ----
+// 18点の解剖学的ランドマーク定義とグループ色。ゴーストスキャナーのプレビューでも
+// landmark_tool.htmlと全く同じ点定義・配色を使いたいためここに集約する。
+var LM=[
+ {k:"head_top",jp:"頭頂",g:"head",desc:"頭のてっぺん(髪を含めた輪郭の一番上)"},
+ {k:"chin",jp:"あご",g:"head",desc:"あごの先端(顔の輪郭で一番下の点。髪で隠れていても実際の輪郭位置)"},
+ {k:"clavicle_L",jp:"鎖骨L",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
+ {k:"clavicle_R",jp:"鎖骨R",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
+ {k:"shoulder_L",jp:"肩L",g:"arm",desc:"肩関節(腕が胴体に接続する回転軸の位置。腕の付け根の一番外側ではなく、腕がそこを軸に回る点)"},
+ {k:"shoulder_R",jp:"肩R",g:"arm",desc:"肩関節(腕が胴体に接続する回転軸の位置。腕の付け根の一番外側ではなく、腕がそこを軸に回る点)"},
+ {k:"elbow_L",jp:"肘L",g:"arm",desc:"肘関節(腕が曲がる位置)"},
+ {k:"elbow_R",jp:"肘R",g:"arm",desc:"肘関節(腕が曲がる位置)"},
+ {k:"wrist_L",jp:"手首L",g:"arm",desc:"手首関節(手のひらの付け根。指先ではない)"},
+ {k:"wrist_R",jp:"手首R",g:"arm",desc:"手首関節(手のひらの付け根。指先ではない)"},
+ {k:"waist_L",jp:"腰L",g:"torso",desc:"胴が一番くびれている高さの、体の左右の輪郭端(ウエストの一番細い所)"},
+ {k:"waist_R",jp:"腰R",g:"torso",desc:"胴が一番くびれている高さの、体の左右の輪郭端(ウエストの一番細い所)"},
+ {k:"hip",jp:"股",g:"leg",desc:"股(両脚の間、脚の付け根の中心点)"},
+ {k:"knee_L",jp:"膝L",g:"leg",desc:"膝関節(脚が曲がる位置)"},
+ {k:"knee_R",jp:"膝R",g:"leg",desc:"膝関節(脚が曲がる位置)"},
+ {k:"ankle_L",jp:"足首L",g:"leg",desc:"足首関節(すねと足の境目)"},
+ {k:"ankle_R",jp:"足首R",g:"leg",desc:"足首関節(すねと足の境目)"},
+ {k:"toe_L",jp:"つま先L",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
+ {k:"toe_R",jp:"つま先R",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
+];
+P3D.LM = LM;
+var GCOL={head:"#52e0c4",arm:"#ffb454",torso:"#7aa2ff",leg:"#ff6ad5"};
+P3D.GCOL = GCOL;
+var LM_GROUP_ORDER=["head","torso","arm","leg"];
+P3D.LM_GROUP_ORDER = LM_GROUP_ORDER;
+var LM_GROUP_JP={head:"頭部",torso:"胴体",arm:"腕",leg:"脚"};
+P3D.LM_GROUP_JP = LM_GROUP_JP;
+
 // ---- スライダー(<input type=range>)をつまみ(thumb)付近でのみ操作可能にする ----
 // ネイティブのrange inputは、つまみ以外のトラック部分をタップしただけでも
 // 即座にその位置へ値がジャンプする仕様のため、誤操作(意図せずパラメータが

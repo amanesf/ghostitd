@@ -334,30 +334,13 @@
 // 標準人体プロポーション（このキャラ固有値ではない＝stage_landmarks の STD と同一）
 const STD={head_bottom:0.125,shoulder:0.182,waist:0.375,hip:0.500,knee_frac:0.47,ankle_frac:0.91,elbow_frac:0.47};
 // L=画像左 / R=画像右（pipeline.py の leg_runs と同規約）
-const LM=[
- {k:"head_top",jp:"頭頂",g:"head",desc:"頭のてっぺん(髪を含めた輪郭の一番上)"},
- {k:"chin",jp:"あご",g:"head",desc:"あごの先端(顔の輪郭で一番下の点。髪で隠れていても実際の輪郭位置)"},
- {k:"clavicle_L",jp:"鎖骨L",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
- {k:"clavicle_R",jp:"鎖骨R",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
- {k:"shoulder_L",jp:"肩L",g:"arm",desc:"肩関節(腕が胴体に接続する回転軸の位置。腕の付け根の一番外側ではなく、腕がそこを軸に回る点)"},
- {k:"shoulder_R",jp:"肩R",g:"arm",desc:"肩関節(腕が胴体に接続する回転軸の位置。腕の付け根の一番外側ではなく、腕がそこを軸に回る点)"},
- {k:"elbow_L",jp:"肘L",g:"arm",desc:"肘関節(腕が曲がる位置)"},
- {k:"elbow_R",jp:"肘R",g:"arm",desc:"肘関節(腕が曲がる位置)"},
- {k:"wrist_L",jp:"手首L",g:"arm",desc:"手首関節(手のひらの付け根。指先ではない)"},
- {k:"wrist_R",jp:"手首R",g:"arm",desc:"手首関節(手のひらの付け根。指先ではない)"},
- {k:"waist_L",jp:"腰L",g:"torso",desc:"胴が一番くびれている高さの、体の左右の輪郭端(ウエストの一番細い所)"},
- {k:"waist_R",jp:"腰R",g:"torso",desc:"胴が一番くびれている高さの、体の左右の輪郭端(ウエストの一番細い所)"},
- {k:"hip",jp:"股",g:"leg",desc:"股(両脚の間、脚の付け根の中心点)"},
- {k:"knee_L",jp:"膝L",g:"leg",desc:"膝関節(脚が曲がる位置)"},
- {k:"knee_R",jp:"膝R",g:"leg",desc:"膝関節(脚が曲がる位置)"},
- {k:"ankle_L",jp:"足首L",g:"leg",desc:"足首関節(すねと足の境目)"},
- {k:"ankle_R",jp:"足首R",g:"leg",desc:"足首関節(すねと足の境目)"},
- {k:"toe_L",jp:"つま先L",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
- {k:"toe_R",jp:"つま先R",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
-];
-const GCOL={head:"#52e0c4",arm:"#ffb454",torso:"#7aa2ff",leg:"#ff6ad5"};
-const LM_GROUP_ORDER=["head","torso","arm","leg"];
-const LM_GROUP_JP={head:"頭部",torso:"胴体",arm:"腕",leg:"脚"};
+// フェーズ0(2026-07-07): 点定義/配色はjs/common.jsに切り出し済み(ゴースト
+// スキャナーの簡易プレビューでも同じ見た目を再利用するため)。ここではその
+// 参照だけを保持する(既存コードの参照箇所は無改修で動くよう同名にしている)。
+const LM=P3D.LM;
+const GCOL=P3D.GCOL;
+const LM_GROUP_ORDER=P3D.LM_GROUP_ORDER;
+const LM_GROUP_JP=P3D.LM_GROUP_JP;
 const BONES=["hips","torso","chest","neck","head",
   "clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L",
   "clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R",
@@ -874,18 +857,10 @@ function cleanJpeg(img,W,H,maxDim){
 }
 
 /* ---------- 描画（view = ズーム/パン対応） ---------- */
-function drawCross(x,px,py,on,color){
-  const r=on?9:6.5;
-  x.lineWidth=on?3.4:2.4;x.strokeStyle="rgba(0,0,0,.65)";
-  x.beginPath();x.moveTo(px-r,py);x.lineTo(px+r,py);x.moveTo(px,py-r);x.lineTo(px,py+r);x.stroke();
-  x.lineWidth=on?1.8:1.2;x.strokeStyle=on?"#ffe14d":color;
-  x.beginPath();x.moveTo(px-r,py);x.lineTo(px+r,py);x.moveTo(px,py-r);x.lineTo(px,py+r);x.stroke();
-}
-function drawLabel(x,text,px,py,color){
-  x.font="bold 11px sans-serif";x.textAlign="center";
-  x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.75)";x.strokeText(text,px,py);
-  x.fillStyle=color;x.fillText(text,px,py);
-}
+// フェーズ0(2026-07-07): 実装はjs/common.jsのP3D.drawCross/P3D.drawLabelに
+// 切り出し済み(ゴーストスキャナーの簡易プレビューと見た目を共有するため)。
+const drawCross=P3D.drawCross;
+const drawLabel=P3D.drawLabel;
 // アクセサリーごとに枠線/点の色を変える(全パーツ同色だと見分けが付かない
 // との指摘のため)。パレットを順番に割り当て、編集中(pendingAcc)は
 // 選択ハイライトと同じ色で常に区別できるようにする。
@@ -918,15 +893,15 @@ function getInteractivePoints(view){
   }
   return out;
 }
+// 実際の線描画はP3D.drawPolygonOutline(汎用・座標のみ受け取る)に委譲し、
+// ここではregions/pendingAcc/accessories等このツール固有の状態からビュー座標
+// への変換だけを担当する(フェーズ0切り出し)。
 function drawRegionOutlines(x,sc){
   const toPx=p=>[p[0]*sc+view.ox, p[1]*sc+view.oy];
   const drawRegions=(regions,color)=>{
     Object.keys(regions).forEach(v=>{if(v!==curView)return;
       const pts=regions[v].points; if(!pts||pts.length<2)return;
-      x.save();x.lineWidth=2;x.strokeStyle=color;x.beginPath();
-      const p0=toPx(pts[0]);x.moveTo(p0[0],p0[1]);
-      for(let i=1;i<pts.length;i++){const p=toPx(pts[i]);x.lineTo(p[0],p[1]);}
-      x.closePath();x.stroke();x.restore();
+      P3D.drawPolygonOutline(x, pts.map(toPx), color);
     });
   };
   if(pendingAcc)drawRegions(pendingAcc.regions,ACC_PENDING_COLOR);
@@ -2041,9 +2016,45 @@ renderOutlinePanel();
   $("modeNewBtn").onclick=startNewNormalMode;
   $("modeContinueBtn").onclick=startContinueNormalMode;
   $("backToIndex").onclick=()=>{ location.href="index.html"; };
+  // ゴーストスキャナー(ghost_scanner.html)からの引き継ぎ(GHOST_SCANNER_PLAN.md
+  // 「ジェネレータへの引き継ぎ」節)。画像本体はIndexedDB専用キー
+  // (SCANNER_IMAGES_KEY、generated_model/normal_session_imagesとは別)、
+  // landmarks_ai.json相当のJSONはページ遷移一回きりの受け渡しなので
+  // sessionStorageに置く(scanner側がsetItemしてから遷移する)。読み込んだら
+  // 両方とも消費して(残っていると次回起動時に誤って再読込されるため)、以後は
+  // 通常モードとして扱う(自動保存の対象にもなる)。
+  async function startScannerHandoffMode(){
+    currentMode="normal";
+    $("modeChoice").classList.add("hidden");
+    try{
+      const jsonRaw=sessionStorage.getItem("scanner_handoff_json");
+      const blobs=await P3D.loadScannerHandoffImages();
+      if(!jsonRaw||!blobs||!blobs.front||!blobs.side||!blobs.back) throw new Error("スキャナーからの引き継ぎデータが見つかりません");
+      await Promise.all(["front","side","back"].map(function(slot){
+        return loadImageBlobIntoSlot(slot,blobs[slot]);
+      }));
+      runAnalyze();syncViewBtns();
+      applyLoadedJson(JSON.parse(jsonRaw));
+      sessionStorage.removeItem("scanner_handoff_json");
+      P3D.clearScannerHandoffImages().catch(function(){});
+      setMsg("ゴーストスキャナーからの結果を読み込みました。");
+    }catch(e){
+      console.warn("スキャナーからの引き継ぎに失敗しました:",e);
+      setMsg("ゴーストスキャナーからの引き継ぎに失敗しました。新規作成でやり直してください。");
+      showModeChoice();
+    }
+  }
+  const scannerSource = new URLSearchParams(location.search).get("source")==="scanner";
   // モード選択画面は常に表示する(自動復元でモード選択を省略する挙動は撤去し、
   // 毎回必ずここから選ぶ。「前回の続き」の可否だけその都度チェックする)。
-  showModeChoice();
+  // ただし?source=scannerの場合だけは例外的にモード選択をスキップし、直接
+  // スキャナーの結果を読み込む(スキャナー側の「ジェネレータへ」ボタンを
+  // 押した直後にもう一度モードを選ばせるのは冗長なため)。
+  if(scannerSource){
+    startScannerHandoffMode();
+  }else{
+    showModeChoice();
+  }
   startAutosaveLoop();
 })();
 })();
