@@ -112,15 +112,23 @@ P3D.scannerDrawAccessoryRegionsPreview = drawAccessoryRegionsPreview;
 // view: "front"|"side"|"back"、w,h: そのview画像の原寸サイズ
 // 戻り値: PNG dataURL、対象accessoryが1つもなければnull
 function buildExcludeMaskDataUrl(accessories, view, w, h){
-  var targets = (accessories||[]).filter(function(a){
+  var polyTargets = (accessories||[]).filter(function(a){
     var region = a.regions && a.regions[view];
     return a.exclude_from_body_silhouette===true && region && region.points && region.points.length>=2;
   });
-  if(!targets.length) return null;
+  // マスク方式(色分けマップ由来)のaccessoryも除外マスク合成の対象にする
+  // (計画書「除外マスク(exclude_from_body_silhouette===trueのaccessory色領域から)」)。
+  // マスク自体は元画像と同じ座標系のラスタ(maskDataUrl、白RGB+アルファ=前景)
+  // なので、そのままそのview canvasへ重ね描きするだけでよい。
+  var maskTargets = (accessories||[]).filter(function(a){
+    var m = a.mask && a.mask[view];
+    return a.exclude_from_body_silhouette===true && m && m.maskDataUrl;
+  });
+  if(!polyTargets.length && !maskTargets.length) return null;
   var c = document.createElement("canvas"); c.width=w; c.height=h;
   var ctx = c.getContext("2d");
   ctx.fillStyle = "#ff0000";
-  targets.forEach(function(a){
+  polyTargets.forEach(function(a){
     var pts = a.regions[view].points;
     ctx.beginPath();
     ctx.moveTo(pts[0][0], pts[0][1]);
@@ -128,6 +136,19 @@ function buildExcludeMaskDataUrl(accessories, view, w, h){
     ctx.closePath();
     ctx.fill();
   });
+  if(maskTargets.length){
+    // 呼び出し元がすでにマスク画像をHTMLImageElementとして読み込み済みで
+    // 同期描画したい場合に備え、img要素を直接渡せる形も許容する
+    // (a.mask[view]._img があればそれを使い、なければ非同期読み込みは
+    // 呼び出し元の責務とする=ここでは同期描画のみ行う)。
+    maskTargets.forEach(function(a){
+      var m = a.mask[view];
+      if(m._img){
+        ctx.globalCompositeOperation="source-over";
+        ctx.drawImage(m._img, 0, 0, w, h);
+      }
+    });
+  }
   return c.toDataURL("image/png");
 }
 P3D.scannerBuildExcludeMaskDataUrl = buildExcludeMaskDataUrl;

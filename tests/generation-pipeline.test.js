@@ -33,7 +33,11 @@ async function generateAndExportGlb(server, browser, addAccessory) {
   await page.waitForTimeout(1500);
 
   if (addAccessory) {
-    await page.click('.tabbtn[data-tab="ac"]');
+    // 5タブ再編(GHOST_SCANNER_PLAN.md「色分けマップ」方式): 旧「パーツ＋」(ac)は
+    // 「手動マスク」(manualmask)配下のサブタブになり、編集にはロック解除が要る。
+    await page.click('.tabbtn[data-tab="manualmask"]');
+    await page.check("#manualMaskUnlock");
+    await page.click('[data-subtab="ac"]');
     await page.waitForTimeout(200);
     await page.click("#acAddBtn");
     await page.waitForTimeout(200);

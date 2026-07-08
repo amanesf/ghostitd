@@ -70,6 +70,18 @@ function bboxOf(pointsModel, padFrac){
   return [x0-px,x1+px,y0-py,y1+py];
 }
 
+// マスク(色分けマップ由来、regions.mask.{front,back,side}={bbox:[x0,y0,x1,y1](画像
+// ピクセル座標)})の外接矩形を、多角形のbboxOf()と同じ「モデル座標の[x0,x1,y0,y1]」
+// 形式に変換する。マスクのピクセルbboxの四隅を各view座標変換関数に通してから
+// モデル空間でのmin/maxを取る(多角形と同じ経路でスケール/オフセットを反映するため)。
+function pixelBboxToModelBbox(pxBbox, toModelFn){
+  var x0=pxBbox[0], y0=pxBbox[1], x1=pxBbox[2], y1=pxBbox[3];
+  var corners=[[x0,y0],[x1,y0],[x0,y1],[x1,y1]];
+  var modelPts = toModelFn(corners);
+  return bboxOf(modelPts, 0.05);
+}
+P3D.pixelBboxToModelBbox = pixelBboxToModelBbox;
+
 /**
  * opts: {
  *   accs: [{name,mode,bones,regions:{front:{points},back:{points},side:{points}}}, ...]
@@ -97,7 +109,13 @@ function stageAccessories(opts){
     var name = acc.name || 'accessory';
     var mode = acc.mode || 'rigid';
     var bones = acc.bones || [];
+    // accessoryは多角形(regions[view].points、手動編集)かマスク(mask[view].bbox、
+    // 色分けマップ由来・自動抽出のみ)のどちらか一方の形式で範囲を持つ
+    // (GHOST_SCANNER_PLAN.md「データモデル」節: 統合せず並存させる)。
+    // どちらの場合も実際の3D彫刻自体はbbox範囲内のアルファ検出(localAlpha/
+    // carveRegion)で行われるため、ここでの分岐はbbox算出方法の違いだけで済む。
     var regions = acc.regions || {};
+    var mask = acc.mask || {};
     var fr=regions.front, bk=regions.back, sd=regions.side;
     var frontPolygon=null, backPolygon=null, sidePolygon=null;
     var mxMin,mxMax,myMin,myMax,mzMin,mzMax;
@@ -107,6 +125,12 @@ function stageAccessories(opts){
     }else if(bk && bk.points && bk.points.length){
       backPolygon = backPointsToModel(bk.points, CX, SCALE, YBOT, W, backOffsetX, backOffsetY);
       var bb2=bboxOf(backPolygon); mxMin=bb2[0];mxMax=bb2[1];myMin=bb2[2];myMax=bb2[3];
+    }else if(mask.front && mask.front.bbox){
+      var bbm=P3D.pixelBboxToModelBbox(mask.front.bbox, function(pts){ return frontPointsToModel(pts, CX, SCALE, YBOT); });
+      mxMin=bbm[0];mxMax=bbm[1];myMin=bbm[2];myMax=bbm[3];
+    }else if(mask.back && mask.back.bbox){
+      var bbm2=P3D.pixelBboxToModelBbox(mask.back.bbox, function(pts){ return backPointsToModel(pts, CX, SCALE, YBOT, W, backOffsetX, backOffsetY); });
+      mxMin=bbm2[0];mxMax=bbm2[1];myMin=bbm2[2];myMax=bbm2[3];
     }else{
       console.log("  accessories: skip", name, "(front/back範囲なし)");
       return;
@@ -114,6 +138,9 @@ function stageAccessories(opts){
     if(sd && sd.points && sd.points.length){
       sidePolygon = sidePointsToModel(sd.points, SIDE_REF, SCALE, SYTOP, SYBOT);
       var bb3=bboxOf(sidePolygon); mzMin=bb3[0];mzMax=bb3[1];
+    }else if(mask.side && mask.side.bbox){
+      var bbm3=P3D.pixelBboxToModelBbox(mask.side.bbox, function(pts){ return sidePointsToModel(pts, SIDE_REF, SCALE, SYTOP, SYBOT); });
+      mzMin=bbm3[0];mzMax=bbm3[1];
     }else{
       var hw=(mxMax-mxMin)/2; mzMin=-hw*0.6; mzMax=hw*0.6;
     }

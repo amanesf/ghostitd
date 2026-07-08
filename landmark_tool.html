@@ -125,6 +125,8 @@
   .tabpanel{display:none}
   .tabpanel.on{display:block}
   .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
+  #manualMaskEditArea.locked{opacity:.45;pointer-events:none;filter:grayscale(.4)}
+  #automaskColormaps img{max-width:110px;border-radius:8px;border:1px solid var(--line)}
   .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
   .acitem{display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,.04);
     border:1px solid var(--line);border-radius:9px;padding:7px 9px;transition:background .6s ease,border-color .6s ease}
@@ -159,8 +161,8 @@
   <div id="editor" class="hidden">
     <div class="tabbar" id="tabbar">
       <button class="tabbtn on" data-tab="lm">マーク</button>
-      <button class="tabbtn" data-tab="ex">領域</button>
-      <button class="tabbtn" data-tab="ac">パーツ＋</button>
+      <button class="tabbtn" data-tab="automask">自動マスク</button>
+      <button class="tabbtn" data-tab="manualmask">手動マスク</button>
       <button class="tabbtn" data-tab="params">設定値</button>
       <button class="tabbtn" data-tab="gen">生成</button>
     </div>
@@ -204,6 +206,41 @@
       </div>
     </div>
 
+    <!-- 自動マスク(新規、GHOST_SCANNER_PLAN.md「色分けマップ」方式):
+         front/side/backの色分けマップ画像3枚+抽出済みパーツ一覧を同時表示する。
+         マスクはここでのみ更新され、手動での書き換えはできない(再生成/
+         再アップロードのみ)。 -->
+    <div class="tabpanel acpanel" data-tabpanel="automask">
+      <h2>自動マスク(色分けマップ由来、手動編集不可)
+        <button type="button" class="qbtn" data-help="help-automask">?</button></h2>
+      <p class="helpText hidden" id="help-automask">
+        ゴーストスキャナーで生成/アップロードした色分けマップ(front/side/back、
+        体=黒・背景=白・各accessory=パレット色でベタ塗り)から自動抽出された
+        マスク(ラスタ)の一覧です。ここでは再抽出はできません(ゴーストスキャナー
+        側の「色分けマップ生成→領域抽出」タブで再生成/再アップロードしてから、
+        改めてこのツールへ引き継いでください)。多角形(下の「手動マスク」タブ)
+        とは別の独立したデータ形式で、統合はされません。</p>
+      <div id="automaskColormaps" class="row" style="flex-wrap:wrap"></div>
+      <div id="automaskList" class="aclist"></div>
+      <p class="hint" id="automaskEmptyHint" style="font-size:11px;color:var(--mut)"></p>
+    </div>
+
+    <!-- 手動マスク(既存の「領域」ex・「パーツ＋」acを内部サブ切り替えとして格納。
+         GHOST_SCANNER_PLAN.md「UI変更」節の通り、既存ロジックはほぼ無改修のまま
+         移設し、明示的なチェックボックスをオンにしないと編集できないようにする
+         (誤操作防止、自動マスクと役割が違うことを意識させるため)。 -->
+    <div class="tabpanel acpanel" data-tabpanel="manualmask" id="manualMaskPanel">
+      <div class="acitem" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+          <input type="checkbox" id="manualMaskUnlock">
+          編集を有効にする(誤操作防止のロック。オフの間は下の「領域」「パーツ＋」を編集できません)
+        </label>
+      </div>
+      <div class="tabbar" id="manualMaskSubTabbar" style="margin-bottom:10px">
+        <button class="tabbtn on" data-subtab="ex">領域</button>
+        <button class="tabbtn" data-subtab="ac">パーツ＋</button>
+      </div>
+      <div id="manualMaskEditArea">
     <div class="tabpanel acpanel" data-tabpanel="ex">
       <h2>除外範囲（毛先など、シルエット測定から除外したい部分）
         <button type="button" class="qbtn" data-help="help-ex">?</button></h2>
@@ -247,6 +284,8 @@
       <div id="acForm"></div>
       <button class="btn mint" id="acAddBtn">+ 手動で追加</button>
     </div>
+      </div><!-- #manualMaskEditArea -->
+    </div><!-- #manualMaskPanel -->
 
     <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
          (seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの編集UI)は
@@ -882,6 +921,7 @@ function getInteractivePoints(view){
   }
   if(curTab==="ac"){
     const pushRegionPts=(regions,prefix,name,color)=>{
+      if(!regions)return; // マスク形式のaccessoryは多角形の点ドラッグ編集対象外
       Object.keys(regions).forEach(v=>{if(v!==view)return;
         const r=regions[v];
         r.points.forEach((p,i)=>{
@@ -899,6 +939,7 @@ function getInteractivePoints(view){
 function drawRegionOutlines(x,sc){
   const toPx=p=>[p[0]*sc+view.ox, p[1]*sc+view.oy];
   const drawRegions=(regions,color)=>{
+    if(!regions)return; // マスク形式のaccessoryは輪郭線を持たない(ラスタマスクのため)
     Object.keys(regions).forEach(v=>{if(v!==curView)return;
       const pts=regions[v].points; if(!pts||pts.length<2)return;
       P3D.drawPolygonOutline(x, pts.map(toPx), color);
@@ -1232,7 +1273,7 @@ cvs.addEventListener("pointerdown",e=>{
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   try{cvs.setPointerCapture(e.pointerId);}catch(_){}
   if(ptrs.size===1){
-    if(curTab==="ex"&&!pointsLocked){
+    if(curTab==="ex"&&!pointsLocked&&!isManualMaskLocked()){
       const p=toImg(e), px=Math.round(p[0]), py=Math.round(p[1]);
       if(exMode==="brush"){
         ptrMode="paint";
@@ -1250,7 +1291,7 @@ cvs.addEventListener("pointerdown",e=>{
       return;
     }
     let near=null,nd=1e9;
-    if(!pointsLocked){
+    if(!pointsLocked&&!isManualMaskLocked()){
       const p=toImg(e);
       const pts=getInteractivePoints(curView);
       pts.forEach(pp=>{const dd=Math.hypot(pp.pos[0]-p[0],pp.pos[1]-p[1]);if(dd<nd){nd=dd;near=pp;}});
@@ -1299,8 +1340,15 @@ function buildJson(){
     image:{front:{w,h,ytop:analysis.ytop,ybot:analysis.ybot,cx:Math.round(analysis.cx)},
       side:imgs.side?{w:imgs.side.w,h:imgs.side.h}:null,back:imgs.back?{w:imgs.back.w,h:imgs.back.h}:null},
     points_px,derived:deriveFromPoints(points,analysis),
-    accessories:accessories.map(a=>({name:a.name,mode:a.mode,bones:a.bones,
-      regions:Object.keys(a.regions).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{})})),
+    accessories:accessories.map(a=>{
+      const out={name:a.name,mode:a.mode,bones:a.bones};
+      if(a.mask&&Object.keys(a.mask).length){
+        out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
+      }else{
+        out.regions=Object.keys(a.regions||{}).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{});
+      }
+      return out;
+    }),
     exclude_masks:(function(){
       const out={};
       ["front","side","back"].forEach(v=>{
@@ -1338,14 +1386,28 @@ function applyLoadedJson(d){
   if(d.points_px){
     LM.forEach(lm=>{const p=d.points_px[lm.k];if(p)points[lm.k]=[p.x,p.y];});
   }
-  accessories=(d.accessories||[]).map(a=>({
-    name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
-    regions:Object.keys(a.regions||{}).reduce((o,v)=>{
-      const pts=a.regions[v]&&a.regions[v].points;
-      if(pts&&pts.length)o[v]={points:pts.map(p=>[p[0],p[1]])};
-      return o;
-    },{})
-  }));
+  // accessoryは多角形(regions、既存・手動編集可)かマスク(mask、色分けマップ由来・
+  // 新規・自動抽出のみ)のどちらか一方の形式を持つ(統合せず並存させる、
+  // GHOST_SCANNER_PLAN.md「データモデル」節)。既存の多角形形式の保存済みJSONとの
+  // 互換性は維持しない方針のため、旧形式の救済処理は行わない。
+  accessories=(d.accessories||[]).map(a=>{
+    const hasMask=a.mask&&Object.keys(a.mask).length>0;
+    const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[]};
+    if(hasMask){
+      out.mask=Object.keys(a.mask).reduce((o,v)=>{
+        const m=a.mask[v];
+        if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
+        return o;
+      },{});
+    }else{
+      out.regions=Object.keys(a.regions||{}).reduce((o,v)=>{
+        const pts=a.regions[v]&&a.regions[v].points;
+        if(pts&&pts.length)o[v]={points:pts.map(p=>[p[0],p[1]])};
+        return o;
+      },{});
+    }
+    return out;
+  });
   seamAngles=Object.assign({},d.seam_angles||{});
   seamNoSide=Object.assign({},d.seam_no_side||{});
   seamSmoothIters=(d.seam_smooth_iters!==undefined)?d.seam_smooth_iters:SEAM_DEFAULT_SMOOTH;
@@ -1389,21 +1451,52 @@ function loadJsonFile(file){
 }
 
 /* ---------- タブ(ランドマーク/アクセサリー/幅奥行き/境目角度を切り替え、縦スクロールを短縮) ---------- */
+// curTabは既存の値("lm"/"ex"/"ac"/"params"/"gen")をそのまま使い続ける
+// (CLAUDE.mdの通り、単一の巨大IIFEスコープでの変数衝突リスクを避けるため
+// 全体grep済み。他に"curTab"という名前の別意味の変数は無い)。「領域」(ex)
+// 「パーツ＋」(ac)は、5タブ再編後は最上段のタブバーには出さず、「手動マスク」
+// (data-tab="manualmask")配下のサブタブとして選ぶ形にする。トップレベルの
+// タブボタン一覧には無いcurTab値("ex"/"ac")のときにどのタブボタン/パネルを
+// 「on」にするかは、この配列を使って特別扱いする。
+const MANUAL_MASK_SUBTABS=["ex","ac"];
 let curTab="lm";
 // 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
-// タブ(画像境界/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
+// タブ(自動マスク/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
 const IMG_TABS=["lm","ex","ac","params"];
 function syncTabs(){
-  [].forEach.call(document.querySelectorAll(".tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===curTab);});
-  [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{p.classList.toggle("on",p.dataset.tabpanel===curTab);});
+  const topLevelTab = MANUAL_MASK_SUBTABS.includes(curTab) ? "manualmask" : curTab;
+  [].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===topLevelTab);});
+  [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{
+    if(p.dataset.tabpanel==="manualmask"){ p.classList.toggle("on", MANUAL_MASK_SUBTABS.includes(curTab)); return; }
+    p.classList.toggle("on",p.dataset.tabpanel===curTab);
+  });
+  if(MANUAL_MASK_SUBTABS.includes(curTab)){
+    [].forEach.call(document.querySelectorAll("#manualMaskSubTabbar > .tabbtn"),b=>{b.classList.toggle("on",b.dataset.subtab===curTab);});
+    $("manualMaskEditArea").classList.toggle("locked", !manualMaskUnlocked);
+  }
+  if(curTab==="automask") renderAutomaskTab();
   $("imgArea").classList.toggle("hidden",!IMG_TABS.includes(curTab));
 }
-[].forEach.call(document.querySelectorAll(".tabbtn"),b=>{
-  b.onclick=()=>{curTab=b.dataset.tab;syncTabs();
+[].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{
+  b.onclick=()=>{
+    // 「手動マスク」を初めて選んだ場合は直前のサブタブ(既定は"ex")に入る。
+    curTab = (b.dataset.tab==="manualmask") ? (MANUAL_MASK_SUBTABS.includes(curTab)?curTab:"ex") : b.dataset.tab;
+    syncTabs();
     syncViewBtns();
     if(IMG_TABS.includes(curTab))draw();
   };
 });
+[].forEach.call(document.querySelectorAll("#manualMaskSubTabbar > .tabbtn"),b=>{
+  b.onclick=()=>{curTab=b.dataset.subtab;syncTabs();syncViewBtns();draw();};
+});
+// 「手動マスク」タブは誤操作防止のため、明示的にチェックボックスをオンにするまで
+// 編集(点ドラッグ・ブラシ塗り等)ができない(GHOST_SCANNER_PLAN.md「UI変更」節)。
+let manualMaskUnlocked=false;
+function isManualMaskLocked(){ return MANUAL_MASK_SUBTABS.includes(curTab) && !manualMaskUnlocked; }
+$("manualMaskUnlock").onchange=e=>{
+  manualMaskUnlocked=e.target.checked;
+  $("manualMaskEditArea").classList.toggle("locked", !manualMaskUnlocked);
+};
 
 /* ---------- アクセサリー(ヘッドホン/猫耳/カメラ小物/スカート等) ---------- */
 function syncViewBtns(){
@@ -1579,15 +1672,65 @@ function highlightAcListItem(idx){
   el.classList.add("flash");
   setTimeout(()=>el.classList.remove("flash"),1200);
 }
+// 「自動マスク」タブ: front/side/backの画像に、色分けマップ由来のマスク
+// (acc.mask[view].maskDataUrl、白RGB+アルファ=前景のラスタ)を重ね描きした
+// プレビューと、抽出済みパーツ一覧を同時表示する(GHOST_SCANNER_PLAN.md
+// 「自動マスク」タブ節)。このタブでは再抽出はできない(ゴーストスキャナー側
+// でやり直してから、改めて引き継ぐ)。
+let automaskRendered=false;
+function renderAutomaskTab(){
+  const colWrap=$("automaskColormaps"), listWrap=$("automaskList"), hint=$("automaskEmptyHint");
+  const maskAccs=accessories.filter(a=>a.mask&&Object.keys(a.mask).length);
+  colWrap.innerHTML="";
+  listWrap.innerHTML="";
+  if(!maskAccs.length){
+    hint.textContent="自動マスク(色分けマップ由来)のパーツはありません。ゴーストスキャナーの「色分けマップ生成→領域抽出」タブで抽出してから、このツールへ引き継いでください。";
+    return;
+  }
+  hint.textContent="";
+  ["front","side","back"].forEach(v=>{
+    const im=imgs[v];
+    if(!im)return;
+    const c=document.createElement("canvas");
+    c.width=im.w; c.height=im.h;
+    const cx=c.getContext("2d");
+    cx.drawImage(im.el,0,0,im.w,im.h);
+    maskAccs.forEach((a,i)=>{
+      const m=a.mask[v];
+      if(!m||!m.maskDataUrl)return;
+      const mi=new Image();
+      mi.onload=()=>{ cx.save(); cx.globalAlpha=0.55; cx.drawImage(mi,0,0,im.w,im.h); cx.restore(); };
+      mi.src=m.maskDataUrl;
+    });
+    const wrap=document.createElement("div");
+    const label=document.createElement("div");
+    label.style.cssText="font-size:10.5px;color:var(--mut);margin-bottom:2px";
+    label.textContent=VIEWJP[v]||v;
+    wrap.appendChild(label);
+    wrap.appendChild(c);
+    colWrap.appendChild(wrap);
+  });
+  listWrap.innerHTML=maskAccs.map(a=>{
+    const views=["front","side","back"].filter(v=>a.mask[v]);
+    return '<div class="acitem"><b>'+(a.name||"?")+'</b>'+
+      '<span class="tag">'+a.mode+'/'+((a.bones||[]).join(",")||"未設定")+'</span>'+
+      '<span class="tag">面: '+views.join(",")+'</span></div>';
+  }).join("");
+}
 function renderAcList(){
   const el=$("acList");
-  el.innerHTML=accessories.map((a,i)=>
-    '<div class="acitem"><input type="text" class="acNameEdit" data-i="'+i+'" '+
+  // マスク形式(色分けマップ由来・自動抽出)のaccessoryは、この「パーツ＋」タブでは
+  // 多角形の点ドラッグ編集ができない(データモデルが違うため)。「変更」ボタンは
+  // 出さず、代わりに由来を示すタグを表示する(実データは「自動マスク」タブ側で
+  // 再抽出することで更新する)。
+  el.innerHTML=accessories.map((a,i)=>{
+    const isMask=!!(a.mask&&Object.keys(a.mask).length);
+    return '<div class="acitem"><input type="text" class="acNameEdit" data-i="'+i+'" '+
     'value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)">'+
-    '<span class="tag">'+a.mode+'/'+(a.bones.join(",")||"未設定")+'</span>'+
-    '<span class="ed" data-i="'+i+'">変更</span>'+
-    '<span class="rm" data-i="'+i+'">削除</span></div>'
-  ).join("");
+    '<span class="tag">'+a.mode+'/'+(a.bones.join(",")||"未設定")+(isMask?"/自動マスク":"")+'</span>'+
+    (isMask?'':'<span class="ed" data-i="'+i+'">変更</span>')+
+    '<span class="rm" data-i="'+i+'">削除</span></div>';
+  }).join("");
   [].forEach.call(el.querySelectorAll(".acNameEdit"),inp=>{
     inp.oninput=()=>{
       const i=+inp.dataset.i, oldKey="acc:"+(accessories[i].name||"accessory");
@@ -1745,8 +1888,15 @@ $("generateBtn").onclick=async()=>{
   try{
     const state={
       imgs, points, analysis, deriveFromPoints,
-      accessories: accessories.map(a=>({name:a.name,mode:a.mode,bones:a.bones,
-        regions:Object.keys(a.regions).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{})})),
+      accessories: accessories.map(a=>{
+        const out={name:a.name,mode:a.mode,bones:a.bones};
+        if(a.mask&&Object.keys(a.mask).length){
+          out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={bbox:a.mask[v].bbox};return o;},{});
+        }else{
+          out.regions=Object.keys(a.regions||{}).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{});
+        }
+        return out;
+      }),
       excludeMask, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, genParams,
     };
     // ★フェーズ1(2026-07-07〜): 「生成」は完成GLBまで作らず、重い彫刻(marching

@@ -267,6 +267,77 @@ function loadRgbaRemoveWhite(img, whiteThr, excludeMask){
 }
 P3D.loadRgbaRemoveWhite = loadRgbaRemoveWhite;
 
+// ---- 色分けマップからのマスク抽出(GHOST_SCANNER_PLAN.md「色分けマップ」方式) ----
+// アクセサリー領域抽出を「1件ずつ座標を当てさせる」方式から、front/side/back
+// 各1枚の色分けマップ画像(体=黒、背景=白、各accessory=パレット色でベタ塗り)
+// をGeminiの画像編集で生成し、こちら側のcanvas処理で色ごとに走査して
+// マスクを機械的に算出する方式に変更した際に追加。多角形化(輪郭追跡)は
+// 行わず、ラスタマスクのまま保持する(多角形手動編集とは別データ形式として
+// 並存させる、GHOST_SCANNER_PLAN.md「データモデル」節)。
+// hex: "#rrggbb" -> [r,g,b]
+function hexToRgb(hex){
+  var m = /^#?([0-9a-fA-F]{6})$/.exec(hex||"");
+  if(!m) return [0,0,0];
+  var n = parseInt(m[1],16);
+  return [(n>>16)&255, (n>>8)&255, n&255];
+}
+P3D.hexToRgb = hexToRgb;
+
+// ctx: CanvasRenderingContext2D(色分けマップ画像が描画済み), w,h: サイズ,
+// targetColorHex: 抽出したい色("#rrggbb"), toleranceOpt: 色距離許容誤差
+// (デフォルト40。アンチエイリアス境界のにじみを吸収するため、RGB各成分の
+// 差の二乗和のルート=ユークリッド距離で判定する)。
+// 戻り値: {maskDataUrl, bbox:[x0,y0,x1,y1](ピクセル座標、y0<y1)} | null
+// (該当色の画素が1つも無ければnull)。最大連結成分のみを採用する
+// (計画書「複数成分対応は必要になれば追って拡張」の通り、現時点では単純化)。
+function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt){
+  var tol = (toleranceOpt===undefined || toleranceOpt===null) ? 40 : toleranceOpt;
+  var target = hexToRgb(targetColorHex);
+  var id = ctx.getImageData(0,0,w,h);
+  var data = id.data;
+  var raw = new Uint8Array(w*h);
+  var tol2 = tol*tol;
+  for(var i=0,p=0; i<data.length; i+=4,p++){
+    var dr=data[i]-target[0], dg=data[i+1]-target[1], db=data[i+2]-target[2];
+    if(dr*dr+dg*dg+db*db <= tol2) raw[p]=1;
+  }
+  var comp = largestComponent(raw, w, h);
+  var x0=w, x1=-1, y0=h, y1=-1, any=false;
+  for(var y=0;y<h;y++){
+    for(var x=0;x<w;x++){
+      if(comp[y*w+x]){
+        any=true;
+        if(x<x0)x0=x; if(x>x1)x1=x;
+        if(y<y0)y0=y; if(y>y1)y1=y;
+      }
+    }
+  }
+  if(!any) return null;
+  var maskCanvas = document.createElement("canvas");
+  maskCanvas.width=w; maskCanvas.height=h;
+  var mctx = maskCanvas.getContext("2d");
+  var mid = mctx.createImageData(w,h);
+  for(var q=0;q<comp.length;q++){
+    var v = comp[q] ? 255 : 0;
+    mid.data[q*4]=255; mid.data[q*4+1]=255; mid.data[q*4+2]=255; mid.data[q*4+3]=v;
+  }
+  mctx.putImageData(mid,0,0);
+  return { maskDataUrl: maskCanvas.toDataURL("image/png"), bbox:[x0,y0,x1+1,y1+1] };
+}
+P3D.extractMaskFromColormap = extractMaskFromColormap;
+
+// マスクdataURL(白RGB+アルファ=前景)からUint8Array(w*h, 1=前景)を復元する
+// (3D彫刻側/範囲計算側で真偽画素配列として扱いたい箇所向けのヘルパー)。
+function maskDataUrlToAlpha(ctx, w, h, maskDataUrl){
+  // 呼び出し元はPromiseベースで画像読み込み後にこれを呼ぶ想定(同期版)。
+  // ここでは既にdrawImage済みのctxからアルファチャンネルだけ読む単純な実装にする。
+  var id = ctx.getImageData(0,0,w,h);
+  var out = new Uint8Array(w*h);
+  for(var i=0,p=0;i<id.data.length;i+=4,p++){ out[p] = id.data[i+3] > 127 ? 1 : 0; }
+  return out;
+}
+P3D.maskAlphaFromCtx = maskDataUrlToAlpha;
+
 // ---- 縁の色にじみ(prep.stage_bleedのJS移植) ----
 // 透明画素を最も近い不透明画素のRGBで埋め(distance_transform_edtのindices相当を
 // 多元BFSで代用)、アルファをalphaDilate回だけ膨張させる。

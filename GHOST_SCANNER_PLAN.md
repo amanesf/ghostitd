@@ -504,7 +504,7 @@ accessoryに含めないでください。迷った場合は「取り除いて�
   `scanner_handoff_images`)+ `sessionStorage`の`scanner_handoff_json`
   (ページ遷移一回きりのJSON受け渡し)という形で実装した。
 
-## 計画(未着手): アクセサリー抽出方式を「色分けマップ」方式に変更
+## 完了: アクセサリー抽出方式を「色分けマップ」方式に変更
 
 ### 経緯
 タブ6b-2(アクセサリー領域指定)は当初、1件のaccessoryごとにGeminiへ
@@ -632,7 +632,43 @@ accessoryに含めないでください。迷った場合は「取り除いて�
   (`curTab`等)を編集する際は全体grepを徹底すること
 
 ### 状態
-計画のみ(未着手)。着手時はこの節を更新すること。
+完了(2026-07-08)。実装内容:
+- `js/common.js`: `P3D.extractMaskFromColormap(ctx,w,h,targetColorHex,tolerance)`
+  (色距離判定→二値化→最大連結成分抽出→ラスタマスクdataURL+bbox)を追加。
+  `P3D.hexToRgb`もヘルパーとして追加。
+- `js/scanner_api.js`: `P3D.scannerBuildColormapPrompt(accessories, viewLabel)`
+  で色分けマップ生成プロンプトを動的に組み立てる関数を追加。
+- `ghost_scanner.html`: タブ6-2を「色分けマップを生成(front/side/back)」+
+  手動アップロード×3+「領域を抽出」ボタンに置き換え(`promptAccessoryRegion`/
+  `runAccessoryRegions`は削除)。抽出結果は`acc.mask={front,side,back}`
+  (各`{maskDataUrl,bbox}`)に格納し、ジェネレータへの引き継ぎJSON
+  (`landmarks_ai.json`相当)の`accessories[].mask`にそのまま乗せる
+  (`regions`と排他)。除外マスク合成(`scannerBuildExcludeMaskDataUrl`)も
+  マスク形式のaccessoryに対応。
+- `js/accessories.js`: `stageAccessories()`のregions/mask分岐を追加。マスクの
+  場合はbboxの4隅をfrontPointsToModel等に通してモデル座標のbboxを求めるのみで、
+  多角形(frontPolygon等)は生成しない(carveRegion側は素のbbox+アルファ検出の
+  みで彫刻する=計画通り)。
+- `landmark_tool.html`: タブを「マーク/自動マスク/手動マスク/設定値/生成」の
+  5タブに再編。「自動マスク」タブは新規(マスク由来accessoryのプレビュー3枚+
+  一覧表示、読み込み専用。再抽出はゴーストスキャナー側で行う設計)。
+  「手動マスク」タブは既存の「領域」(ex)「パーツ＋」(ac)をサブタブとして
+  無改修に近い形で格納し、チェックボックス(`#manualMaskUnlock`)で編集ロック
+  (既定でロック)。`curTab`の値自体は"ex"/"ac"のまま維持し(全体grep済み、
+  衝突なし)、トップレベルのタブボタン/パネル表示だけ`MANUAL_MASK_SUBTABS`で
+  特別扱いする形にした。
+- スキャナー→ジェネレータの引き継ぎJSON契約: `accessories[]`の各要素が
+  `regions`(多角形)または`mask`(色分けマップ由来)のどちらか一方を持つ形に
+  拡張(`js/accessories.js`の分岐に合わせ、両方揃っていればregions優先)。
+- `tests/generator-ui.test.js`/`tests/generation-pipeline.test.js`: タブ構成
+  変更に合わせてセレクタを更新(`.tabbtn[data-tab="ex"/"ac"]`→
+  `.tabbtn[data-tab="manualmask"]`+`#manualMaskUnlock`+`[data-subtab="ex"/"ac"]`)。
+- `npm test`: `generation-pipeline`(golden hash、既存のregions経路は変更なし
+  のためハッシュ不変)・`generator-ui`・`viewer-ui`はPASS。`controller-ui`は
+  本変更と無関係のファイル(`controller.html`は無変更)での既存の失敗
+  (PIPカメラ表示のアサーション)で、この作業による影響ではない。
+- 実機でのGemini画像編集API検証は未実施(APIキーなし、計画書の既知の
+  不確実要素を参照)。
 
 ## 完了: APIキーUIをボタン化+パラメータ提案機能の削除
 

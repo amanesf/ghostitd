@@ -225,4 +225,37 @@ async function callTextTurn(promptText, imageDataUrls, history, apiKey){
 }
 P3D.scannerCallTextTurn = callTextTurn;
 
+// ---- 色分けマップ生成プロンプト(GHOST_SCANNER_PLAN.md「色分けマップ」方式) ----
+// accessory一覧(名前・パレット色)から動的にテーブルを組み立てる。1回のAPI
+// 呼び出しで「体=黒・背景=白・各accessory=パレット色でベタ塗り」の色分け
+// マップ画像を生成させる(front/side/backそれぞれ1回、計3回。1件ずつ座標を
+// 当てさせていた旧方式=promptAccessoryRegionを置き換える)。
+// accessories: [{name,color}, ...](タブ6-1で確定済みの一覧、colorは"#rrggbb")
+// viewLabel: "正面(front)" / "側面(side)" / "背面(back)"
+function buildColormapPrompt(accessories, viewLabel){
+  var rows = (accessories||[]).map(function(a){
+    return "- " + a.name + " → " + (a.color || "#000000");
+  }).join("\n");
+  return "添付画像は、あるキャラクターの" + viewLabel + "のTポーズ立ち絵です。\n"+
+"この画像を、以下の指示に従って**色分けマップ**(ベタ塗りの領域分割図)に\n"+
+"編集してください。線画・グラデーション・影は一切残さず、指定した色の\n"+
+"平坦な塗りつぶしだけで構成してください。\n\n"+
+"## 塗り分けルール\n"+
+"1. **背景**: 白(#FFFFFF)\n"+
+"2. **体そのもの**(肌、および体に密着してその輪郭に沿う衣服。下記の\n"+
+"   アクセサリー一覧に含まれない全ての部分): 黒(#000000)\n"+
+"3. **各アクセサリー**: 以下の一覧の名前ごとに、対応する色でベタ塗り\n"+
+(rows || "   (アクセサリーの指定はありません)") + "\n\n"+
+"## 注意点\n"+
+"- 各領域の境界は明瞭に(アンチエイリアスによる中間色のにじみを最小限に)\n"+
+"- あるアクセサリーが体や他のアクセサリーの前後に重なって一部隠れている\n"+
+"  場合も、実際に見えている部分だけをそのアクセサリーの色で塗ってください\n"+
+"  (隠れて見えない部分は無理に推測して塗らない)\n"+
+"- キャラクターの輪郭・ポーズ・構図(位置・大きさ)は元画像から変更しない\n"+
+"  でください(色分けマップとして領域抽出に使うため、位置がずれると\n"+
+"  マスクが元画像とずれてしまいます)\n\n"+
+"出力は画像のみとしてください。";
+}
+P3D.scannerBuildColormapPrompt = buildColormapPrompt;
+
 })(window);

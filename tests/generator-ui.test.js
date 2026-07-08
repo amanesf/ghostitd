@@ -52,8 +52,17 @@ async function testEditorTabsAndOverlays(server, browser) {
   const editorVisible = await page.$eval("#editor", (el) => !el.classList.contains("hidden"));
   assert.ok(editorVisible, "sample mode should reach the editor screen");
 
-  for (const tab of ["ex", "ac", "params", "gen", "lm"]) {
+  // 5タブ再編(GHOST_SCANNER_PLAN.md「色分けマップ」方式): 旧「領域」(ex)/
+  // 「パーツ＋」(ac)はトップレベルタブから消え、「手動マスク」(manualmask)配下の
+  // サブタブになった(data-subtab="ex"/"ac")。編集にはロック解除チェックボックスも要る。
+  for (const tab of ["automask", "manualmask", "params", "gen", "lm"]) {
     await page.click(`.tabbtn[data-tab="${tab}"]`);
+    await page.waitForTimeout(150);
+  }
+  await page.click('.tabbtn[data-tab="manualmask"]');
+  await page.check("#manualMaskUnlock");
+  for (const subtab of ["ex", "ac"]) {
+    await page.click(`[data-subtab="${subtab}"]`);
     await page.waitForTimeout(150);
   }
 
@@ -74,7 +83,8 @@ async function testEditorTabsAndOverlays(server, browser) {
   await page.mouse.up();
 
   // アクセサリーフォーム(buildAcFormHtml/wireAcFormEvents)
-  await page.click('.tabbtn[data-tab="ac"]');
+  await page.click('.tabbtn[data-tab="manualmask"]');
+  await page.click('[data-subtab="ac"]');
   await page.waitForTimeout(150);
   await page.click("#acAddBtn");
   await page.waitForTimeout(200);
