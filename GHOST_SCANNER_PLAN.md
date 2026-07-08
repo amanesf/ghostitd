@@ -757,31 +757,58 @@ accessoryに含めないでください。迷った場合は「取り除いて�
   複数の分離した塊があってもすべて拾えるようにする。
 
 ### ③モデル生成後にアクセサリーの位置がずれる(添付画像で確認)
-**根本原因を特定**: `ghost_scanner.html`の`extractMasks()`は、マスクの
-bboxを**色分けマップ画像自身の`naturalWidth/naturalHeight`**を基準に
-計算している。一方、`js/accessories.js`の`stageAccessories()`はその
-bboxを`pixelBboxToModelBbox()`経由でモデル座標に変換する際、front/side/
-back**元画像**(ランドマークから求めたCX/SCALE/YBOT等)を基準にした
-座標変換関数(`frontPointsToModel`等)に通している。**色分けマップ画像は
-Gemini画像編集で別途生成された画像であり、元のfront/side/back画像と
-ピクセル寸法が完全に一致する保証が無い**(ランドマーク推定やアクセサリー
-座標検出で以前まさに同じ問題(自己申告サイズと実サイズの不一致)に遭遇し、
-`scannerBuildDetectionCopy`/`scannerDetectionPointToNatural`という
-決定論的な逆変換の仕組みを導入して解決した経緯がある。マスク抽出の
-実装だけこの対策が漏れていた)。寸法が食い違うと、bboxがそのまま
-ズレた位置・スケールでモデル座標に変換され、彫刻の探索窓(`localAlpha`)が
-本来と違う位置を向いてしまい、結果として添付画像のような浮遊した/
-破綻したジオメトリになる。
-- ユーザー指摘の「相対ではなく絶対位置でよい」は、現状の
-  `back_offset_x/y`等の手動オフセット調整の話ではなく、**そもそも
-  マスク抽出時点でズレを生じさせない(元画像と同じ座標系で扱う)**
-  ことを指していると解釈。
-- 修正方針: `extractMasks()`で色分けマップ画像を読み込んだ際、対応する
-  front/side/back**元画像**(`state[v].dataUrl`)の`naturalWidth/Height`
-  とも比較し、寸法が異なる場合は`P3D.extractMaskFromColormap`が返す
-  bbox(および必要ならmaskDataUrl自体)を元画像の寸法に合わせて
-  比例変換してから`acc.mask[v]`に格納する(ランドマーク推定で使った
-  `detectionPointToNatural`と同種の決定論的リスケール処理を追加する)。
+**根本原因を特定(2026-07-08訂正: Gemini側ではなく、このツール自身の
+既存バグ)**。当初「色分けマップ画像と元画像のピクセル寸法が食い違う
+(Gemini起因)」という仮説を立てたが、指摘を受けて`js/pipeline.js`を
+確認したところ、**マスク方式かどうかに関係なく、アクセサリー全般に
+影響する既存の構造的バグ**であることが判明した。
+
+`js/pipeline.js`の`runCarvingStages()`(仮称)内、体本体の彫刻
+(`stageVisualHull`)は面ごとに個別のサイズを正しく渡している:
+```js
+var body = P3D.stageVisualHull({
+  faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h, ...
+});
+```
+一方、アクセサリーの彫刻(`stageAccessories`)は**front基準の1組の
+W,Hだけ**を全ビューに使い回している:
+```js
+acc = P3D.stageAccessories({
+  frontRgba: rgbaFull.front, backRgba: rgbaFull.back, sideRgba: rgbaFull.side,
+  W: sizes.front.w, H: sizes.front.h,   // ← back/sideにもこれを使い回す
+  ...
+});
+```
+`js/accessories.js`側もこの単一`W,H`を、back画像のalpha検出範囲切り出し
+(`localAlpha(opts.backRgba, W, H, ...)`)やbackの左右反転計算
+(`backPointsToModel`内の`W-p[0]-CX`)にそのまま使っている。つまり
+**front/side/back画像のピクセル寸法が1pxでも食い違うと、back/side側の
+アクセサリー切り出し位置・スケールがズレる**構造になっている。
+
+スキャナー経由のfront/side/backはそれぞれ別のGemini生成呼び出しの
+結果であり、寸法が完全一致する保証は無い(この意味でGeminiの挙動も
+遠因ではあるが)、**「サイズが違っても正しく変換できる処理がツール側に
+そもそも無い」のが直接の原因**であり、マスクの抽出方法(色分けマップ
+経由かどうか)とは無関係。多角形方式でも本来同じバグを踏む可能性が
+あったが、色分けマップ方式で実際にfront/side/backのサイズがずれやすい
+運用が増えたことで初めて表面化したと考えられる。
+
+ユーザー指摘の「相対ではなく絶対位置でよい」は、`back_offset_x/y`等の
+手動オフセット調整の話ではなく、そもそも**面ごとのサイズを正しく扱えば
+ズレは発生しない**、という理解で一致。
+
+- 修正方針: `js/pipeline.js`の`stageAccessories`呼び出しを
+  `stageVisualHull`と同様に、`sizes.front`/`sizes.side`/`sizes.back`を
+  個別に渡す形に変更する。`js/accessories.js`(`stageAccessories`内の
+  `localAlpha`呼び出し・`backPointsToModel`/`sidePointsToModel`)も、
+  front用のW,Hとback/side用のW,Hを区別して使うように修正する
+  (`stageVisualHull`/`carveRegion`側が既に面ごとのサイズを扱っている
+  実装を参考にする)。
+- 以前の仮説(色分けマップ画像自身のサイズを基準にbboxを計算している点)
+  も、マスクのbbox自体がどの面のものか(front/side/back)に応じて正しい
+  面サイズと突き合わせる必要がある、という点では上記の修正に包含される。
+  独立した追加のリスケール処理は不要と判断する(このバグ修正で解消する
+  見込みのため)。
 
 ### ④ゴーストスキャナー側でマスク抽出結果のプレビューが無い
 `ghost_scanner.html`の`renderMaskList()`は「マスク取得済みの面=
@@ -825,9 +852,11 @@ canvas+`drawAccessoryRegionsPreview`相当の仕組みが、色分けマップ�
     (`scanner_handoff_images`)等と衝突しない専用キーを新設する
 
 ### 影響ファイル(見込み)
-- `js/common.js`: ②のマスク合成ロジック変更、③のリスケール処理(新規、
-  scanner_render.jsに置く可能性もある)
-- `ghost_scanner.html`: ①③④⑥
+- `js/common.js`: ②のマスク合成ロジック変更
+- `js/pipeline.js`・`js/accessories.js`: ③(stageAccessoriesへの面ごとの
+  サイズ受け渡し、localAlpha/backPointsToModel/sidePointsToModelの
+  W,H使い回し修正)
+- `ghost_scanner.html`: ①④⑥
 - `landmark_tool.html`: ⑤
 - `js/idb.js`: ⑥用の保存キー追加の可能性
 
