@@ -846,6 +846,13 @@ function placeAll(A){
   const{ytop,BH,cx,W,mask,NOISE}=A, yOf=v=>Math.round(ytop+v*BH), P={};
   P.head_top=[cx,ytop];
   const hb=A.shoulder_v*(STD.head_bottom/STD.shoulder);P.chin=[cx,yOf(hb)];
+  // ★2026-07-08追加: 目・口角の粗い初期配置(シルエットのみからは実際の目鼻立ちの
+  // 位置は分からないため、頭頂〜あごの間を単純に内分するだけの仮位置を置く。
+  // ドラッグでの手動調整、またはゴーストスキャナー側のAI推定での上書きが前提)。
+  const headH=yOf(hb)-ytop;
+  const eyeHw=A.shoulder_hw*0.28, mouthHw=A.shoulder_hw*0.12;
+  P.eye_L=[cx-eyeHw, ytop+headH*0.46];P.eye_R=[cx+eyeHw, ytop+headH*0.46];
+  P.mouth_L=[cx-mouthHw, ytop+headH*0.82];P.mouth_R=[cx+mouthHw, ytop+headH*0.82];
   const shY=yOf(A.shoulder_v);
   P.shoulder_L=[cx-A.shoulder_hw,shY];P.shoulder_R=[cx+A.shoulder_hw,shY];
   P.clavicle_L=[cx-A.shoulder_hw*0.45,shY+BH*0.012];P.clavicle_R=[cx+A.shoulder_hw*0.45,shY+BH*0.012];

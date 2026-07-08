@@ -568,11 +568,19 @@ function drawPolygonOutline(x,ptsPx,color){
 P3D.drawPolygonOutline = drawPolygonOutline;
 
 // ---- ランドマーク定義/色(landmark_tool.htmlベタ書きからの切り出し、フェーズ0) ----
-// 18点の解剖学的ランドマーク定義とグループ色。ゴーストスキャナーのプレビューでも
+// 解剖学的ランドマーク定義とグループ色(骨格関節点18+目/口角4=計22点)。ゴーストスキャナーのプレビューでも
 // landmark_tool.htmlと全く同じ点定義・配色を使いたいためここに集約する。
 var LM=[
  {k:"head_top",jp:"頭頂",g:"head",desc:"頭のてっぺん(髪を含めた輪郭の一番上)"},
  {k:"chin",jp:"あご",g:"head",desc:"あごの先端(顔の輪郭で一番下の点。髪で隠れていても実際の輪郭位置)"},
+ // ★2026-07-08追加: 現時点では彫刻パイプライン(carveRegion等)はこの2点を
+ // 未使用(将来、表情/顔パーツ位置合わせ等で使う可能性があるための先行追加)。
+ // 未使用のため彫刻結果には影響しないが、マーク済みの位置として保存・表示は
+ // される(landmark_tool.htmlのplaceAll()が自動配置の粗い初期値を置く)。
+ {k:"eye_L",jp:"目L",g:"face",desc:"左目(画面に向かって左側)の中心"},
+ {k:"eye_R",jp:"目R",g:"face",desc:"右目(画面に向かって右側)の中心"},
+ {k:"mouth_L",jp:"口角L",g:"face",desc:"口の左端(画面に向かって左側の口角)"},
+ {k:"mouth_R",jp:"口角R",g:"face",desc:"口の右端(画面に向かって右側の口角)"},
  {k:"clavicle_L",jp:"鎖骨L",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
  {k:"clavicle_R",jp:"鎖骨R",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
  {k:"shoulder_L",jp:"肩L",g:"arm",desc:"肩関節(腕が胴体に接続する回転軸の位置。腕の付け根の一番外側ではなく、腕がそこを軸に回る点)"},
@@ -592,11 +600,11 @@ var LM=[
  {k:"toe_R",jp:"つま先R",g:"leg",desc:"つま先(靴/足の輪郭で一番前の点)"},
 ];
 P3D.LM = LM;
-var GCOL={head:"#52e0c4",arm:"#ffb454",torso:"#7aa2ff",leg:"#ff6ad5"};
+var GCOL={head:"#52e0c4",face:"#c9a0ff",arm:"#ffb454",torso:"#7aa2ff",leg:"#ff6ad5"};
 P3D.GCOL = GCOL;
-var LM_GROUP_ORDER=["head","torso","arm","leg"];
+var LM_GROUP_ORDER=["head","face","torso","arm","leg"];
 P3D.LM_GROUP_ORDER = LM_GROUP_ORDER;
-var LM_GROUP_JP={head:"頭部",torso:"胴体",arm:"腕",leg:"脚"};
+var LM_GROUP_JP={head:"頭部",face:"顔",torso:"胴体",arm:"腕",leg:"脚"};
 P3D.LM_GROUP_JP = LM_GROUP_JP;
 
 // ---- スライダー(<input type=range>)をつまみ(thumb)付近でのみ操作可能にする ----
