@@ -192,6 +192,16 @@
       <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="lmPromptText"></pre></details>
       <button class="btn mint" id="lmRunBtn">ランドマークを推定</button>
       <canvas class="imgPreview" id="lmPreview" width="512" height="512"></canvas>
+      <div class="modelRow">
+        <label for="lmOffsetX">全体オフセットX(px)</label>
+        <input id="lmOffsetX" type="number" value="0" step="1" style="width:70px"/>
+      </div>
+      <div class="modelRow">
+        <label for="lmOffsetY">全体オフセットY(px)</label>
+        <input id="lmOffsetY" type="number" value="0" step="1" style="width:70px"/>
+      </div>
+      <p class="hint">Geminiの推定とプレビューがずれている場合、ここで全18点を一括で平行移動できます(プレビューはリアルタイム反映、「反映」で確定)。</p>
+      <button class="btn sm" id="lmOffsetApply">オフセットを反映</button>
       <div class="chatLog" id="lmChatLog"></div>
       <div class="chatRow">
         <input id="lmChatInput" placeholder="例: 右肘をもう少し下に" disabled/>
@@ -216,17 +226,24 @@
       </div>
     </div>
     <div class="card">
-      <h2>6b. アクセサリー検出/除外マスク(任意)</h2>
-      <p class="hint">front/side/back 3枚同時入力でbody/accessoryを二分類し、除外マスクを機械的に導出します(スキップ可)。</p>
+      <h2>6b-1. アクセサリー検出(名称のみ、任意)</h2>
+      <p class="hint">まず「何を抽出するか」の一覧だけを決める(精度を上げるため、範囲指定は次のステップで1件ずつ個別に行う)。front/side/back 3枚同時入力でbody/accessoryを二分類します(スキップ可)。</p>
       <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="accPromptText"></pre></details>
-      <button class="btn mint" id="accRunBtn">アクセサリーを検出</button>
-      <canvas class="imgPreview" id="accPreview" width="512" height="512"></canvas>
+      <button class="btn mint" id="accRunBtn">アクセサリー一覧を検出</button>
       <div id="accList"></div>
       <div class="chatLog" id="accChatLog"></div>
       <div class="chatRow">
         <input id="accChatInput" placeholder="例: 尻尾も検出して" disabled/>
         <button class="btn sm mint" id="accChatSend" disabled>送信</button>
       </div>
+      <button class="btn green" id="accConfirmListBtn" disabled style="margin-top:8px">この一覧で確定 → 領域指定へ</button>
+    </div>
+    <div class="card">
+      <h2>6b-2. アクセサリー領域指定(1件ずつ、任意)</h2>
+      <p class="hint">確定した一覧を1件ずつ個別にAPI呼び出しし、各面25点の多角形で範囲を精密に抽出します(6b-1の確定後に押せます)。</p>
+      <button class="btn mint" id="accRegionRunBtn" disabled>各アクセサリーの領域を検出(1件ずつ)</button>
+      <p class="hint" id="accRegionProgress"></p>
+      <canvas class="imgPreview" id="accPreview" width="512" height="512"></canvas>
     </div>
     <button class="btn green" id="paramsNextBtn">次へ(出力)</button>
   </div>
@@ -452,40 +469,60 @@ var PROMPT_A =
 "3. **構図**: キャラクターの**人体の正中線(頭頂から股間を通る中心線)**を、\n"+
 "   画像の水平方向の中心(x=画像幅の50%)に一致させる。イラストの見た目上の\n"+
 "   重心(髪の広がりや小物の位置)ではなく、あくまで骨格の中心線を基準にすること\n"+
-"4. **輪郭線**: 黒い縁取り線(アウトライン)を入れない。面と面の境界は色の差だけで\n"+
-"   表現し、線画的な黒縁は一切使わないこと\n"+
-"5. **背景**: 完全な透過(アルファチャンネル)、または均一な単色背景\n"+
+"4. **輪郭線は絶対禁止(最重要・繰り返し厳守)**: 黒や濃色の縁取り線(アウトライン、\n"+
+"   線画のフチ)を画像のどこにも一切描画しないでください。髪・肌・服・目・小物、\n"+
+"   すべてのパーツの境界は、隣接する面同士の色のコントラストのみで表現し、\n"+
+"   1pxでも連続した縁取りストロークを追加しないこと。「線画にベタ塗りした」\n"+
+"   ような、パーツの外周を縁取る黒い輪郭線は禁止です。もし元画像に輪郭線が\n"+
+"   あっても、生成画像では輪郭線を除去してください。これは他のどの条件よりも\n"+
+"   優先される最重要条件です。\n"+
+"5. **背景(固定)**: 背景は必ず均一な白(RGB 255,255,255 / #FFFFFF)の単色に\n"+
+"   固定してください。透過(アルファチャンネル)・グラデーション・影・模様は\n"+
+"   一切使わないこと。\n"+
 "6. **余白**: キャラクター全体(頭頂からつま先まで)が画像内に収まるよう、\n"+
 "   上下左右に適度な余白を残すこと(画像端でトリミングされないこと)\n"+
-"7. **画風**: 元画像と同じ画風(線の太さ、塗りの質感、色調)を維持すること\n\n"+
+"7. **画風**: 元画像と同じ画風(線の太さ、塗りの質感、色調)を維持すること\n"+
+"   (ただし輪郭線の有無は条件4を優先し、必ず輪郭線なしにすること)\n\n"+
 "出力は画像のみとしてください。";
 
-function promptSide(){
+// side/back共通の生成条件テンプレート。viewLabel(「側面図」/「背面図」)と
+// facingClause(向きの指定、backでは空文字列)だけがside/backで異なるので、
+// 正規表現での文字列置換に頼らずパラメータとして差し替える。
+function genConditionsBody(viewLabel, angleLabel, facingClause){
   return "入力画像は、あるキャラクターの正面Tポーズの立ち絵です。この画像と全く同じ\n"+
 "キャラクターデザイン(髪型・髪色・瞳の色・服装・配色・アクセサリーの形状や\n"+
-"位置)を維持したまま、**真横から見た側面図**を生成してください。\n\n"+
+"位置)を維持したまま、**"+angleLabel+"から見た"+viewLabel+"**を生成してください。\n\n"+
 "## 生成条件\n"+
-"1. **アングル**: 完全な真横(90度)。前後どちら向きでも構いませんが、体の\n"+
-"   向きが左右で一貫していること(横向きの顔・体で、正面成分を含まない)\n"+
-"2. **ポーズ**: 入力画像と同じTポーズ(直立、腕を体の前後どちらかに真横に\n"+
-"   伸ばした状態、膝は曲げない)\n"+
-"3. **構図**: キャラクターの**人体の正中線**を画像の水平方向の中心に一致させる\n"+
-"4. **輪郭線**: 黒い縁取り線を入れない(入力画像も輪郭線が無い状態のはずなので、\n"+
-"   その画風を維持する)\n"+
-"5. **背景**: 完全な透過、または入力画像と同じ単色背景\n"+
-"6. **余白**: 頭頂からつま先まで画像内に収まるよう適度な余白を残す\n"+
-"7. **一貫性**: 服のシワ・アクセサリーの位置・体型プロポーションが正面図と\n"+
+"1. **アングル**: 完全な"+angleLabel+"。"+facingClause+"体の向きが単一で\n"+
+"   一貫していること(横向きの顔・体で、正面成分を含まない)\n"+
+"2. **腕は描画しない(重要)**: 入力画像はTポーズで腕を真横に伸ばしていますが、\n"+
+"   "+viewLabel+"でその腕をそのまま描くと、腕が体から横棒のように突き出て見えてしまい\n"+
+"   不自然になります。**"+viewLabel+"では腕を描画しないでください**(体幹の真後ろに\n"+
+"   隠れている、あるいは体に完全に沿っていて輪郭線上に見えない状態として、\n"+
+"   肩から下の腕・肘・手首・手を一切描かない)。胴体・脚・頭部・髪・首回りの\n"+
+"   装飾など、腕以外の要素は通常通り描いてください。\n"+
+"3. **ポーズ**: 直立、膝は曲げない(入力画像と同じ直立姿勢。腕のみ条件2の通り\n"+
+"   描画しない)\n"+
+"4. **構図**: キャラクターの**人体の正中線**を画像の水平方向の中心に一致させる\n"+
+"5. **輪郭線は絶対禁止(最重要・繰り返し厳守)**: 黒や濃色の縁取り線を画像の\n"+
+"   どこにも一切描画しないでください。パーツの境界は色のコントラストのみで\n"+
+"   表現すること。入力画像に輪郭線が無い場合はその画風を維持し、あっても\n"+
+"   生成画像では除去してください。\n"+
+"6. **背景(固定)**: 背景は必ず均一な白(RGB 255,255,255 / #FFFFFF)の単色に\n"+
+"   固定してください。透過・グラデーション・影・模様は一切使わないこと。\n"+
+"7. **余白**: 頭頂からつま先まで画像内に収まるよう適度な余白を残す\n"+
+"8. **一貫性**: 服のシワ・アクセサリーの位置・体型プロポーションが正面図と\n"+
 "   矛盾しないこと(正面で見えていた要素が側面から見て不自然に消えたり、\n"+
-"   別のデザインに変わったりしないこと)\n\n"+
+"   別のデザインに変わったりしないこと。ただし腕は条件2の通り非表示)\n\n"+
 "出力は画像のみとしてください。";
 }
+function promptSide(){
+  return genConditionsBody("側面図", "真横(90度)",
+    "必ず**画面に向かって右向き**(キャラクターの顔・つま先が画面の右側を向いている状態)にしてください。");
+}
 function promptBack(){
-  // GHOST_SCANNER_PLAN.md: backは「真横」→「完全に背後(180度)」、
-  // 「側面図」→「背面図」に置換するだけで流用できる、との指示通り機械的に置換する。
-  return promptSide()
-    .replace(/真横から見た側面図/g,"完全に背後(180度)から見た背面図")
-    .replace(/完全な真横(90度)/g,"完全に背後(180度)")
-    .replace(/側面図/g,"背面図");
+  // 背面は左右対称に近く、向きを指定する意味が薄いためfacingClauseは空にする。
+  return genConditionsBody("背面図", "背後(180度)", "");
 }
 
 var PROMPT_D =
@@ -646,7 +683,9 @@ var PROMPT_F =
 "**除外マスクには含めないでください**(`exclude_from_body_silhouette: false`)。\n"+
 "頭部の地肌が画像に描かれていないキャラクターがほとんどのため、ここを\n"+
 "除外すると頭部の基準サイズが求められなくなります。\n\n"+
-"## 出力手順\n"+
+"## 出力手順(このステップでは領域(regions)は出力不要です。まず「何を\n"+
+"抽出するか」の一覧を確定させ、各accessoryの範囲指定は後続のステップで\n"+
+"1件ずつ個別に行います)\n"+
 "1. 検出したaccessoryそれぞれに、以下のパレットから重複しないよう\n"+
 "   順に色を割り当ててください: #7aa2ff, #ff6ad5, #52e0c4, #ffb454,\n"+
 "   #ff8a8a, #b48cff, #8cffb4, #5be6ff\n"+
@@ -658,11 +697,10 @@ var PROMPT_F =
 '   するなら"soft"。例: スカート→hips+thigh_L+thigh_R、soft。\n'+
 '   ヘッドホン→head、rigid。尻尾→hips、rigid)\n'+
 "3. 各accessoryについて、上記の「除外マスク用フラグ」を判定してください\n"+
-"4. 各accessoryについて、front/side/backそれぞれの画像に実際に写っている\n"+
-"   場合はその面での多角形領域も、画像のピクセル座標で時計回りに6〜12点\n"+
-"   程度で近似して返してください(写っていない、または隠れて見えない\n"+
-"   面は省略してよい)\n\n"+
-"## 出力形式(JSONのみ、説明文・コードフェンス不要)\n"+
+"4. 各accessoryについて、front/side/backのうちどの面に実際に写っているか\n"+
+"   (visible_views)を挙げてください(隠れて見えない面は含めない)\n\n"+
+"## 出力形式(JSONのみ、説明文・コードフェンス不要。regionsフィールドは\n"+
+"含めないでください)\n"+
 "{\n"+
 '  "accessories": [\n'+
 "    {\n"+
@@ -672,14 +710,43 @@ var PROMPT_F =
 '      "color": "#7aa2ff",\n'+
 '      "reason": "腰から広がり、脚のシルエットの外側に張り出しているため",\n'+
 '      "exclude_from_body_silhouette": true,\n'+
-'      "regions": {\n'+
-'        "front": {"points": [[0,0], [0,0], [0,0]]},\n'+
-'        "side": {"points": [[0,0], [0,0], [0,0]]},\n'+
-'        "back": {"points": [[0,0], [0,0], [0,0]]}\n'+
-"      }\n"+
+'      "visible_views": ["front", "side", "back"]\n'+
 "    }\n"+
 "  ]\n"+
 "}";
+
+// ステップ2(タブ6b後半): ステップ1で確定した1件のaccessoryについて、
+// front/side/back画像から実際の領域(多角形)を精密に抽出する。1回のAPI呼び出しで
+// 全accessoryをまとめて処理していた旧版は精度が低かったため、1件ずつ個別に
+// 呼び出す(新規セッション、対象を絞ることで注意を集中させる)。
+// 頂点数を6〜12点から25点に増やし、より滑らかな輪郭を取れるようにする。
+function promptAccessoryRegion(acc, visibleViews){
+  var viewsLabel = (visibleViews||[]).join("/") || "front/side/back";
+  return "添付の画像(front=正面、side=側面、back=背面。写っている面のみ添付して\n"+
+"いる場合があります)は、同一キャラクターのTポーズ立ち絵です。\n\n"+
+"これらの画像から、以下の1つのアクセサリー(既に分類済み)の領域だけを\n"+
+"高精度に抽出してください。\n\n"+
+"## 対象のアクセサリー\n"+
+"- 名前: "+acc.name+"\n"+
+"- 説明/分類理由: "+(acc.reason||"(なし)")+"\n"+
+"- 実際に写っている面: "+viewsLabel+"\n\n"+
+"## 手順\n"+
+"1. 上記の面それぞれについて、この「"+acc.name+"」に該当する領域の輪郭を\n"+
+"   目視でたどってください(他のアクセサリーや体の部分を含めないこと。\n"+
+"   逆にこのアクセサリーの一部を取りこぼさないこと)\n"+
+"2. 各面ごとに、その輪郭を**画像のピクセル座標で時計回りに、できるだけ\n"+
+"   均等な間隔で25点**を使って近似してください(直線的な部分は点を間引かず、\n"+
+"   25点を使い切って滑らかな輪郭を再現すること。写っていない面は省略する)\n\n"+
+"## 出力形式(JSONのみ、説明文・コードフェンス不要)\n"+
+"{\n"+
+'  "regions": {\n'+
+'    "front": {"points": [[0,0], "...25点..."]},\n'+
+'    "side": {"points": [[0,0], "...25点..."]},\n'+
+'    "back": {"points": [[0,0], "...25点..."]}\n'+
+"  }\n"+
+"}\n"+
+"(写っていない面のキーは省略してよい。各pointsは必ず25点にすること)";
+}
 
 $("frontPromptText").textContent=PROMPT_A;
 $("sidePromptText").textContent=promptSide();
@@ -766,6 +833,25 @@ function appendChatLine(logEl, role, text){
   logEl.appendChild(d);
   logEl.scrollTop=logEl.scrollHeight;
 }
+// Geminiが返す"image":{w,h}(Gemini自身が認識した画像サイズ)と、実際に
+// ブラウザが読み込んだ画像の実寸(img.naturalWidth/Height)がズレることがあり、
+// これがプレビューと最終出力の座標ズレ(数十px単位)の主因になり得る。
+// 返ってきたpoints_pxを、実寸との比率で補正してから使う。
+function rescalePointsToNaturalSize(pointsPx, reportedWH, img){
+  if(!reportedWH || !reportedWH.w || !reportedWH.h) return pointsPx;
+  var rw = img.naturalWidth/reportedWH.w, rh = img.naturalHeight/reportedWH.h;
+  if(Math.abs(rw-1)<1e-6 && Math.abs(rh-1)<1e-6) return pointsPx;
+  var out={};
+  Object.keys(pointsPx).forEach(function(k){
+    var p=pointsPx[k];
+    out[k]={ x:p.x*rw, y:p.y*rh };
+  });
+  return out;
+}
+// 上記の自動補正だけでは吸収しきれない残差(手元での実測では左に約20px程度)を
+// 手動で微調整できるようにする、全点一括の平行移動オフセット。
+// 「反映」を押すとstate.landmarks.pointsPxに直接焼き込み、スライダーは0に戻す
+// (以降の出力・チャット修正が常にこの補正後の座標を基準にするため)。
 function refreshLmPreview(){
   var img=state.landmarks._img;
   if(!img || !state.landmarks.pointsPx) return;
@@ -773,8 +859,30 @@ function refreshLmPreview(){
   var maxDim=900, iw=img.naturalWidth, ih=img.naturalHeight;
   var scale=Math.min(1,maxDim/Math.max(iw,ih));
   c.width=Math.round(iw*scale); c.height=Math.round(ih*scale);
-  P3D.scannerDrawLandmarkPreview(c.getContext("2d"), img, c.width, c.height, state.landmarks.pointsPx, scale);
+  var dx=Number($("lmOffsetX").value)||0, dy=Number($("lmOffsetY").value)||0;
+  var offsetPts=state.landmarks.pointsPx;
+  if(dx||dy){
+    offsetPts={};
+    Object.keys(state.landmarks.pointsPx).forEach(function(k){
+      var p=state.landmarks.pointsPx[k];
+      offsetPts[k]={x:p.x+dx, y:p.y+dy};
+    });
+  }
+  P3D.scannerDrawLandmarkPreview(c.getContext("2d"), img, c.width, c.height, offsetPts, scale);
 }
+$("lmOffsetX").addEventListener("input", refreshLmPreview);
+$("lmOffsetY").addEventListener("input", refreshLmPreview);
+$("lmOffsetApply").onclick=function(){
+  var dx=Number($("lmOffsetX").value)||0, dy=Number($("lmOffsetY").value)||0;
+  if(!state.landmarks.pointsPx || (!dx&&!dy)) return;
+  Object.keys(state.landmarks.pointsPx).forEach(function(k){
+    var p=state.landmarks.pointsPx[k];
+    p.x+=dx; p.y+=dy;
+  });
+  $("lmOffsetX").value=0; $("lmOffsetY").value=0;
+  refreshLmPreview();
+  setMsg("オフセット("+dx+", "+dy+")を全点に反映しました。");
+};
 function runLandmarkInitial(){
   if(!state.front.dataUrl){ setMsg("先に正面(front)を確定してください。",true); return; }
   $("lmRunBtn").disabled=true;
@@ -785,14 +893,14 @@ function runLandmarkInitial(){
   }).then(function(res){
     state.landmarks.history=res.history;
     var d=P3D.parseJsonResponse(res.text);
-    state.landmarks.pointsPx=d.points_px;
     state.landmarks.imageWH=d.image;
+    state.landmarks.pointsPx=rescalePointsToNaturalSize(d.points_px, d.image, state.landmarks._img);
     appendChatLine($("lmChatLog"),"model","(初回推定)18点のランドマークを推定しました。");
     refreshLmPreview();
     $("lmRunBtn").disabled=false;
     $("lmChatInput").disabled=false; $("lmChatSend").disabled=false;
     $("lmNextBtn").disabled=false;
-    setMsg("ランドマークを推定しました。プレビューを確認し、必要ならチャットで修正してください。");
+    setMsg("ランドマークを推定しました。プレビューを確認し、必要ならチャットまたは下のオフセットで修正してください。");
   }).catch(function(e){
     $("lmRunBtn").disabled=false;
     setMsg("ランドマーク推定に失敗しました: "+e.message,true);
@@ -809,7 +917,7 @@ function sendLmChat(){
   P3D.scannerCallTextTurn(followup, [state.front.dataUrl], state.landmarks.history).then(function(res){
     state.landmarks.history=res.history;
     var d=P3D.parseJsonResponse(res.text);
-    state.landmarks.pointsPx=d.points_px;
+    state.landmarks.pointsPx=rescalePointsToNaturalSize(d.points_px, d.image||state.landmarks.imageWH, state.landmarks._img);
     appendChatLine($("lmChatLog"),"model","修正しました。");
     refreshLmPreview();
     $("lmChatSend").disabled=false;
@@ -878,16 +986,19 @@ function sendParamsChat(){
 $("paramsChatSend").onclick=sendParamsChat;
 $("paramsChatInput").addEventListener("keydown",function(e){ if(e.key==="Enter") sendParamsChat(); });
 
-/* ==================== タブ6b: アクセサリー検出+除外マスク(会話継続、任意) ==================== */
+/* ==================== タブ6b-1: アクセサリー一覧検出(会話継続、regionsなし、任意) ==================== */
 function renderAccList(list){
   var el=$("accList"); el.innerHTML="";
   (list||[]).forEach(function(a){
     var d=document.createElement("div");
     d.className="accItem";
     d.style.borderColor=a.color||"var(--line)";
+    var hasRegion = a.regions && Object.keys(a.regions).length>0;
     d.innerHTML="<b style='color:"+(a.color||"#fff")+"'>"+a.name+"</b>"+
       "mode="+a.mode+" / bones="+(a.bones||[]).join(",")+
-      " / 除外マスク="+(a.exclude_from_body_silhouette?"あり":"なし");
+      " / 除外マスク="+(a.exclude_from_body_silhouette?"あり":"なし")+
+      " / 写っている面="+(a.visible_views||[]).join(",")+
+      " / 領域="+(hasRegion?"取得済み":"未取得");
     el.appendChild(d);
   });
 }
@@ -896,25 +1007,17 @@ function runAccInitial(){
     setMsg("front/side/backすべての確定が必要です。",true); return;
   }
   $("accRunBtn").disabled=true;
-  setMsg("アクセサリーを検出中...");
-  P3D.scannerLoadImage(state.front.dataUrl).then(function(img){ state.accessories._frontImg=img; return null; });
+  setMsg("アクセサリー一覧を検出中...");
   P3D.scannerCallTextTurn(PROMPT_F, [state.front.dataUrl, state.side.dataUrl, state.back.dataUrl], []).then(function(res){
     state.accessories.history=res.history;
     var d=P3D.parseJsonResponse(res.text);
     state.accessories.list=d.accessories||[];
     renderAccList(state.accessories.list);
-    appendChatLine($("accChatLog"),"model","(初回検出)"+state.accessories.list.length+"件のaccessory。");
-    return P3D.scannerLoadImage(state.front.dataUrl);
-  }).then(function(img){
-    var c=$("accPreview");
-    var maxDim=900, iw=img.naturalWidth, ih=img.naturalHeight;
-    var scale=Math.min(1,maxDim/Math.max(iw,ih));
-    c.width=Math.round(iw*scale); c.height=Math.round(ih*scale);
-    P3D.scannerDrawAccessoryRegionsPreview(c.getContext("2d"), img, c.width, c.height, state.accessories.list, "front", scale);
+    appendChatLine($("accChatLog"),"model","(初回検出)"+state.accessories.list.length+"件のaccessory(名称のみ、範囲は未取得)。");
     $("accRunBtn").disabled=false;
     $("accChatInput").disabled=false; $("accChatSend").disabled=false;
-    state.accessories.confirmed=true;
-    setMsg("アクセサリーを検出しました(front面のプレビューのみ表示、任意項目です)。");
+    $("accConfirmListBtn").disabled = state.accessories.list.length===0;
+    setMsg("アクセサリー一覧を検出しました。問題なければ「この一覧で確定」してください。");
   }).catch(function(e){
     $("accRunBtn").disabled=false;
     setMsg("アクセサリー検出に失敗しました: "+e.message,true);
@@ -927,18 +1030,14 @@ function sendAccChat(){
   appendChatLine($("accChatLog"),"user",text);
   $("accChatInput").value="";
   $("accChatSend").disabled=true;
-  var followup=text+'\n\n(直前のJSONを踏まえ、修正後の同じ形式のJSON({"accessories":[...]})のみを出力してください。)';
+  var followup=text+'\n\n(直前のJSONを踏まえ、修正後の同じ形式のJSON({"accessories":[...]}、regionsは含めない)のみを出力してください。)';
   P3D.scannerCallTextTurn(followup, [state.front.dataUrl, state.side.dataUrl, state.back.dataUrl], state.accessories.history).then(function(res){
     state.accessories.history=res.history;
     var d=P3D.parseJsonResponse(res.text);
     state.accessories.list=d.accessories||[];
     renderAccList(state.accessories.list);
     appendChatLine($("accChatLog"),"model","修正しました。");
-    return P3D.scannerLoadImage(state.front.dataUrl);
-  }).then(function(img){
-    var c=$("accPreview");
-    var scale=c.width/(img.naturalWidth||c.width);
-    P3D.scannerDrawAccessoryRegionsPreview(c.getContext("2d"), img, c.width, c.height, state.accessories.list, "front", scale);
+    $("accConfirmListBtn").disabled = state.accessories.list.length===0;
     $("accChatSend").disabled=false;
   }).catch(function(e){
     appendChatLine($("accChatLog"),"model","エラー: "+e.message);
@@ -947,6 +1046,47 @@ function sendAccChat(){
 }
 $("accChatSend").onclick=sendAccChat;
 $("accChatInput").addEventListener("keydown",function(e){ if(e.key==="Enter") sendAccChat(); });
+$("accConfirmListBtn").onclick=function(){
+  if(!state.accessories.list || !state.accessories.list.length){ setMsg("先に一覧を検出してください。",true); return; }
+  $("accChatInput").disabled=true; $("accChatSend").disabled=true; $("accConfirmListBtn").disabled=true;
+  $("accRegionRunBtn").disabled=false;
+  setMsg("一覧を確定しました。次は各アクセサリーの領域を1件ずつ検出してください。");
+};
+
+/* ==================== タブ6b-2: アクセサリー領域指定(1件ずつ、新規セッション、任意) ==================== */
+// 旧版はfront/side/back+全accessoryを1回のAPI呼び出しでまとめて処理していたが、
+// 精度が低かった(対象が多すぎて注意が分散する)。1件ずつ個別に新規セッションで
+// 呼び出すことで、各呼び出しの対象を1つのaccessoryに絞り込む。
+async function runAccessoryRegions(){
+  var list = state.accessories.list;
+  if(!list || !list.length){ setMsg("先にアクセサリー一覧を確定してください。",true); return; }
+  $("accRegionRunBtn").disabled=true;
+  var images=[state.front.dataUrl, state.side.dataUrl, state.back.dataUrl];
+  for(var i=0;i<list.length;i++){
+    var acc=list[i];
+    $("accRegionProgress").textContent="("+(i+1)+"/"+list.length+") "+acc.name+" の領域を検出中...";
+    try{
+      var res = await P3D.scannerCallTextTurn(promptAccessoryRegion(acc, acc.visible_views), images, []);
+      var d = P3D.parseJsonResponse(res.text);
+      acc.regions = d.regions || {};
+    }catch(e){
+      appendChatLine($("accChatLog"),"model","「"+acc.name+"」の領域検出に失敗しました: "+e.message);
+    }
+    renderAccList(list);
+  }
+  $("accRegionProgress").textContent="全"+list.length+"件の領域検出が完了しました。";
+  state.accessories.confirmed=true;
+  P3D.scannerLoadImage(state.front.dataUrl).then(function(img){
+    var c=$("accPreview");
+    var maxDim=900, iw=img.naturalWidth, ih=img.naturalHeight;
+    var scale=Math.min(1,maxDim/Math.max(iw,ih));
+    c.width=Math.round(iw*scale); c.height=Math.round(ih*scale);
+    P3D.scannerDrawAccessoryRegionsPreview(c.getContext("2d"), img, c.width, c.height, list, "front", scale);
+  });
+  $("accRegionRunBtn").disabled=false;
+  setMsg("全アクセサリーの領域検出が完了しました(front面のプレビューのみ表示)。");
+}
+$("accRegionRunBtn").onclick=runAccessoryRegions;
 
 $("paramsNextBtn").onclick=function(){
   // タブ6→7は(実施していれば)会話を持ち越さない。
@@ -978,11 +1118,13 @@ function buildLandmarksAiJson(){
       return {name:a.name, mode:a.mode, bones:a.bones, regions:a.regions||{}};
     });
     // 除外マスクはexclude_from_body_silhouette===trueのものだけを機械的に合成する。
-    var wh={front:state.landmarks.imageWH, side:null, back:null};
+    // front側はrescalePointsToNaturalSize()と同じ基準(=実際の画像の自然サイズ)を
+    // 使う必要があるため、Geminiが報告したimageWHではなく実測のnaturalWidth/Heightを使う。
+    var frontImg=state.landmarks._img;
     var exclude_masks={};
     ["front","side","back"].forEach(function(v){
-      var w = v==="front" ? (state.landmarks.imageWH&&state.landmarks.imageWH.w) : 1024;
-      var h = v==="front" ? (state.landmarks.imageWH&&state.landmarks.imageWH.h) : 1024;
+      var w = v==="front" ? (frontImg&&frontImg.naturalWidth) : 1024;
+      var h = v==="front" ? (frontImg&&frontImg.naturalHeight) : 1024;
       if(!w||!h) return;
       var m=P3D.scannerBuildExcludeMaskDataUrl(state.accessories.list, v, w, h);
       if(m) exclude_masks[v]=m;
