@@ -726,3 +726,110 @@ accessoryに含めないでください。迷った場合は「取り除いて�
 
 ### 状態
 完了(2026-07-08)。`ghost_scanner.html`に実装済み、mainへpush済み。
+
+## 計画(未着手): 色分けマップ方式・運用面の修正6点
+
+色分けマップ方式の実装後、実際にモデルを生成してみたユーザーからの
+フィードバックをもとに調査し、原因を特定した。以下6点、状態は全て未着手。
+
+### ①色分けマップ生成プロンプトのプレビュー表示が正面(front)固定になっている
+**実際の生成処理(`generateColormaps()`)自体は正しく面ごとに
+`VIEW_LABEL_JP[v]`("正面(front)"/"側面(side)"/"背面(back)")を渡しており、
+プロンプト本文(`P3D.scannerBuildColormapPrompt`)も`viewLabel`引数を使う
+共通実装になっている(front専用にハードコードされてはいない)。**
+バグがあるのは表示専用の`refreshColormapPromptText()`で、常に
+`VIEW_LABEL_JP.front`を渡しているため、タブ6-2の「送信プロンプト全文を
+表示」パネルが常に「正面(front)」表記になり、あたかもfront専用のように
+見えてしまっていた。
+- 修正方針: プレビューの文言を「各面(front/side/back)共通」のような
+  view非依存の表現に変える(またはfront/side/back3つ分のプロンプトを
+  タブ内に並べて見せる)。実際の生成ロジックは変更不要。
+
+### ②マスク抽出が最大連結成分のみで、1パーツが複数領域に分かれる場合に対応していない
+`js/common.js`の`extractMaskFromColormap()`は`largestComponent()`で
+**最大の連結成分1つだけ**を採用しており、同一色で塗られた領域が画面内で
+複数の孤立した塊に分かれるケース(例: 独立した左右の房が同色指定に
+なっている、体の別部位に隠れて視覚的に分断されている等)では、小さい方の
+塊が失われる。計画時点で把握していたリスクだったが(GHOST_SCANNER_PLAN.md
+「リスク・不確実要素」に記載済み)、実際に問題として顕在化した。
+- 修正方針: `largestComponent`を「一定面積以上の全連結成分」を採用する
+  版に変更し、複数成分をマスクとして合成(OR)する。1accessory1viewにつき
+  複数の分離した塊があってもすべて拾えるようにする。
+
+### ③モデル生成後にアクセサリーの位置がずれる(添付画像で確認)
+**根本原因を特定**: `ghost_scanner.html`の`extractMasks()`は、マスクの
+bboxを**色分けマップ画像自身の`naturalWidth/naturalHeight`**を基準に
+計算している。一方、`js/accessories.js`の`stageAccessories()`はその
+bboxを`pixelBboxToModelBbox()`経由でモデル座標に変換する際、front/side/
+back**元画像**(ランドマークから求めたCX/SCALE/YBOT等)を基準にした
+座標変換関数(`frontPointsToModel`等)に通している。**色分けマップ画像は
+Gemini画像編集で別途生成された画像であり、元のfront/side/back画像と
+ピクセル寸法が完全に一致する保証が無い**(ランドマーク推定やアクセサリー
+座標検出で以前まさに同じ問題(自己申告サイズと実サイズの不一致)に遭遇し、
+`scannerBuildDetectionCopy`/`scannerDetectionPointToNatural`という
+決定論的な逆変換の仕組みを導入して解決した経緯がある。マスク抽出の
+実装だけこの対策が漏れていた)。寸法が食い違うと、bboxがそのまま
+ズレた位置・スケールでモデル座標に変換され、彫刻の探索窓(`localAlpha`)が
+本来と違う位置を向いてしまい、結果として添付画像のような浮遊した/
+破綻したジオメトリになる。
+- ユーザー指摘の「相対ではなく絶対位置でよい」は、現状の
+  `back_offset_x/y`等の手動オフセット調整の話ではなく、**そもそも
+  マスク抽出時点でズレを生じさせない(元画像と同じ座標系で扱う)**
+  ことを指していると解釈。
+- 修正方針: `extractMasks()`で色分けマップ画像を読み込んだ際、対応する
+  front/side/back**元画像**(`state[v].dataUrl`)の`naturalWidth/Height`
+  とも比較し、寸法が異なる場合は`P3D.extractMaskFromColormap`が返す
+  bbox(および必要ならmaskDataUrl自体)を元画像の寸法に合わせて
+  比例変換してから`acc.mask[v]`に格納する(ランドマーク推定で使った
+  `detectionPointToNatural`と同種の決定論的リスケール処理を追加する)。
+
+### ④ゴーストスキャナー側でマスク抽出結果のプレビューが無い
+`ghost_scanner.html`の`renderMaskList()`は「マスク取得済みの面=
+front,side,back」というテキスト表示のみで、抽出したマスクの形状を
+画像上に重ねて確認する手段が無い(旧・多角形方式にあった`accPreview`
+canvas+`drawAccessoryRegionsPreview`相当の仕組みが、色分けマップ方式へ
+移行した際に作られていなかった)。なお`landmark_tool.html`側の
+「自動マスク」タブには視覚的なオーバーレイプレビュー(後述⑤)が
+既にあるため、確認自体は不可能ではないが、生成元であるスキャナー側で
+確認できないのは手戻り(ジェネレータまで進んでから初めて誤りに気づく)
+の原因になる。
+- 修正方針: タブ6-2に、`landmark_tool.html`の「自動マスク」タブと同様の
+  プレビュー(front/side/back画像+抽出マスクを半透明重ね描き)を追加する。
+
+### ⑤ジェネレータの「自動マスク」タブでマスク画像が画面サイズに対して大きすぎる
+原因はCSSセレクタの取りこぼし。`#automaskColormaps img{max-width:110px;...}`
+というルールが定義されているが、実際に`renderAutomaskTab()`が生成して
+いるのは`<img>`ではなく`<canvas>`要素(`c.width=im.w; c.height=im.h`と
+元画像の実寸そのまま)であり、このCSSルールは`canvas`には一切適用されない。
+そのため各viewのプレビューが実寸(数百〜1024px超)のまま表示され、画面から
+はみ出るほど大きくなっていた。
+- 修正方針: CSSセレクタを`#automaskColormaps canvas`に修正する(または
+  `img`と両対応にする)。合わせてスマホ幅でも収まるよう、コンテナの
+  `flex-wrap`列でのサイズ配分(3枚横並びなら1枚あたり計算幅を指定する等)
+  も見直す。
+
+### ⑥ゴーストスキャナーにも自動保存/前回の続きから機能がほしい
+`landmark_tool.html`は`NORMAL_SESSION_KEY`(localStorage)への
+`autosaveInterval`定期保存+起動時の「新規作成」/「前回の続きから」選択
+(`checkContinueAvailable`)という仕組みを持つが、`ghost_scanner.html`は
+状態がすべてメモリ上の`state`オブジェクトのみで、ページを閉じる/
+リロードすると生成途中の内容(front/side/back画像、ランドマーク、
+アクセサリー一覧、色分けマップ、マスク等)がすべて失われる。
+- 修正方針: `landmark_tool.html`と同じパターンを踏襲する:
+  - `state`のシリアライズ可能な部分(dataURL/JSON、画像はBlobとして
+    IndexedDB、それ以外はlocalStorageのJSON)を一定間隔で自動保存する
+  - 起動時に保存済みセッションの有無を検出し、「新規作成」/「前回の
+    続きから」を選ばせる導線を追加する(現状のタブ1直行の初期表示を
+    見直す必要がある)
+  - 保存キーは`landmark_tool.html`の`SCANNER_IMAGES_KEY`
+    (`scanner_handoff_images`)等と衝突しない専用キーを新設する
+
+### 影響ファイル(見込み)
+- `js/common.js`: ②のマスク合成ロジック変更、③のリスケール処理(新規、
+  scanner_render.jsに置く可能性もある)
+- `ghost_scanner.html`: ①③④⑥
+- `landmark_tool.html`: ⑤
+- `js/idb.js`: ⑥用の保存キー追加の可能性
+
+### 状態
+計画のみ(未着手)。着手時はこの節を更新すること。
