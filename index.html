@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#07080a;--txt:#e8edf2;--mut:#9aa3ad;
-    --pink:#ff2fb0;--green:#39ff9e;--cyan:#5be6ff;
+    --pink:#ff2fb0;--green:#39ff9e;--cyan:#5be6ff;--yellow:#ffd640;
     --line:rgba(255,255,255,.12)
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -90,10 +90,13 @@
   .card.g2:active{border-color:var(--cyan);box-shadow:0 0 22px rgba(91,230,255,.25)}
   .card.g3{border-color:rgba(57,255,158,.35)}
   .card.g3:active{border-color:var(--green);box-shadow:0 0 22px rgba(57,255,158,.25)}
+  .card.g4{border-color:rgba(255,214,64,.35)}
+  .card.g4:active{border-color:var(--yellow);box-shadow:0 0 22px rgba(255,214,64,.25)}
   .card b{display:block;font-size:15.5px;margin-bottom:5px;letter-spacing:.01em}
   .card.g1 b{color:var(--pink)}
   .card.g2 b{color:var(--cyan)}
   .card.g3 b{color:var(--green)}
+  .card.g4 b{color:var(--yellow)}
   .card span{display:block;font-size:12px;color:var(--mut);line-height:1.6}
   .card .arrow{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:18px;opacity:.4}
 
@@ -123,6 +126,11 @@
   </div>
 
   <div class="actions">
+    <a class="card g4" href="ghost_scanner.html">
+      <b>ゴーストスキャナー</b>
+      <span>1枚の絵から"本当の姿"を読み取る。front/side/back・骨格をAIで自動推定し、そのままジェネレータへ引き継ぐ。</span>
+      <span class="arrow">→</span>
+    </a>
     <a class="card g1" href="landmark_tool.html">
       <b>ゴーストジェネレータ</b>
       <span>3枚の絵からゴーストを呼び出す。front/side/back画像とランドマークから、彼女の"実体"を生成する。</span>
@@ -136,11 +144,6 @@
     <a class="card g3" href="controller.html">
       <b>ゴーストコントローラー</b>
       <span>目覚めたゴーストの中に入り込み、彼女の足で歩かせる。三人称視点で操作する。</span>
-      <span class="arrow">→</span>
-    </a>
-    <a class="card g1" href="ghost_scanner.html">
-      <b>ゴーストスキャナー</b>
-      <span>1枚の絵から"本当の姿"を読み取る。front/side/back・骨格をAIで自動推定し、そのままジェネレータへ引き継ぐ。</span>
       <span class="arrow">→</span>
     </a>
   </div>
