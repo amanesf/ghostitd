@@ -51,6 +51,19 @@ function localAlpha(fullRgba, fullW, fullH, x0,y0,x1,y1, whiteThr, bandH, bandOv
 }
 P3D.localAlpha = localAlpha;
 
+// 矩形範囲をそのまま塗りつぶしたアルファ(実画像のピクセルは一切参照しない)。
+// mask形式アクセサリーでside面のマスクが無い場合、粗い深さ推定の矩形を
+// そのまま使うためのもの(GHOST_SCANNER_PLAN.md 原因①対応)。
+function rectAlpha(fullW, fullH, x0,y0,x1,y1){
+  var x0i=Math.max(0,Math.floor(x0)), x1i=Math.min(fullW,Math.ceil(x1));
+  var y0i=Math.max(0,Math.floor(y0)), y1i=Math.min(fullH,Math.ceil(y1));
+  var out=new Uint8Array(fullW*fullH);
+  for(var y=y0i;y<y1i;y++){
+    for(var x=x0i;x<x1i;x++){ out[y*fullW+x]=1; }
+  }
+  return out;
+}
+
 function frontPointsToModel(pts, CX, SCALE, YBOT){
   return pts.map(function(p){ return [(p[0]-CX)/SCALE, (YBOT-p[1])/SCALE]; });
 }
@@ -123,6 +136,7 @@ function stageAccessories(opts){
     // どちらの場合も実際の3D彫刻自体はbbox範囲内のアルファ検出(localAlpha/
     // carveRegion)で行われるため、ここでの分岐はbbox算出方法の違いだけで済む。
     var regions = acc.regions || {};
+    var isMaskAcc = !!acc.mask;
     var mask = acc.mask || {};
     var fr=regions.front, bk=regions.back, sd=regions.side;
     var frontPolygon=null, backPolygon=null, sidePolygon=null;
@@ -158,21 +172,44 @@ function stageAccessories(opts){
     // pipeline.jsで事前にmaskDataUrlをラスタライズ済み)があればそれを
     // そのまま使う。従来はbbox内を「白背景でないか」で塗り直すlocalAlphaだけに
     // 頼っていたため、bbox内にある体側のピクセル(肌・髪・他の服等)まで拾って
-    // 本体位置まで彫ってしまっていた。マスクが無い面(側面が別アクセサリーに
-    // 隠れて抽出できなかった場合等)だけ、従来通りlocalAlphaにフォールバックする。
-    var faAcc = (mask.front && mask.front.alpha) ? mask.front.alpha :
-      localAlpha(opts.frontRgba, faW, faH, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
+    // 本体位置まで彫ってしまっていた。
+    //
+    // ★2026-07-09バグ修正(GHOST_SCANNER_PLAN.md 原因①): mask形式のアクセサリー
+    // は片面(front/back/side)にしかマスクが存在しないことが普通にある(例:
+    // 前髪は背面写真に映らないのでmask.backが無い)。この場合に元画像を粗い
+    // 閾値(localAlpha)で走査すると、前髪と無関係な後ろ髪・地肌等まで
+    // 「背面側のアルファ」として拾ってしまい、front/back合成(和集合)後に
+    // 本物の前髪と無関係な塊が両方彫られて斜め視点で二重に見える不具合が
+    // あった。mask形式のアクセサリーはlocalAlphaへフォールバックせず、
+    // front/backは情報なし(全ゼロ、和集合に寄与しない)、sideは実画像を
+    // 見ずに粗い深さ推定の矩形をそのまま塗りつぶす。regions(多角形)形式の
+    // アクセサリーは従来通りlocalAlphaを使う。
+    var faAcc, baAcc;
+    if(mask.front && mask.front.alpha){
+      faAcc = mask.front.alpha;
+    }else if(isMaskAcc){
+      faAcc = new Uint8Array(faW*faH);
+    }else{
+      faAcc = localAlpha(opts.frontRgba, faW, faH, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
                  gp.white_thr, gp.band_h, gp.band_overlap);
-    var baAcc = (mask.back && mask.back.alpha) ? mask.back.alpha :
-      localAlpha(opts.backRgba, faW, faH, faW-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, faW-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
+    }
+    if(mask.back && mask.back.alpha){
+      baAcc = mask.back.alpha;
+    }else if(isMaskAcc){
+      baAcc = new Uint8Array(faW*faH);
+    }else{
+      baAcc = localAlpha(opts.backRgba, faW, faH, faW-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, faW-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
                  gp.white_thr, gp.band_h, gp.band_overlap);
+    }
     var saAcc;
     if(mask.side && mask.side.alpha){
       saAcc = mask.side.alpha;
     }else{
       var sx0=SIDE_REF+mzMin*SCALE+sideOffsetX, sx1=SIDE_REF+mzMax*SCALE+sideOffsetX;
       var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP)+sideOffsetY, sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP)+sideOffsetY;
-      saAcc = localAlpha(opts.sideRgba, saW, saH, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
+      saAcc = isMaskAcc ?
+        rectAlpha(saW, saH, sx0, sy0, sx1, sy1) :
+        localAlpha(opts.sideRgba, saW, saH, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
     }
 
     var result = P3D.carveRegion({
