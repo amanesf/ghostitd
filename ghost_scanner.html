@@ -191,17 +191,19 @@
       <p class="hint">確定したfront画像から18点の骨格関節点を推定します。誤りがあれば下のチャットで修正を指示できます(このタブ内でのみ会話を継続)。</p>
       <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="lmPromptText"></pre></details>
       <button class="btn mint" id="lmRunBtn">ランドマークを推定</button>
-      <canvas class="imgPreview" id="lmPreview" width="512" height="512"></canvas>
+      <canvas class="imgPreview" id="lmPreview" width="512" height="512" style="touch-action:none;cursor:grab"></canvas>
+      <p class="hint">プレビュー上をドラッグすると全点が平行移動、ホイール/トラックパッドのピンチ・2本指ピンチで拡大縮小します(画像中心基準)。下の数値でも微調整できます。「反映」を押すまではプレビューだけの仮表示です。</p>
       <div class="modelRow">
-        <label for="lmOffsetX">全体オフセットX(px)</label>
+        <label for="lmOffsetX">オフセットX(px)</label>
         <input id="lmOffsetX" type="number" value="0" step="1" style="width:70px"/>
-      </div>
-      <div class="modelRow">
-        <label for="lmOffsetY">全体オフセットY(px)</label>
+        <label for="lmOffsetY">Y(px)</label>
         <input id="lmOffsetY" type="number" value="0" step="1" style="width:70px"/>
+        <label for="lmOffsetScale">倍率</label>
+        <input id="lmOffsetScale" type="number" value="1" step="0.01" style="width:70px"/>
       </div>
-      <p class="hint">Geminiの推定とプレビューがずれている場合、ここで全18点を一括で平行移動できます(プレビューはリアルタイム反映、「反映」で確定)。</p>
-      <button class="btn sm" id="lmOffsetApply">オフセットを反映</button>
+      <button class="btn sm" id="lmOffsetReset">リセット</button>
+      <button class="btn sm mint" id="lmOffsetApply">この位置で反映</button>
+      <p class="hint">この補正(位置+倍率)は、ランドマークだけでなく除外マスク・アクセサリー領域指定(タブ6b)にも同じ値を自動適用します(Geminiの座標のズレは面ごとに共通の傾向であることが多いため)。</p>
       <div class="chatLog" id="lmChatLog"></div>
       <div class="chatRow">
         <input id="lmChatInput" placeholder="例: 右肘をもう少し下に" disabled/>
@@ -228,6 +230,7 @@
     <div class="card">
       <h2>6b-1. アクセサリー検出(名称のみ、任意)</h2>
       <p class="hint">まず「何を抽出するか」の一覧だけを決める(精度を上げるため、範囲指定は次のステップで1件ずつ個別に行う)。front/side/back 3枚同時入力でbody/accessoryを二分類します(スキップ可)。</p>
+      <p class="hint"><b>「アクセサリー」と「除外マスク」は別の分類です。</b>アクセサリーは「体の輪郭からはみ出るかどうか」で決まる3Dパーツの分割単位(スカート・髪の房・尻尾など、体に密着していない全て)。除外マスクは、そのアクセサリーのうち<b>体そのもののシルエット計測を狂わせる、体の輪郭より外側に完全にはみ出た部分だけ</b>が対象になる別基準のフラグです(下の一覧の「除外マスク」欄を参照。例: 前髪・後ろ髪はアクセサリーだが体の地肌を覆っているため除外マスク対象外、ツインテールは体の外側にはみ出ているため除外マスク対象)。</p>
       <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="accPromptText"></pre></details>
       <button class="btn mint" id="accRunBtn">アクセサリー一覧を検出</button>
       <div id="accList"></div>
@@ -276,6 +279,11 @@ var state={
   landmarks:{pointsPx:null, imageWH:null, history:[], confirmed:false},
   params:{suggestions:null, history:[]},
   accessories:{list:null, history:[], confirmed:false},
+  // タブ5で「反映」した位置ズレ補正(平行移動+倍率)の累積値。ランドマーク
+  // だけでなく、タブ6b-2で取得するアクセサリー領域(regions)にも同じ値を
+  // 自動適用する(Geminiの座標系のズレは面ごとに共通の傾向であることが
+  // 多いため、一度計測した補正を使い回す)。
+  calibration:{dx:0, dy:0, scale:1},
 };
 
 function $(id){ return document.getElementById(id); }
@@ -860,41 +868,132 @@ function rescalePointsToNaturalSize(pointsPx, reportedWH, img){
   });
   return out;
 }
-// 上記の自動補正だけでは吸収しきれない残差(手元での実測では左に約20px程度)を
-// 手動で微調整できるようにする、全点一括の平行移動オフセット。
-// 「反映」を押すとstate.landmarks.pointsPxに直接焼き込み、スライダーは0に戻す
-// (以降の出力・チャット修正が常にこの補正後の座標を基準にするため)。
+// 上記の自動補正(rescalePointsToNaturalSize)だけでは吸収しきれない残差を
+// 手動で補正できるようにする、全点一括の平行移動+倍率(画像中心基準の拡大縮小)。
+// プレビュー上のドラッグ/ホイール/ピンチでdx,dy,scaleを対話的に決め、
+// 「この位置で反映」でstate.landmarks.pointsPxに焼き込む。この確定値は
+// state.calibrationに累積し、タブ6b-2のアクセサリー領域取得にも同じ値を
+// 自動適用する(除外マスク・アクセサリーもGemini由来の座標なので、同じ
+// ズレの傾向を持つことが多いため)。
+// pt: {x,y}(画像原寸ピクセル座標)、center: {cx,cy}(倍率の基準点、通常は画像中心)
+function applyCalibration(pt, calib, center){
+  return {
+    x: center.cx + (pt.x-center.cx)*calib.scale + calib.dx,
+    y: center.cy + (pt.y-center.cy)*calib.scale + calib.dy
+  };
+}
+P3D.scannerApplyCalibration = applyCalibration;
+function currentTabOffset(){
+  return {
+    dx: Number($("lmOffsetX").value)||0,
+    dy: Number($("lmOffsetY").value)||0,
+    scale: Number($("lmOffsetScale").value)||1
+  };
+}
+function setTabOffsetInputs(o){
+  $("lmOffsetX").value=Math.round(o.dx*10)/10;
+  $("lmOffsetY").value=Math.round(o.dy*10)/10;
+  $("lmOffsetScale").value=Math.round(o.scale*1000)/1000;
+}
 function refreshLmPreview(){
   var img=state.landmarks._img;
   if(!img || !state.landmarks.pointsPx) return;
   var c=$("lmPreview");
   var maxDim=900, iw=img.naturalWidth, ih=img.naturalHeight;
-  var scale=Math.min(1,maxDim/Math.max(iw,ih));
-  c.width=Math.round(iw*scale); c.height=Math.round(ih*scale);
-  var dx=Number($("lmOffsetX").value)||0, dy=Number($("lmOffsetY").value)||0;
+  var dispScale=Math.min(1,maxDim/Math.max(iw,ih));
+  c.width=Math.round(iw*dispScale); c.height=Math.round(ih*dispScale);
+  var o=currentTabOffset();
+  var center={cx:iw/2, cy:ih/2};
   var offsetPts=state.landmarks.pointsPx;
-  if(dx||dy){
+  if(o.dx||o.dy||o.scale!==1){
     offsetPts={};
     Object.keys(state.landmarks.pointsPx).forEach(function(k){
-      var p=state.landmarks.pointsPx[k];
-      offsetPts[k]={x:p.x+dx, y:p.y+dy};
+      offsetPts[k]=applyCalibration(state.landmarks.pointsPx[k], o, center);
     });
   }
-  P3D.scannerDrawLandmarkPreview(c.getContext("2d"), img, c.width, c.height, offsetPts, scale);
+  P3D.scannerDrawLandmarkPreview(c.getContext("2d"), img, c.width, c.height, offsetPts, dispScale);
 }
 $("lmOffsetX").addEventListener("input", refreshLmPreview);
 $("lmOffsetY").addEventListener("input", refreshLmPreview);
-$("lmOffsetApply").onclick=function(){
-  var dx=Number($("lmOffsetX").value)||0, dy=Number($("lmOffsetY").value)||0;
-  if(!state.landmarks.pointsPx || (!dx&&!dy)) return;
-  Object.keys(state.landmarks.pointsPx).forEach(function(k){
-    var p=state.landmarks.pointsPx[k];
-    p.x+=dx; p.y+=dy;
-  });
-  $("lmOffsetX").value=0; $("lmOffsetY").value=0;
+$("lmOffsetScale").addEventListener("input", refreshLmPreview);
+$("lmOffsetReset").onclick=function(){
+  setTabOffsetInputs({dx:0,dy:0,scale:1});
   refreshLmPreview();
-  setMsg("オフセット("+dx+", "+dy+")を全点に反映しました。");
 };
+$("lmOffsetApply").onclick=function(){
+  var o=currentTabOffset();
+  if(!state.landmarks.pointsPx || (!o.dx&&!o.dy&&o.scale===1)) return;
+  var img=state.landmarks._img;
+  var center={cx:img.naturalWidth/2, cy:img.naturalHeight/2};
+  Object.keys(state.landmarks.pointsPx).forEach(function(k){
+    state.landmarks.pointsPx[k]=applyCalibration(state.landmarks.pointsPx[k], o, center);
+  });
+  // 累積: 平行移動は加算、倍率は乗算(この順で今回のoを既存の補正の後に適用)。
+  state.calibration.dx += o.dx;
+  state.calibration.dy += o.dy;
+  state.calibration.scale *= o.scale;
+  setTabOffsetInputs({dx:0,dy:0,scale:1});
+  refreshLmPreview();
+  setMsg("補正(dx="+o.dx+", dy="+o.dy+", 倍率="+o.scale+")を反映しました。以後アクセサリー領域取得にも同じ補正を自動適用します。");
+};
+// ---- プレビュー上のドラッグ(平行移動)・ホイール/ピンチ(拡大縮小) ----
+(function setupLmPreviewDragZoom(){
+  var canvas=$("lmPreview");
+  var dragging=false, dragStart=null, dragBaseOffset=null;
+  function toImageDelta(dxCss, dyCss){
+    // 表示canvasはdispScaleで縮小表示しているため、画面上のpx移動量を
+    // 画像原寸px単位に変換してから既存のdx,dyに加算する。
+    var img=state.landmarks._img;
+    if(!img) return {x:0,y:0};
+    var dispScale = canvas.width / img.naturalWidth;
+    return { x: dxCss/dispScale, y: dyCss/dispScale };
+  }
+  canvas.addEventListener("mousedown", function(e){
+    dragging=true; dragStart={x:e.clientX,y:e.clientY}; dragBaseOffset=currentTabOffset();
+    canvas.style.cursor="grabbing";
+  });
+  window.addEventListener("mousemove", function(e){
+    if(!dragging) return;
+    var d=toImageDelta(e.clientX-dragStart.x, e.clientY-dragStart.y);
+    setTabOffsetInputs({dx:dragBaseOffset.dx+d.x, dy:dragBaseOffset.dy+d.y, scale:dragBaseOffset.scale});
+    refreshLmPreview();
+  });
+  window.addEventListener("mouseup", function(){ dragging=false; canvas.style.cursor="grab"; });
+  canvas.addEventListener("wheel", function(e){
+    e.preventDefault();
+    var o=currentTabOffset();
+    var factor = Math.exp(-e.deltaY*0.001);
+    setTabOffsetInputs({dx:o.dx, dy:o.dy, scale:Math.max(0.5,Math.min(2,o.scale*factor))});
+    refreshLmPreview();
+  }, {passive:false});
+  // タッチ: 1本指ドラッグ=平行移動、2本指ピンチ=拡大縮小。
+  var touchBase=null;
+  function touchDist(t0,t1){ return Math.hypot(t0.clientX-t1.clientX, t0.clientY-t1.clientY); }
+  canvas.addEventListener("touchstart", function(e){
+    e.preventDefault();
+    if(e.touches.length===1){
+      dragging=true; dragStart={x:e.touches[0].clientX,y:e.touches[0].clientY}; dragBaseOffset=currentTabOffset();
+    }else if(e.touches.length===2){
+      dragging=false;
+      touchBase={dist:touchDist(e.touches[0],e.touches[1]), offset:currentTabOffset()};
+    }
+  }, {passive:false});
+  canvas.addEventListener("touchmove", function(e){
+    e.preventDefault();
+    if(e.touches.length===1 && dragging){
+      var d=toImageDelta(e.touches[0].clientX-dragStart.x, e.touches[0].clientY-dragStart.y);
+      setTabOffsetInputs({dx:dragBaseOffset.dx+d.x, dy:dragBaseOffset.dy+d.y, scale:dragBaseOffset.scale});
+      refreshLmPreview();
+    }else if(e.touches.length===2 && touchBase){
+      var ratio = touchDist(e.touches[0],e.touches[1]) / touchBase.dist;
+      setTabOffsetInputs({dx:touchBase.offset.dx, dy:touchBase.offset.dy, scale:Math.max(0.5,Math.min(2,touchBase.offset.scale*ratio))});
+      refreshLmPreview();
+    }
+  }, {passive:false});
+  canvas.addEventListener("touchend", function(e){
+    if(e.touches.length===0){ dragging=false; touchBase=null; }
+  });
+})();
 function runLandmarkInitial(){
   if(!state.front.dataUrl){ setMsg("先に正面(front)を確定してください。",true); return; }
   $("lmRunBtn").disabled=true;
@@ -1069,18 +1168,41 @@ $("accConfirmListBtn").onclick=function(){
 // 旧版はfront/side/back+全accessoryを1回のAPI呼び出しでまとめて処理していたが、
 // 精度が低かった(対象が多すぎて注意が分散する)。1件ずつ個別に新規セッションで
 // 呼び出すことで、各呼び出しの対象を1つのaccessoryに絞り込む。
+// タブ5で確定した位置ズレ補正(state.calibration)を、そのviewの画像中心を
+// 基準にregionsの各点にも適用する(Geminiの座標系のズレは面ごとに共通の
+// 傾向であることが多いため、同じ補正値を使い回す)。
+function calibrateRegionsInPlace(regions, viewImgs){
+  var calib=state.calibration;
+  if(!regions || (calib.dx===0 && calib.dy===0 && calib.scale===1)) return regions;
+  Object.keys(regions).forEach(function(view){
+    var img=viewImgs[view];
+    var pts=regions[view] && regions[view].points;
+    if(!img || !pts) return;
+    var center={cx:img.naturalWidth/2, cy:img.naturalHeight/2};
+    regions[view].points = pts.map(function(p){
+      var c=P3D.scannerApplyCalibration({x:p[0],y:p[1]}, calib, center);
+      return [c.x, c.y];
+    });
+  });
+  return regions;
+}
 async function runAccessoryRegions(){
   var list = state.accessories.list;
   if(!list || !list.length){ setMsg("先にアクセサリー一覧を確定してください。",true); return; }
   $("accRegionRunBtn").disabled=true;
   var images=[state.front.dataUrl, state.side.dataUrl, state.back.dataUrl];
+  var viewImgs={
+    front: await P3D.scannerLoadImage(state.front.dataUrl),
+    side: await P3D.scannerLoadImage(state.side.dataUrl),
+    back: await P3D.scannerLoadImage(state.back.dataUrl)
+  };
   for(var i=0;i<list.length;i++){
     var acc=list[i];
     $("accRegionProgress").textContent="("+(i+1)+"/"+list.length+") "+acc.name+" の領域を検出中...";
     try{
       var res = await P3D.scannerCallTextTurn(promptAccessoryRegion(acc, acc.visible_views), images, []);
       var d = P3D.parseJsonResponse(res.text);
-      acc.regions = d.regions || {};
+      acc.regions = calibrateRegionsInPlace(d.regions || {}, viewImgs);
     }catch(e){
       appendChatLine($("accChatLog"),"model","「"+acc.name+"」の領域検出に失敗しました: "+e.message);
     }
@@ -1113,7 +1235,7 @@ $("paramsNextBtn").onclick=function(){
 function dataUrlToBlob(dataUrl){
   return fetch(dataUrl).then(function(r){ return r.blob(); });
 }
-function buildLandmarksAiJson(){
+async function buildLandmarksAiJson(){
   var out={
     version:2, generator:"ghost-scanner",
     points_px:state.landmarks.pointsPx || {},
@@ -1130,13 +1252,18 @@ function buildLandmarksAiJson(){
       return {name:a.name, mode:a.mode, bones:a.bones, regions:a.regions||{}};
     });
     // 除外マスクはexclude_from_body_silhouette===trueのものだけを機械的に合成する。
-    // front側はrescalePointsToNaturalSize()と同じ基準(=実際の画像の自然サイズ)を
-    // 使う必要があるため、Geminiが報告したimageWHではなく実測のnaturalWidth/Heightを使う。
+    // regions座標はcalibrateRegionsInPlace()で各viewの実測naturalWidth/Heightを
+    // 基準に補正済みのため、ここでも1024固定ではなく実測サイズを使う。
     var frontImg=state.landmarks._img;
+    var viewImgs={
+      front: frontImg,
+      side: await P3D.scannerLoadImage(state.side.dataUrl),
+      back: await P3D.scannerLoadImage(state.back.dataUrl)
+    };
     var exclude_masks={};
     ["front","side","back"].forEach(function(v){
-      var w = v==="front" ? (frontImg&&frontImg.naturalWidth) : 1024;
-      var h = v==="front" ? (frontImg&&frontImg.naturalHeight) : 1024;
+      var img=viewImgs[v];
+      var w = img&&img.naturalWidth, h = img&&img.naturalHeight;
       if(!w||!h) return;
       var m=P3D.scannerBuildExcludeMaskDataUrl(state.accessories.list, v, w, h);
       if(m) exclude_masks[v]=m;
@@ -1158,7 +1285,8 @@ $("outSendBtn").onclick=function(){
   ]).then(function(blobs){
     return P3D.saveScannerHandoffImages({front:blobs[0], side:blobs[1], back:blobs[2]});
   }).then(function(){
-    var json=buildLandmarksAiJson();
+    return buildLandmarksAiJson();
+  }).then(function(json){
     sessionStorage.setItem("scanner_handoff_json", JSON.stringify(json));
     setMsg("引き継ぎ準備ができました。ジェネレータへ移動します...");
     location.href="landmark_tool.html?source=scanner";
