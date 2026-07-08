@@ -861,4 +861,40 @@ canvas+`drawAccessoryRegionsPreview`相当の仕組みが、色分けマップ�
 - `js/idb.js`: ⑥用の保存キー追加の可能性
 
 ### 状態
-計画のみ(未着手)。着手時はこの節を更新すること。
+完了(2026-07-08)。実装内容:
+- ①: `ghost_scanner.html`の`refreshColormapPromptText()`が常に`VIEW_LABEL_JP.front`
+  固定でプレビュー表示していたバグを修正。front/side/backそれぞれの実際の
+  送信文面を並べて表示する形にし、summary文言も「front/side/back共通の
+  テンプレート」である旨に修正した(実際の生成処理`generateColormaps()`/
+  `P3D.scannerBuildColormapPrompt`自体は元々view別に正しく渡していたため無改修)。
+- ②: `js/common.js`に`P3D.significantComponentsMask(mask,w,h,minAreaPx)`を追加
+  (一定面積以上の全連結成分をOR合成、既定の最小面積16px未満はアンチエイリアス
+  ノイズとみなして除外)。`extractMaskFromColormap()`が`largestComponent`ではなく
+  こちらを使うように変更(引数`minAreaPxOpt`を追加、`largestComponent`自体は
+  `loadRgbaRemoveWhite`向けに無改修のまま残置)。
+- ③: `js/pipeline.js`の`stageAccessories`呼び出しを、`stageVisualHull`と同様に
+  `faW/faH`(front+back用。carving.jsの前提通りback/frontは同サイズ)と
+  `saW/saH`(side専用)を区別して渡す形に変更。`js/accessories.js`の
+  `stageAccessories`内(`localAlpha`のfront/back/side呼び出し、
+  `backPointsToModel`の反射計算、`carveRegion`呼び出しのfaW/faH/saW/saH)も
+  同様に区別するよう修正。サンプル画像(front/side/back全て1024×1024)では
+  数値上front=side=back寸法のため`generation-pipeline.test.js`のgolden hashは
+  変化なし(PASS確認済み)。
+- ④: `ghost_scanner.html`のタブ6-2に`renderMaskPreview()`を追加。
+  `landmark_tool.html`の「自動マスク」タブと同じ重ね描きパターン(front/side/back
+  画像+抽出済みマスクをalpha 0.55で重畳)で、`#maskPreviewList`に表示する
+  (`extractMasks()`実行後・確定解除時にクリア)。
+- ⑤: `landmark_tool.html`の`#automaskColormaps img`セレクタが実際は`<canvas>`
+  要素で効いていなかったCSSを修正(`canvas`セレクタ追加+`.automaskItem`で
+  幅上限140pxを指定)。
+- ⑥: `js/idb.js`に`saveScannerSessionImages`/`loadScannerSessionImages`/
+  `clearScannerSessionImages`(専用キー`scanner_session_images`)を追加。
+  `ghost_scanner.html`に`landmark_tool.html`と同様の自動保存(4秒間隔ポーリング、
+  変化があればlocalStorageのJSON+IndexedDBのBlobを保存)と、起動時の
+  「前回の続きから」/「破棄して新規作成」カードを追加。保存対象はfront/side/back
+  生成画像・色分けマップ画像・ランドマーク・アクセサリー一覧(色分けマップ由来の
+  抽出済みマスクは対象外、色分けマップさえ復元できれば無料で再抽出可能なため)。
+- 検証: Playwrightで①②③④⑥それぞれ実データに近い形の動作確認を実施
+  (コンソールエラーなし)。`npm test`は`generation-pipeline`/`generator-ui`/
+  `viewer-ui`がPASS、`controller-ui`は本変更と無関係(`controller.html`無改修)の
+  既存の失敗(PIPカメラ表示のアサーション)。

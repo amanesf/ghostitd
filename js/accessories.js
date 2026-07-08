@@ -85,9 +85,11 @@ P3D.pixelBboxToModelBbox = pixelBboxToModelBbox;
 /**
  * opts: {
  *   accs: [{name,mode,bones,regions:{front:{points},back:{points},side:{points}}}, ...]
- *   frontRgba,backRgba,sideRgba: Uint8ClampedArray(W*H*4) 元画像(front.png等)そのまま
- *   W,H: 画像サイズ, SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション
- *   frontCont,backCont,sideCont: Float32Array(W*H) min(RGB)連続値
+ *   frontRgba,backRgba,sideRgba: Uint8ClampedArray(*4) 元画像(front.png等)そのまま
+ *   faW,faH: front/backの画像サイズ(carving.jsの前提通りback/frontは同サイズ)
+ *   saW,saH: side画像のサイズ(front/backとは別サイズでよい)
+ *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション
+ *   frontCont,backCont,sideCont: front/back用はfaW*faH、side用はsaW*saHのFloat32Array
  *   pivots: skeleton pivots(soft skinning用)
  *   gp: gen_params
  * }
@@ -95,7 +97,13 @@ P3D.pixelBboxToModelBbox = pixelBboxToModelBbox;
  */
 function stageAccessories(opts){
   var gp = opts.gp;
-  var W=opts.W, H=opts.H, SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT;
+  // ★2026-07-08バグ修正(GHOST_SCANNER_PLAN.md「運用面の修正6点・③」): 以前は
+  // front基準の単一W,Hをfront/back/side全ての領域抽出・carveRegion呼び出しに
+  // 使い回しており、front/side画像のピクセル寸法が食い違うと側面のアクセサリー
+  // 抽出位置・スケールがズレていた。stageVisualHullと同じくfaW/faH(front+back)
+  // とsaW/saH(side)を区別する。
+  var faW=opts.faW, faH=opts.faH, saW=opts.saW, saH=opts.saH;
+  var SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT;
   var SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
   var backOffsetX=gp.back_offset_x||0, backOffsetY=gp.back_offset_y||0;
   var sideOffsetX=gp.side_offset_x||0, sideOffsetY=gp.side_offset_y||0;
@@ -123,13 +131,13 @@ function stageAccessories(opts){
       frontPolygon = frontPointsToModel(fr.points, CX, SCALE, YBOT);
       var bb=bboxOf(frontPolygon); mxMin=bb[0];mxMax=bb[1];myMin=bb[2];myMax=bb[3];
     }else if(bk && bk.points && bk.points.length){
-      backPolygon = backPointsToModel(bk.points, CX, SCALE, YBOT, W, backOffsetX, backOffsetY);
+      backPolygon = backPointsToModel(bk.points, CX, SCALE, YBOT, faW, backOffsetX, backOffsetY);
       var bb2=bboxOf(backPolygon); mxMin=bb2[0];mxMax=bb2[1];myMin=bb2[2];myMax=bb2[3];
     }else if(mask.front && mask.front.bbox){
       var bbm=P3D.pixelBboxToModelBbox(mask.front.bbox, function(pts){ return frontPointsToModel(pts, CX, SCALE, YBOT); });
       mxMin=bbm[0];mxMax=bbm[1];myMin=bbm[2];myMax=bbm[3];
     }else if(mask.back && mask.back.bbox){
-      var bbm2=P3D.pixelBboxToModelBbox(mask.back.bbox, function(pts){ return backPointsToModel(pts, CX, SCALE, YBOT, W, backOffsetX, backOffsetY); });
+      var bbm2=P3D.pixelBboxToModelBbox(mask.back.bbox, function(pts){ return backPointsToModel(pts, CX, SCALE, YBOT, faW, backOffsetX, backOffsetY); });
       mxMin=bbm2[0];mxMax=bbm2[1];myMin=bbm2[2];myMax=bbm2[3];
     }else{
       console.log("  accessories: skip", name, "(front/back範囲なし)");
@@ -145,16 +153,16 @@ function stageAccessories(opts){
       var hw=(mxMax-mxMin)/2; mzMin=-hw*0.6; mzMax=hw*0.6;
     }
 
-    var faAcc = localAlpha(opts.frontRgba, W, H, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
+    var faAcc = localAlpha(opts.frontRgba, faW, faH, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
                            gp.white_thr, gp.band_h, gp.band_overlap);
-    var baAcc = localAlpha(opts.backRgba, W, H, W-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, W-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
+    var baAcc = localAlpha(opts.backRgba, faW, faH, faW-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, faW-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
                            gp.white_thr, gp.band_h, gp.band_overlap);
     var sx0=SIDE_REF+mzMin*SCALE+sideOffsetX, sx1=SIDE_REF+mzMax*SCALE+sideOffsetX;
     var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP)+sideOffsetY, sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP)+sideOffsetY;
-    var saAcc = localAlpha(opts.sideRgba, W, H, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
+    var saAcc = localAlpha(opts.sideRgba, saW, saH, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
 
     var result = P3D.carveRegion({
-      fa:faAcc, ba:baAcc, sa:saAcc, faW:W, faH:H, saW:W, saH:H,
+      fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:saW, saH:saH,
       faCont: gp.subpixel ? opts.frontCont : null,
       baCont: gp.subpixel ? opts.backCont : null,
       saCont: gp.subpixel ? opts.sideCont : null,

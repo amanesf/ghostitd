@@ -242,6 +242,45 @@ function largestComponent(mask, w, h){
 }
 P3D.largestComponent = largestComponent;
 
+// ---- 一定面積以上の連結成分を全て残す(4連結、OR合成) ----
+// largestComponent()は最大成分1つだけを残すため、同一色に塗られた領域が
+// 画面内で複数の孤立した塊に分かれるケース(左右別々の房が同色指定、体の
+// 別パーツに隠れて視覚的に分断されている等)で小さい方の塊が失われる
+// (GHOST_SCANNER_PLAN.md「色分けマップ方式・運用面の修正6点・②」)。
+// minAreaPx未満の成分はアンチエイリアス境界のノイズとみなして除外し、
+// それ以外の成分は全てOR合成して残す。
+function significantComponentsMask(mask, w, h, minAreaPx){
+  minAreaPx = (minAreaPx===undefined || minAreaPx===null) ? 16 : minAreaPx;
+  var n=w*h;
+  var label=new Int32Array(n).fill(-1);
+  var labelSize={};
+  var stack=[];
+  for(var start=0; start<n; start++){
+    if(!mask[start] || label[start]!==-1) continue;
+    var lab=start, size=0;
+    stack.push(start); label[start]=lab;
+    while(stack.length){
+      var idx=stack.pop(); size++;
+      var x=idx%w, y=(idx/w)|0;
+      var nbrs=[];
+      if(x>0)nbrs.push(idx-1); if(x<w-1)nbrs.push(idx+1);
+      if(y>0)nbrs.push(idx-w); if(y<h-1)nbrs.push(idx+w);
+      for(var k=0;k<nbrs.length;k++){
+        var ni=nbrs[k];
+        if(mask[ni] && label[ni]===-1){ label[ni]=lab; stack.push(ni); }
+      }
+    }
+    labelSize[lab]=size;
+  }
+  var out=new Uint8Array(n);
+  for(var i=0;i<n;i++){
+    var lab=label[i];
+    if(lab>=0 && labelSize[lab]>=minAreaPx) out[i]=1;
+  }
+  return out;
+}
+P3D.significantComponentsMask = significantComponentsMask;
+
 // ---- 背景除去(prep.load_rgba_remove_whiteのJS移植) ----
 // img: HTMLImageElement, whiteThr: number, excludeMask: Uint8Array(w*h)|null
 // 戻り値: {w,h,rgba(Uint8ClampedArray,元画像そのまま), alpha(Uint8Array, 1=前景)}
@@ -288,9 +327,11 @@ P3D.hexToRgb = hexToRgb;
 // (デフォルト40。アンチエイリアス境界のにじみを吸収するため、RGB各成分の
 // 差の二乗和のルート=ユークリッド距離で判定する)。
 // 戻り値: {maskDataUrl, bbox:[x0,y0,x1,y1](ピクセル座標、y0<y1)} | null
-// (該当色の画素が1つも無ければnull)。最大連結成分のみを採用する
-// (計画書「複数成分対応は必要になれば追って拡張」の通り、現時点では単純化)。
-function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt){
+// (該当色の画素が1つも無ければnull)。一定面積以上の連結成分を全てOR合成して
+// 採用する(GHOST_SCANNER_PLAN.md「運用面の修正6点・②」。以前は最大成分1つ
+// だけを採用しており、同一色の領域が複数の孤立した塊に分かれるケースで
+// 小さい方が失われていた)。
+function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAreaPxOpt){
   var tol = (toleranceOpt===undefined || toleranceOpt===null) ? 40 : toleranceOpt;
   var target = hexToRgb(targetColorHex);
   var id = ctx.getImageData(0,0,w,h);
@@ -301,7 +342,7 @@ function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt){
     var dr=data[i]-target[0], dg=data[i+1]-target[1], db=data[i+2]-target[2];
     if(dr*dr+dg*dg+db*db <= tol2) raw[p]=1;
   }
-  var comp = largestComponent(raw, w, h);
+  var comp = significantComponentsMask(raw, w, h, minAreaPxOpt);
   var x0=w, x1=-1, y0=h, y1=-1, any=false;
   for(var y=0;y<h;y++){
     for(var x=0;x<w;x++){

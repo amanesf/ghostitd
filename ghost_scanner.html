@@ -92,6 +92,10 @@
   .hint{color:var(--mut);font-size:11px;line-height:1.6}
   .accItem{border:1px solid var(--line);border-radius:9px;padding:8px;margin-bottom:6px;font-size:11.5px}
   .accItem b{display:block;margin-bottom:2px}
+  #maskPreviewList{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  #maskPreviewList .maskPreviewItem{flex:0 0 auto;max-width:140px}
+  #maskPreviewList canvas{max-width:140px;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block}
+  #maskPreviewList .maskPreviewLabel{font-size:10.5px;color:var(--mut);margin-bottom:2px}
   .spin{display:inline-block;width:11px;height:11px;border-radius:50%;border:2px solid rgba(255,255,255,.25);
     border-top-color:var(--mint);animation:spin .8s linear infinite;margin-right:6px}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -104,6 +108,15 @@
     <button class="apiKeyBtn" id="apiKeyToggleBtn" type="button">⚙ APIキー</button>
   </div>
   <p class="sub">1枚のイラストから front/side/back の3面図と骨格情報をAIで推定し、ジェネレータへ引き継ぐ前処理ツール。</p>
+
+  <div class="card" id="resumeCard" hidden>
+    <h2>前回の続き</h2>
+    <p class="hint">保存済みの作業内容(画像・ランドマーク等)が見つかりました。続きから復元しますか?(いずれかを選ぶと以後は自動保存されます)</p>
+    <div class="rowGap">
+      <button class="btn sm" id="resumeDiscardBtn">破棄して新規作成</button>
+      <button class="btn sm mint" id="resumeBtn">続きから復元</button>
+    </div>
+  </div>
 
   <div class="card" id="apiKeyPanel" hidden>
     <h2>Gemini APIキー</h2>
@@ -250,7 +263,7 @@
     <div class="card">
       <h2>6-2. 色分けマップ生成→領域抽出(任意)</h2>
       <p class="hint">front/side/backそれぞれ1枚ずつ、「体=黒・背景=白・各accessory=パレット色でベタ塗り」した色分けマップ画像を生成(または手動アップロード)し、そこから色ごとにマスク(ラスタ)を機械的に抽出します(6-1の確定後に押せます)。1件ずつ座標を当てさせる旧方式より高精度・低コストです。</p>
-      <details class="promptPanel"><summary>送信プロンプト全文(front)を表示</summary><pre id="colormapPromptText"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(front/side/back共通のテンプレート、面ごとの実際の文面を表示)を表示</summary><pre id="colormapPromptText"></pre></details>
       <button class="btn mint" id="colormapGenBtn" disabled>色分けマップを生成(front/side/back)</button>
       <p class="hint" id="colormapProgress"></p>
       <div class="rowGap">
@@ -266,6 +279,8 @@
       <canvas class="imgPreview" id="colormapBackPreview" width="512" height="512"></canvas>
       <button class="btn green" id="maskExtractBtn" disabled>領域を抽出</button>
       <div id="maskList"></div>
+      <p class="hint">抽出したマスクの形状はここで確認できます(元画像に半透明で重ね描き)。</p>
+      <div id="maskPreviewList"></div>
     </div>
     <button class="btn green" id="paramsNextBtn">次へ(出力)</button>
   </div>
@@ -1124,6 +1139,7 @@ function resetColormapAndMaskState(){
     if(c) c.getContext("2d").clearRect(0,0,c.width,c.height);
   });
   $("maskList").innerHTML="";
+  $("maskPreviewList").innerHTML="";
   $("colormapProgress").textContent="";
   state.accessories.confirmed=false;
   refreshColormapButtons();
@@ -1147,8 +1163,17 @@ $("accUnconfirmBtn").onclick=function(){
 // (データモデルは統合せず並存、既存のregions手動編集ロジックは無改修)。
 var VIEW_LABEL_JP = {front:"正面(front)", side:"側面(side)", back:"背面(back)"};
 state.colormaps = { front:null, side:null, back:null };
+// ★2026-07-08バグ修正: 実際の生成処理(generateColormaps)はfront/side/back
+// それぞれにVIEW_LABEL_JP[v]を渡す共通実装だが、このプレビューだけが常に
+// VIEW_LABEL_JP.frontを渡していたため、front専用の指示のように見えていた
+// (GHOST_SCANNER_PLAN.md「運用面の修正6点・①」)。3面分の実際の文面を
+// 並べて表示することで、共通テンプレートであることを明示する。
 function refreshColormapPromptText(){
-  $("colormapPromptText").textContent = P3D.scannerBuildColormapPrompt(state.accessories.list||[], VIEW_LABEL_JP.front);
+  var list = state.accessories.list||[];
+  var text = ["front","side","back"].map(function(v){
+    return "――― "+VIEW_LABEL_JP[v]+" ―――\n"+P3D.scannerBuildColormapPrompt(list, VIEW_LABEL_JP[v]);
+  }).join("\n\n");
+  $("colormapPromptText").textContent = text;
 }
 function refreshColormapButtons(){
   var ready = !!(state.accessories.list && state.accessories.list.length && state.front.confirmed);
@@ -1213,6 +1238,36 @@ function renderMaskList(list){
     el.appendChild(d);
   });
 }
+// 抽出したマスクの形状を、元のfront/side/back画像に半透明で重ね描きして
+// 確認できるようにする(GHOST_SCANNER_PLAN.md「運用面の修正6点・④」。以前は
+// ジェネレータの「自動マスク」タブでしか確認できず、生成元であるスキャナー
+// 側で誤りに気づけなかった)。landmark_tool.htmlのrenderAutomaskTabと同じ
+// 重ね描きパターン(alpha 0.55)を踏襲する。
+async function renderMaskPreview(list){
+  var wrap=$("maskPreviewList"); wrap.innerHTML="";
+  var views=["front","side","back"];
+  for(var i=0;i<views.length;i++){
+    var v=views[i];
+    var url=state[v].dataUrl;
+    if(!url) continue;
+    var img=await P3D.scannerLoadImage(url);
+    var w=img.naturalWidth, h=img.naturalHeight;
+    var c=document.createElement("canvas"); c.width=w; c.height=h;
+    var cx=c.getContext("2d");
+    cx.drawImage(img,0,0,w,h);
+    for(var j=0;j<list.length;j++){
+      var acc=list[j];
+      var m=acc.mask && acc.mask[v];
+      if(!m || !m.maskDataUrl) continue;
+      var mi=await P3D.scannerLoadImage(m.maskDataUrl);
+      cx.save(); cx.globalAlpha=0.55; cx.drawImage(mi,0,0,w,h); cx.restore();
+    }
+    var itemWrap=document.createElement("div"); itemWrap.className="maskPreviewItem";
+    var label=document.createElement("div"); label.className="maskPreviewLabel"; label.textContent=VIEW_LABEL_JP[v];
+    itemWrap.appendChild(label); itemWrap.appendChild(c);
+    wrap.appendChild(itemWrap);
+  }
+}
 // 各view(front/side/back)の色分けマップ画像に対して、accessory一覧の
 // パレット色ごとにP3D.extractMaskFromColormapを呼び、acc.mask[view]に
 // {maskDataUrl,bbox}を格納する(GHOST_SCANNER_PLAN.md「新規実装が必要な
@@ -1242,6 +1297,7 @@ async function extractMasks(){
   // (計画書「1accessoryにつきどちらか一方の形式」の通り、抽出できた面については
   // regionsを持たせず一貫してmaskを優先させる)。
   renderMaskList(list);
+  await renderMaskPreview(list);
   state.accessories.confirmed=true;
   $("maskExtractBtn").disabled=false;
   setMsg("領域抽出が完了しました。");
@@ -1348,10 +1404,183 @@ $("outSendBtn").onclick=function(){
   });
 };
 
+/* ==================== 自動保存/前回の続きから ==================== */
+// GHOST_SCANNER_PLAN.md「運用面の修正6点・⑥」: リロード/閉じるでfront/side/back
+// 生成やランドマーク推定(時間・場合によっては課金を伴うAPI呼び出しの結果)が
+// 消えてしまう問題への対応。landmark_tool.htmlの自動保存パターン(画像は
+// IndexedDBにBlob、それ以外はlocalStorageにJSON)を踏襲する。抽出済みの
+// アクセサリーマスクは色分けマップさえ残っていれば無料でローカル再抽出できる
+// ため保存対象外にする(保存対象を絞りBlob管理の複雑さを抑える設計)。
+var SESSION_JSON_KEY = "3dtoolJS_scanner_session_v1";
+function buildSessionJson(){
+  return {
+    curTab: state.curTab, unlockedUpTo: state.unlockedUpTo,
+    front:{confirmed:state.front.confirmed}, side:{confirmed:state.side.confirmed}, back:{confirmed:state.back.confirmed},
+    landmarks:{pointsPx:state.landmarks.pointsPx, confirmed:state.landmarks.confirmed},
+    accessories:{
+      list:(state.accessories.list||[]).map(function(a){
+        return {name:a.name, mode:a.mode, bones:a.bones, color:a.color, reason:a.reason,
+          exclude_from_body_silhouette:a.exclude_from_body_silhouette, visible_views:a.visible_views};
+      }),
+      confirmed: state.accessories.confirmed
+    },
+    calibration: state.calibration,
+  };
+}
+function saveSessionJson(){
+  try{ localStorage.setItem(SESSION_JSON_KEY, JSON.stringify(buildSessionJson())); }
+  catch(e){ console.warn("セッション保存に失敗しました:", e); }
+}
+async function saveSessionImages(){
+  var blobs={};
+  var pairs=[
+    ["source", state.sourceDataUrl],
+    ["front", state.front.dataUrl],
+    ["side", state.side.dataUrl],
+    ["back", state.back.dataUrl],
+    ["colormapFront", state.colormaps && state.colormaps.front],
+    ["colormapSide", state.colormaps && state.colormaps.side],
+    ["colormapBack", state.colormaps && state.colormaps.back],
+  ];
+  for(var i=0;i<pairs.length;i++){
+    var k=pairs[i][0], url=pairs[i][1];
+    if(url) blobs[k]=await dataUrlToBlob(url);
+  }
+  try{ await P3D.saveScannerSessionImages(blobs); }
+  catch(e){ console.warn("画像セッション保存に失敗しました:", e); }
+}
+var scannerAutosaveInterval=null, lastScannerAutosaveJson=null;
+function startScannerAutosaveLoop(){
+  if(scannerAutosaveInterval) return;
+  scannerAutosaveInterval=setInterval(function(){
+    var json=JSON.stringify(buildSessionJson());
+    if(json===lastScannerAutosaveJson) return;
+    lastScannerAutosaveJson=json;
+    saveSessionJson();
+    saveSessionImages();
+  }, 4000);
+}
+async function checkScannerSessionAvailable(){
+  var raw=null;
+  try{ raw=localStorage.getItem(SESSION_JSON_KEY); }catch(e){}
+  var images=null;
+  try{ images = await P3D.loadScannerSessionImages(); }catch(e){}
+  return !!(raw && images && (images.source || images.front));
+}
+function blobToDataUrl(blob){
+  return new Promise(function(resolve,reject){
+    var fr=new FileReader();
+    fr.onload=function(){ resolve(fr.result); };
+    fr.onerror=function(){ reject(fr.error); };
+    fr.readAsDataURL(blob);
+  });
+}
+function restoreGenTabUI(name){
+  var st=state[name];
+  if(!st.dataUrl) return Promise.resolve();
+  return showImageOnCanvas($(name+"Preview"), st.dataUrl).then(function(){
+    $(name+"RetryBtn").disabled=false;
+    $(name+"ConfirmBtn").disabled=false;
+    var downloadBtn=$(name+"DownloadBtn"); if(downloadBtn) downloadBtn.disabled=false;
+    if(st.confirmed) $(name+"NextBtn").disabled=false;
+  });
+}
+async function restoreLandmarksUI(){
+  if(!state.landmarks.pointsPx || !state.front.dataUrl) return;
+  state.landmarks._img = await P3D.scannerLoadImage(state.front.dataUrl);
+  state.landmarks._detection = await P3D.scannerBuildDetectionCopy(state.front.dataUrl, 1000);
+  refreshLmPreview();
+  appendChatLine($("lmChatLog"),"model","(前回の続きから復元しました。チャットの会話履歴は引き継がれないため、修正する場合は改めて指示してください。)");
+  $("lmRunBtn").disabled=false;
+  $("lmChatInput").disabled=false; $("lmChatSend").disabled=false;
+  $("lmNextBtn").disabled=false;
+}
+function restoreAccessoriesUI(){
+  if(!state.accessories.list || !state.accessories.list.length) return;
+  renderAccList(state.accessories.list);
+  if(state.accessories.confirmed){
+    $("accChatInput").disabled=true; $("accChatSend").disabled=true; $("accConfirmListBtn").disabled=true;
+    $("accUnconfirmBtn").style.display=""; $("accConfirmedNote").style.display="";
+  }else{
+    $("accChatInput").disabled=false; $("accChatSend").disabled=false;
+    $("accConfirmListBtn").disabled=false;
+  }
+}
+async function restoreColormapsUI(){
+  var views=["front","side","back"];
+  for(var i=0;i<views.length;i++){
+    var v=views[i];
+    if(state.colormaps[v]) await showColormapPreview(v, state.colormaps[v]);
+  }
+  refreshColormapPromptText();
+  refreshColormapButtons();
+}
+async function restoreScannerSession(){
+  var raw=localStorage.getItem(SESSION_JSON_KEY);
+  var json=JSON.parse(raw);
+  var images=await P3D.loadScannerSessionImages();
+  if(images.source){
+    state.sourceDataUrl=await blobToDataUrl(images.source);
+    await showImageOnCanvas($("uploadPreview"), state.sourceDataUrl);
+    $("uploadNextBtn").disabled=false; $("uploadDownloadBtn").disabled=false;
+  }
+  for(var i=0;i<["front","side","back"].length;i++){
+    var name=["front","side","back"][i];
+    if(images[name]){
+      state[name].dataUrl = await blobToDataUrl(images[name]);
+      state[name].confirmed = json[name] ? json[name].confirmed : false;
+      await restoreGenTabUI(name);
+    }
+  }
+  if(json.landmarks){
+    state.landmarks.pointsPx=json.landmarks.pointsPx;
+    state.landmarks.confirmed=json.landmarks.confirmed;
+    await restoreLandmarksUI();
+  }
+  if(json.accessories){
+    state.accessories.list=json.accessories.list||[];
+    state.accessories.confirmed=json.accessories.confirmed;
+    restoreAccessoriesUI();
+  }
+  if(json.calibration) state.calibration=json.calibration;
+  if(images.colormapFront) state.colormaps.front=await blobToDataUrl(images.colormapFront);
+  if(images.colormapSide) state.colormaps.side=await blobToDataUrl(images.colormapSide);
+  if(images.colormapBack) state.colormaps.back=await blobToDataUrl(images.colormapBack);
+  await restoreColormapsUI();
+  state.unlockedUpTo = json.unlockedUpTo||0;
+  renderTabs();
+  switchTab(json.curTab||"upload");
+}
+$("resumeDiscardBtn").onclick=function(){
+  $("resumeCard").hidden=true;
+  try{ localStorage.removeItem(SESSION_JSON_KEY); }catch(e){}
+  P3D.clearScannerSessionImages().catch(function(){});
+  startScannerAutosaveLoop();
+};
+$("resumeBtn").onclick=function(){
+  $("resumeCard").hidden=true;
+  setMsg("前回の続きを復元中...");
+  restoreScannerSession().then(function(){
+    setMsg("前回の続きを復元しました。");
+  }).catch(function(e){
+    console.warn("前回の続きの復元に失敗しました:",e);
+    setMsg("前回の続きの復元に失敗しました。新規作成でやり直してください。",true);
+  }).then(function(){
+    startScannerAutosaveLoop();
+  });
+};
+async function initScannerSessionResume(){
+  var available=false;
+  try{ available = await checkScannerSessionAvailable(); }catch(e){}
+  if(available){ $("resumeCard").hidden=false; }
+  else{ startScannerAutosaveLoop(); }
+}
+
 /* ==================== 初期化 ==================== */
 refreshApiKeyStatus();
 renderTabs();
 switchTab("upload");
+initScannerSessionResume();
 })();
 </script>
 </body></html>

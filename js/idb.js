@@ -156,4 +156,42 @@ async function clearScannerHandoffImages(){
 P3D.saveScannerHandoffImages=saveScannerHandoffImages;
 P3D.loadScannerHandoffImages=loadScannerHandoffImages;
 P3D.clearScannerHandoffImages=clearScannerHandoffImages;
+
+// ゴーストスキャナー自身の「前回の続きから」用(GHOST_SCANNER_PLAN.md「運用面の
+// 修正6点・⑥」)。SCANNER_IMAGES_KEY(ジェネレータへの引き継ぎ、使い切り)とは
+// 別に、スキャナー内での作業継続用に画像本体(Blob)を保持する専用キー。
+// 有料/時間のかかるAPI呼び出しの結果(元画像・front/side/back生成画像・
+// 色分けマップ画像)のみを対象にし、そこから無料で再抽出できるマスクは
+// 対象外にする(保存対象を絞ることでBlob管理の複雑さを抑える設計)。
+var SCANNER_SESSION_IMAGES_KEY="scanner_session_images";
+async function saveScannerSessionImages(blobs){
+  var db = await openDb();
+  return new Promise(function(resolve,reject){
+    var tx = db.transaction(STORE,'readwrite');
+    tx.objectStore(STORE).put(blobs, SCANNER_SESSION_IMAGES_KEY);
+    tx.oncomplete=function(){resolve();};
+    tx.onerror=function(){reject(tx.error);};
+  });
+}
+async function loadScannerSessionImages(){
+  var db = await openDb();
+  return new Promise(function(resolve,reject){
+    var tx = db.transaction(STORE,'readonly');
+    var req = tx.objectStore(STORE).get(SCANNER_SESSION_IMAGES_KEY);
+    req.onsuccess=function(){resolve(req.result||null);};
+    req.onerror=function(){reject(req.error);};
+  });
+}
+async function clearScannerSessionImages(){
+  var db = await openDb();
+  return new Promise(function(resolve,reject){
+    var tx = db.transaction(STORE,'readwrite');
+    tx.objectStore(STORE).delete(SCANNER_SESSION_IMAGES_KEY);
+    tx.oncomplete=function(){resolve();};
+    tx.onerror=function(){reject(tx.error);};
+  });
+}
+P3D.saveScannerSessionImages=saveScannerSessionImages;
+P3D.loadScannerSessionImages=loadScannerSessionImages;
+P3D.clearScannerSessionImages=clearScannerSessionImages;
 })(window);

@@ -208,7 +208,14 @@ async function runCarvingStages(state, report){
     acc = P3D.stageAccessories({
       accs: state.accessories,
       frontRgba: rgbaFull.front, backRgba: rgbaFull.back, sideRgba: rgbaFull.side,
-      W: sizes.front.w, H: sizes.front.h,
+      // ★2026-07-08バグ修正(GHOST_SCANNER_PLAN.md「運用面の修正6点・③」):
+      // carveRegion/carving.jsはfront/backが同サイズ前提・sideは別サイズという
+      // 設計(stageVisualHullのfaW/faH+saW/saHと同じ)。以前はW,H(front基準)
+      // 1組をside側にも使い回しており、front/side画像のピクセル寸法が
+      // 食い違うスキャナー経由の素材でside側のアクセサリー切り出し位置・
+      // スケールがズレていた。faW/faH(front+back用)とsaW/saH(side用)を
+      // 分けて渡す。
+      faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
       SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
       frontCont:frontCont, backCont:backCont, sideCont:sideCont,
       pivots:pivots, gp:gp,
