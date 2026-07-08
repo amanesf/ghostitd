@@ -19,12 +19,12 @@ const { chromium } = require("playwright");
 const { startServer, openPage } = require("./lib/testkit");
 
 const EXPECTED_BODY_ONLY = {
-  byteLength: 1134576,
-  sha256: "159c83cf3c65f3fb65c8c3c445521221dda8f83b4ebeaa951abf25f9bbf67ce8",
+  byteLength: 1235660,
+  sha256: "8dadf21f38d2b14f01607b3efba54a36358cdaef13874897f6cac509c58452a4",
 };
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1254952,
-  sha256: "f0b71c556b299cff391f4ac6d5acf150becb59c4ebf964c1bd9ceebf0b03962d",
+  byteLength: 1356084,
+  sha256: "764107fc90e72c671c5ab2aec16bc7839b3fc8168625673739766fe7a68d3943",
 };
 
 async function generateAndExportGlb(server, browser, addAccessory) {

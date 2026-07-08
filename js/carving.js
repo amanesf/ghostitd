@@ -57,6 +57,23 @@ function intersectIntervals(runs, allowed){
   return out;
 }
 
+// 2本の区間リストの和集合(重なる/接する区間はマージする)。front/backそれぞれの
+// runを「両方が一致した範囲だけ採用(積集合)」ではなく「どちらかにあれば採用
+// (和集合)」に使う。マフラーや髪の毛のように front/back で重なり方が違う絵柄は、
+// 積集合だとその重なった部分だけ幅が削れて本体に穴が空く(引き算になってしまう)。
+function unionIntervals(a, b){
+  var all=a.concat(b);
+  if(!all.length) return [];
+  all.sort(function(p,q){ return p[0]-q[0]; });
+  var out=[[all[0][0], all[0][1]]];
+  for(var i=1;i<all.length;i++){
+    var last=out[out.length-1];
+    if(all[i][0]<=last[1]){ if(all[i][1]>last[1]) last[1]=all[i][1]; }
+    else out.push([all[i][0], all[i][1]]);
+  }
+  return out;
+}
+
 // V:Float32Array(N*3), F:Uint32Array(M*3) -> 最大連結成分に対しminFrac未満の
 // 断片を除去(union-find)
 function dropSmallFragments(V, F, minFrac){
@@ -410,14 +427,12 @@ function carveRegion(opts){
       var brPx = baCont ? Common.findRunsSubpixel(baRow, rowOf1d(baCont,faW,byBack[iy]), whiteThr) : Common.findRuns(baRow);
       var fr=frPx.map(function(pq){ return [(pq[0]-CX)/SCALE, (pq[1]-CX)/SCALE]; });
       var br=brPx.map(function(pq){ return [(faW-pq[1]-CX+backOffsetX)/SCALE, (faW-pq[0]-CX+backOffsetX)/SCALE]; });
-      var runsVal = intersectIntervals(intersectIntervals(fr,br), mxLim);
-      // ★2026-07-04: アクセサリー(ポリゴン指定あり)では、front/backの絵柄の
-      // 描かれ方が行単位で食い違う(片方だけ描線が途切れる等)と交差が空になり
-      // その行のメッシュが丸ごと欠落していた。ポリゴンで範囲が明示されている
-      // 場合は、交差が空なら描かれている方の面のrunだけで続行する。
-      if(xyPolygon && !runsVal.length){
-        runsVal = intersectIntervals(fr.length ? fr : br, mxLim);
-      }
+      // ★2026-07-08: front/backのrunは積集合(両方が重なった範囲だけ採用)ではなく
+      // 和集合にする。積集合だと、マフラーや髪の毛のようにfront/backで重なり方が
+      // 食い違う絵柄で、重なった行の幅がその場で削れて本体に穴が空いていた
+      // (front基準の幅からbackが「引き算」していた)。和集合ならbackはfrontに
+      // 無い範囲を「足す」方向にしか働かず、食い違いがあっても穴にならない。
+      var runsVal = intersectIntervals(unionIntervals(fr,br), mxLim);
       if(xyPolygon) runsVal = intersectIntervals(runsVal, polygonRowIntervals(xyPolygon, my[iy]));
       var segs=[];
       for(var i=0;i<runsVal.length;i++){
