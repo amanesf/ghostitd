@@ -263,7 +263,7 @@
     <div class="card">
       <h2>6-2. 色分けマップ生成→領域抽出(任意)</h2>
       <p class="hint">front/side/backそれぞれ1枚ずつ、「体=黒・背景=白・各accessory=パレット色でベタ塗り」した色分けマップ画像を生成(または手動アップロード)し、そこから色ごとにマスク(ラスタ)を機械的に抽出します(6-1の確定後に押せます)。1件ずつ座標を当てさせる旧方式より高精度・低コストです。</p>
-      <details class="promptPanel"><summary>送信プロンプト全文(front/side/back共通のテンプレート、面ごとの実際の文面を表示)を表示</summary><pre id="colormapPromptText"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(front/side/back共通、画像だけを差し替えて3回送信)を表示</summary><pre id="colormapPromptText"></pre></details>
       <button class="btn mint" id="colormapGenBtn" disabled>色分けマップを生成(front/side/back)</button>
       <p class="hint" id="colormapProgress"></p>
       <div class="rowGap">
@@ -773,7 +773,17 @@ var PROMPT_F =
 '   ヘッドホン→head、rigid。尻尾→hips、rigid)\n'+
 "2. 各accessoryについて、上記の「除外マスク用フラグ」を判定してください\n"+
 "3. 各accessoryについて、front/side/backのうちどの面に実際に写っているか\n"+
-"   (visible_views)を挙げてください(隠れて見えない面は含めない)\n\n"+
+"   (visible_views)を挙げてください(隠れて見えない面は含めない)\n"+
+"4. 各accessoryについて、`reason`には**なぜaccessory(体の輪郭からはみ出る\n"+
+"   もの)と判断したか**という理由だけでなく、**キャラクターの体のどの部分に、\n"+
+"   具体的にどのように付いている/生えているか**という位置の説明も必ず含めて、\n"+
+"   文章で具体的に書いてください。この`reason`は後続の別の作業(この画像を\n"+
+"   色分けして塗り分ける作業)で、今回のあなたの判断根拠をそのまま引き継ぐために\n"+
+"   使われます。今回のこの会話の記憶を持たない状態で読んでも、この文章だけを\n"+
+"   頼りに画像上で同じ部分を過不足なく特定できるくらい具体的にしてください\n"+
+"   (例: 「後頭部の生え際あたりから肩甲骨のあたりまで、背中に沿って左右2房に\n"+
+"   分かれて垂れ下がる長い髪。体幹の輪郭より外側にはみ出て背中に張り付いて\n"+
+"   いるためaccessory」)\n\n"+
 "## 出力形式(JSONのみ、説明文・コードフェンス不要。regions/colorフィールドは\n"+
 "含めないでください)\n"+
 "{\n"+
@@ -782,7 +792,8 @@ var PROMPT_F =
 '      "name": "例: スカート",\n'+
 '      "mode": "soft",\n'+
 '      "bones": ["hips", "thigh_L", "thigh_R"],\n'+
-'      "reason": "腰から広がり、脚のシルエットの外側に張り出しているため",\n'+
+'      "reason": "腰の位置から円錐状に大きく広がり、太もものシルエットより外側に\\n'+
+'張り出しているプリーツ状の布。腰のベルト付近から膝上あたりまでの範囲を覆う",\n'+
 '      "exclude_from_body_silhouette": true,\n'+
 '      "visible_views": ["front", "side", "back"]\n'+
 "    }\n"+
@@ -1194,17 +1205,15 @@ $("accUnconfirmBtn").onclick=function(){
 // (データモデルは統合せず並存、既存のregions手動編集ロジックは無改修)。
 var VIEW_LABEL_JP = {front:"正面(front)", side:"側面(side)", back:"背面(back)"};
 state.colormaps = { front:null, side:null, back:null };
-// ★2026-07-08バグ修正: 実際の生成処理(generateColormaps)はfront/side/back
-// それぞれにVIEW_LABEL_JP[v]を渡す共通実装だが、このプレビューだけが常に
-// VIEW_LABEL_JP.frontを渡していたため、front専用の指示のように見えていた
-// (GHOST_SCANNER_PLAN.md「運用面の修正6点・①」)。3面分の実際の文面を
-// 並べて表示することで、共通テンプレートであることを明示する。
+// ★2026-07-08: プロンプト文面はfront/side/backで指示内容が変わらないため
+// (判断基準・塗り分けルールは共通)、view非依存の共通テキスト1つに統合した
+// (P3D.scannerBuildColormapPrompt自体がview引数を取らなくなった)。
+// 以前は「front専用に見える」という表示バグの修正としてfront/side/back
+// 3面分を並べて表示していたが、実際に文面が完全に共通になったため、
+// 1つだけ表示しfront/side/back共通である旨を明記する形に戻す。
 function refreshColormapPromptText(){
   var list = state.accessories.list||[];
-  var text = ["front","side","back"].map(function(v){
-    return "――― "+VIEW_LABEL_JP[v]+" ―――\n"+P3D.scannerBuildColormapPrompt(list, VIEW_LABEL_JP[v]);
-  }).join("\n\n");
-  $("colormapPromptText").textContent = text;
+  $("colormapPromptText").textContent = P3D.scannerBuildColormapPrompt(list);
 }
 function refreshColormapButtons(){
   var ready = !!(state.accessories.list && state.accessories.list.length && state.front.confirmed);
@@ -1219,6 +1228,10 @@ async function generateColormaps(){
   var list = state.accessories.list;
   if(!list || !list.length){ setMsg("先にアクセサリー一覧を確定してください。",true); return; }
   $("colormapGenBtn").disabled=true;
+  // プロンプト文面はfront/side/back共通のため1回だけ組み立て、画像だけを
+  // view別に3回(新規セッション)渡す(GHOST_SCANNER_PLAN.md「アクセサリー
+  // 一覧・色分けマッププロンプトの見直し」節)。
+  var prompt = P3D.scannerBuildColormapPrompt(list);
   var views=["front","side","back"];
   for(var i=0;i<views.length;i++){
     var v=views[i];
@@ -1226,7 +1239,6 @@ async function generateColormaps(){
     if(!ref){ $("colormapProgress").textContent=v+"の画像がありません(スキップ)。"; continue; }
     $("colormapProgress").textContent="("+(i+1)+"/3) "+VIEW_LABEL_JP[v]+"の色分けマップを生成中...";
     try{
-      var prompt = P3D.scannerBuildColormapPrompt(list, VIEW_LABEL_JP[v]);
       var dataUrl = await P3D.scannerGenerateImage(prompt, ref);
       state.colormaps[v]=dataUrl;
       await showColormapPreview(v, dataUrl);

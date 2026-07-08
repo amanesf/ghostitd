@@ -950,3 +950,40 @@ canvas+`drawAccessoryRegionsPreview`相当の仕組みが、色分けマップ�
 ランドマークの初期配置・ドラッグ対象化・`buildJson()`のクラッシュ無し・
 旧JSON互換を確認済み。彫刻パイプライン側での目・口角の実利用は未着手
 (現時点では「後々のため」の先行データ追加)。
+
+## 完了: 色分けマッププロンプトをPROMPT_Fの判断基準に寄せる+front/side/back共通化(2026-07-08)
+
+ユーザーからのフィードバックを受けて追加対応。
+
+- **色分けマッププロンプトにPROMPT_F相当の判断基準を含める**: 色分けマップ
+  生成(`js/scanner_api.js`の`buildColormapPrompt`)は新規セッションで、
+  PROMPT_F(アクセサリー検出)の会話履歴を引き継がない。そのため以前は
+  `name → color`の対応表しか渡しておらず、「なぜそれをアクセサリーと
+  判断したか」という文脈が失われていた。以下の2つを追加した:
+  1. PROMPT_F側: 各accessoryの`reason`に、判断理由(なぜ)**だけでなく
+     体のどこを指しているか(どこ)**も具体的に書かせるよう指示を追加
+     (この`reason`は後で色分けマップ生成に渡されるため、単体で読んでも
+     同じ部分を特定できる具体性を求めている)。
+  2. `buildColormapPrompt`側: 各accessoryの行に`reason`を含めるほか、
+     「## 参考: アクセサリー検出時に使った判断基準」節を新設し、
+     body/accessory区別の基準(円柱/紡錘形に戻るか)と、髪の前後分割
+     ルール(頭頂基準)を要約して渡すようにした。
+- **front/side/back別だった色分けマッププロンプトを共通化**: 実質的な
+  指示内容(判断基準・塗り分けルール)はどの面でも変わらないため、
+  `buildColormapPrompt(accessories)`から`viewLabel`引数を削除し、view非依存の
+  共通テキスト1つを返す形にした。画像自体はこれまで通りfront/side/backで
+  別々に3回API呼び出しする(新規セッションのまま、変更なし)が、送信する
+  プロンプト文面は3回とも完全に同一になる。`ghost_scanner.html`の
+  `generateColormaps()`もプロンプトをループの外で1回だけ組み立てるように
+  変更し、`refreshColormapPromptText()`もfront/side/back3面分を並べて表示する
+  形(前回の修正)から、共通テキスト1つを表示する形に戻した。
+
+### 影響ファイル
+- `js/scanner_api.js`: `buildColormapPrompt`(判断基準の追加、view非依存化)
+- `ghost_scanner.html`: PROMPT_F(`reason`の記述指示強化)、
+  `generateColormaps()`/`refreshColormapPromptText()`(呼び出し方の追随)
+
+### 状態
+完了(2026-07-08)。Playwrightで生成されるプロンプト文面に各accessoryの
+`reason`・body/accessory判断基準・髪の頭頂分割ルールが含まれることを確認済み。
+実機のGemini画像編集APIでの検証は未実施(既知の不確実要素、他の画像生成系と同様)。
