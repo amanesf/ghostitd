@@ -53,6 +53,10 @@
 
   .imgPreview{width:100%;border-radius:10px;border:1px solid var(--line);background:#000;display:block;margin-bottom:8px}
   canvas.imgPreview{width:100%;height:auto}
+  .modelRow{display:flex;gap:6px;margin-bottom:8px;align-items:center}
+  .modelRow label{flex:0 0 auto;font-size:12px;color:var(--mut);white-space:nowrap}
+  .modelRow select{flex:1;min-width:0;height:34px;border-radius:9px;border:1px solid var(--line);
+    background:#0d0f13;color:var(--txt);font-size:13px;padding:0 8px}
   .apiKeyRow{display:flex;gap:6px;margin-bottom:10px}
   .apiKeyRow input{flex:1;min-width:0;height:36px;border-radius:9px;border:1px solid var(--line);
     background:rgba(255,255,255,.04);color:var(--txt);padding:0 10px;font-size:12px}
@@ -93,6 +97,16 @@
       <button class="btn sm" id="apiKeyClear" style="margin:0">削除</button>
     </div>
     <p class="hint" id="apiKeyStatus"></p>
+    <div class="modelRow">
+      <label for="imageModelSelect">画像生成モデル</label>
+      <select id="imageModelSelect"></select>
+    </div>
+    <div class="modelRow">
+      <label for="textModelSelect">テキスト/JSON推定モデル</label>
+      <select id="textModelSelect"></select>
+    </div>
+    <button class="btn sm" id="modelListFetchBtn" style="margin:0 0 6px">APIキーからモデル一覧を取得</button>
+    <p class="hint" id="modelListStatus"></p>
   </div>
 
   <div class="tabs" id="tabs"></div>
@@ -276,6 +290,56 @@ $("apiKeyClear").onclick=function(){
   P3D.clearGeminiApiKey();
   refreshApiKeyStatus();
   setMsg("APIキーを削除しました。");
+};
+
+/* ==================== モデル選択UI ==================== */
+// 既定値(コード埋め込みのDEFAULT_*)を、取得済みモデル一覧が無くても
+// 選べるようフォールバックの選択肢として常に用意しておく。
+function fillModelSelect(selectEl, options, current){
+  selectEl.innerHTML="";
+  options.forEach(function(name){
+    var opt=document.createElement("option");
+    opt.value=name; opt.textContent=name;
+    if(name===current) opt.selected=true;
+    selectEl.appendChild(opt);
+  });
+  // 現在値が選択肢に無ければ先頭に追加して選択(保存済みだが一覧未取得の場合)
+  if(current && options.indexOf(current)===-1){
+    var opt=document.createElement("option");
+    opt.value=current; opt.textContent=current+"(保存済み)";
+    opt.selected=true;
+    selectEl.insertBefore(opt, selectEl.firstChild);
+  }
+}
+function refreshModelSelects(){
+  fillModelSelect($("imageModelSelect"), [P3D.SCANNER_DEFAULT_IMAGE_MODEL], P3D.getScannerImageModel());
+  fillModelSelect($("textModelSelect"), [P3D.SCANNER_DEFAULT_TEXT_MODEL], P3D.getScannerTextModel());
+}
+refreshModelSelects();
+$("imageModelSelect").onchange=function(){ P3D.setScannerImageModel(this.value); };
+$("textModelSelect").onchange=function(){ P3D.setScannerTextModel(this.value); };
+
+$("modelListFetchBtn").onclick=function(){
+  var k=P3D.getGeminiApiKey();
+  if(!k){ setMsg("先にAPIキーを保存してください。",true); return; }
+  $("modelListStatus").textContent="モデル一覧を取得中...";
+  P3D.scannerListModels(k).then(function(models){
+    // generateContent対応モデルのみを候補にする。画像出力対応かどうかを示す
+    // 明確なフラグがレスポンスに無いため、モデル名に"image"を含むかどうかで
+    // 画像生成用/テキスト用を振り分ける(GHOST_SCANNER_PLAN.md「モデル自動取得」節参照)。
+    var names = models.filter(function(m){
+      return m.supportedGenerationMethods.indexOf("generateContent")!==-1;
+    }).map(function(m){ return m.name; });
+    var imageNames = names.filter(function(n){ return /image/i.test(n); });
+    var textNames = names.filter(function(n){ return !/image/i.test(n); });
+    if(imageNames.indexOf(P3D.SCANNER_DEFAULT_IMAGE_MODEL)===-1) imageNames.unshift(P3D.SCANNER_DEFAULT_IMAGE_MODEL);
+    if(textNames.indexOf(P3D.SCANNER_DEFAULT_TEXT_MODEL)===-1) textNames.unshift(P3D.SCANNER_DEFAULT_TEXT_MODEL);
+    fillModelSelect($("imageModelSelect"), imageNames, P3D.getScannerImageModel());
+    fillModelSelect($("textModelSelect"), textNames, P3D.getScannerTextModel());
+    $("modelListStatus").textContent="モデル一覧を取得しました("+names.length+"件、うち画像候補"+imageNames.length+"件)。";
+  }).catch(function(e){
+    $("modelListStatus").textContent="モデル一覧の取得に失敗しました: "+((e&&e.message)||e);
+  });
 };
 
 /* ==================== 汎用: canvasにdataURLを表示 ==================== */

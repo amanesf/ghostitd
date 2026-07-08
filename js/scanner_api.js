@@ -27,13 +27,68 @@ P3D.setGeminiApiKey = setApiKey;
 P3D.clearGeminiApiKey = clearApiKey;
 
 // ---- モデル名 ----
-// 画像生成(front/side/back)はgemini-2.5-flash-image、テキスト/JSON推定
-// (ランドマーク・パラメータ・アクセサリー)はgemini-2.5-proを使う
-// (GHOST_SCANNER_PLAN.mdの指示通り)。
-var IMAGE_MODEL = "gemini-2.5-flash-image";
-var TEXT_MODEL = "gemini-2.5-pro";
-P3D.SCANNER_IMAGE_MODEL = IMAGE_MODEL;
-P3D.SCANNER_TEXT_MODEL = TEXT_MODEL;
+// 画像生成(front/side/back)・テキスト/JSON推定(ランドマーク・パラメータ・
+// アクセサリー)ともに、既定値はコード更新時点(2026-07-08)の最新安定モデル。
+// Geminiのモデルは頻繁に更新されるため、既定値をハードコードしたままにせず
+// localStorageで上書きできるようにしてある(下のgetImageModel/getTextModel、
+// および画面上の「モデル取得」UIから選択・保存する)。
+var DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
+var DEFAULT_TEXT_MODEL = "gemini-3.5-flash";
+var IMAGE_MODEL_STORAGE_KEY = "ghost_scanner_image_model";
+var TEXT_MODEL_STORAGE_KEY = "ghost_scanner_text_model";
+
+function getImageModel(){
+  try{ return localStorage.getItem(IMAGE_MODEL_STORAGE_KEY) || DEFAULT_IMAGE_MODEL; }catch(e){ return DEFAULT_IMAGE_MODEL; }
+}
+function setImageModel(model){
+  try{ localStorage.setItem(IMAGE_MODEL_STORAGE_KEY, model||""); }catch(e){}
+}
+function getTextModel(){
+  try{ return localStorage.getItem(TEXT_MODEL_STORAGE_KEY) || DEFAULT_TEXT_MODEL; }catch(e){ return DEFAULT_TEXT_MODEL; }
+}
+function setTextModel(model){
+  try{ localStorage.setItem(TEXT_MODEL_STORAGE_KEY, model||""); }catch(e){}
+}
+P3D.SCANNER_DEFAULT_IMAGE_MODEL = DEFAULT_IMAGE_MODEL;
+P3D.SCANNER_DEFAULT_TEXT_MODEL = DEFAULT_TEXT_MODEL;
+P3D.getScannerImageModel = getImageModel;
+P3D.setScannerImageModel = setImageModel;
+P3D.getScannerTextModel = getTextModel;
+P3D.setScannerTextModel = setTextModel;
+
+// Gemini側のモデル一覧を取得する(models.list)。APIキーが使えるモデル名を
+// 画面のプルダウンに反映するために使う。「画像出力対応」を示す明確なフラグは
+// レスポンスに無いため、呼び出し元(UI層)でモデル名に"image"を含むかどうか等の
+// パターンで画像用/テキスト用を振り分ける。
+async function listModels(apiKey){
+  apiKey = apiKey || getApiKey();
+  if(!apiKey) throw new Error("APIキーが設定されていません。先に画面上部でAPIキーを入力してください。");
+  var url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=" + encodeURIComponent(apiKey);
+  var res;
+  try{
+    res = await fetch(url);
+  }catch(e){
+    throw new Error("Gemini APIへの通信に失敗しました(ネットワーク/プロキシの問題の可能性があります): " + ((e&&e.message)||e));
+  }
+  var text = await res.text();
+  var json;
+  try{ json = JSON.parse(text); }
+  catch(e){ throw new Error("Gemini APIのモデル一覧レスポンスがJSONとして解析できませんでした: " + text.slice(0,500)); }
+  if(!res.ok){
+    var msg = (json && json.error && json.error.message) || text;
+    throw new Error("Gemini APIのモデル一覧取得がエラーを返しました(HTTP " + res.status + "): " + msg);
+  }
+  var models = (json && json.models) || [];
+  // "models/gemini-3.1-flash-image" のような形で返るのでプレフィックスを剥がす
+  return models.map(function(m){
+    return {
+      name: (m.name||"").replace(/^models\//, ""),
+      displayName: m.displayName || m.name || "",
+      supportedGenerationMethods: m.supportedGenerationMethods || []
+    };
+  }).filter(function(m){ return m.name; });
+}
+P3D.scannerListModels = listModels;
 
 function apiUrl(model, apiKey){
   // NOTE(不確実要素): generateContentのエンドポイント形式は
@@ -81,6 +136,14 @@ async function callGemini(model, history, newParts, opts){
   catch(e){ throw new Error("Gemini APIのレスポンスがJSONとして解析できませんでした: " + text.slice(0,500)); }
   if(!res.ok){
     var msg = (json && json.error && json.error.message) || text;
+    if(res.status === 429 && /limit:\s*0\b/.test(msg)){
+      // "limit: 0" は一時的なレート制限ではなく、そのAPIキーのプロジェクトで
+      // このモデルの無料枠が0(=課金設定が必要)であることを示す。しばらく
+      // 待っても解消しないため、原因を区別できるメッセージにする。
+      msg = "このAPIキーのプロジェクトでは、このモデルの無料利用枠が0に設定されています" +
+        "(一時的なレート制限ではありません)。Google AI Studio/Cloudの課金設定を有効にするか、" +
+        "別のAPIキーに切り替えてください。元のメッセージ: " + msg;
+    }
     throw new Error("Gemini APIがエラーを返しました(HTTP " + res.status + "): " + msg);
   }
   return json;
@@ -140,7 +203,7 @@ P3D.parseJsonResponse = parseJsonResponse;
 // promptText: プロンプト全文、refImageDataUrl: 参照画像(元イラスト、またはfront確定画像)
 async function generateImage(promptText, refImageDataUrl, apiKey){
   var parts = [ { text: promptText }, dataUrlToInlinePart(refImageDataUrl) ];
-  var json = await callGemini(IMAGE_MODEL, [], parts, { apiKey: apiKey, responseModalities: ["IMAGE"] });
+  var json = await callGemini(getImageModel(), [], parts, { apiKey: apiKey, responseModalities: ["IMAGE"] });
   return extractImageDataUrl(json);
 }
 P3D.scannerGenerateImage = generateImage;
@@ -152,7 +215,7 @@ P3D.scannerGenerateImage = generateImage;
 async function callTextTurn(promptText, imageDataUrls, history, apiKey){
   var parts = [ { text: promptText } ];
   (imageDataUrls||[]).forEach(function(u){ parts.push(dataUrlToInlinePart(u)); });
-  var json = await callGemini(TEXT_MODEL, history||[], parts, { apiKey: apiKey });
+  var json = await callGemini(getTextModel(), history||[], parts, { apiKey: apiKey });
   var text = extractText(json);
   var newHistory = (history||[]).concat([
     { role: "user", parts: parts },
