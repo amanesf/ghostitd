@@ -13,7 +13,8 @@ var P3D = global.P3D = global.P3D || {};
 // GHOST_SCANNER_PLAN.md「3面図生成」節の通り、Geminiのリサイズは使わず、必ず
 // 先にこちら側でリサイズしてから送る(縦横比は維持し、余白を透過で埋める=
 // アスペクト比の歪みでキャラクターの体型が変わって渡るのを防ぐ)。
-// 戻り値: {canvas, dataUrl}
+// 戻り値: {canvas, dataUrl, scale, ox, oy, size}(scale/ox/oyは呼び出し元が
+// 座標を実寸に逆変換する際に使う。詳細はscannerBuildDetectionCopy参照)。
 function resizeImageToSquare(img, size){
   size = size || 1024;
   var iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
@@ -24,9 +25,32 @@ function resizeImageToSquare(img, size){
   var ctx = c.getContext("2d");
   ctx.clearRect(0,0,size,size);
   ctx.drawImage(img, 0,0, iw,ih, ox,oy, dw,dh);
-  return { canvas:c, dataUrl:c.toDataURL("image/png") };
+  return { canvas:c, dataUrl:c.toDataURL("image/png"), scale:scale, ox:ox, oy:oy, size:size };
 }
 P3D.scannerResizeImageToSquare = resizeImageToSquare;
+
+// ---- 検出専用の正方形レターボックスコピー(座標系の自己申告依存を廃止) ----
+// Geminiにランドマーク/アクセサリー領域を尋ねる際、「画像サイズを自己申告
+// させてそれを信用する」(旧rescalePointsToNaturalSize方式)は自己申告と
+// 実際の画像サイズが食い違うことがあり、ズレの主因になっていた。
+// 代わりに、こちらで確実に size×size(既定1000×1000)にレターボックス
+// リサイズしたコピーを作って送り、「このN×Nピクセル座標で答えよ」と
+// 指示する(Geminiが正規化0〜1000座標で検出タスクを学習している慣習にも
+// 合わせられる)。返ってきた座標は、このリサイズ情報(scale/ox/oy)を使って
+// 決定論的に実寸へ逆変換できる(自己申告を一切信用しない)。
+// 戻り値: {dataUrl, resize:{scale, ox, oy, size}}
+async function buildDetectionCopy(sourceDataUrl, size){
+  var img = await loadImageFromSrc(sourceDataUrl);
+  var r = resizeImageToSquare(img, size||1000);
+  return { dataUrl:r.dataUrl, resize:{ scale:r.scale, ox:r.ox, oy:r.oy, size:r.size } };
+}
+P3D.scannerBuildDetectionCopy = buildDetectionCopy;
+
+// 検出コピー上の座標(pt:{x,y})を、リサイズ情報を使って元画像の実寸座標に戻す。
+function detectionPointToNatural(pt, resize){
+  return { x:(pt.x-resize.ox)/resize.scale, y:(pt.y-resize.oy)/resize.scale };
+}
+P3D.scannerDetectionPointToNatural = detectionPointToNatural;
 
 // dataURL/Blob/File -> HTMLImageElement(Promise)
 function loadImageFromSrc(src){
