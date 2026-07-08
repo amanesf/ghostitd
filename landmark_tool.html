@@ -735,6 +735,7 @@ function setMsg(t){ $("msg").textContent=t; }
 
 // 「新規作成」/「サンプルモードで開く」のどちらで今のセッションが始まったか。
 let currentMode=null; // "sample" | "normal"
+let currentSampleId="default"; // サンプルモード時、SAMPLESのどのidを選んでいるか(自動保存キーの区別に使う)
 
 // ★ビューア(character_3d.html)と行き来しても編集中のデータを失わないための
 // セッション保存(localStorage)。「モデル生成」でビューアへ移る直前に
@@ -752,8 +753,11 @@ function saveNormalSession(){
   try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(buildJson())); }
   catch(e){ console.warn("セッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
 }
+// ★サンプルが複数になったため、保存キーはサンプルidごとに分ける(単一キーの
+// ままだと、サンプル1で編集後にサンプル2に切り替えた際、サンプル2の画像に
+// サンプル1のランドマーク編集内容が誤って復元されてしまう)。
 function saveSampleSession(){
-  try{ localStorage.setItem(SAMPLE_SESSION_KEY, JSON.stringify(buildJson())); }
+  try{ localStorage.setItem(SAMPLE_SESSION_KEY+":"+currentSampleId, JSON.stringify(buildJson())); }
   catch(e){ console.warn("サンプルセッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
 }
 function imageElementToBlob(imgEl,w,h){
@@ -2116,10 +2120,12 @@ renderOutlinePanel();
   // (既存の.slots UIをそのまま使う、何も自動読込しない)。
   // ただし、モデル生成→ビューア→「戻る」で来た場合(保存済みセッションが
   // ある場合)は、モードに関わらずこの選択画面を出さず直接復元する。
-  // サンプルは今のところ同梱のimages/*.png1組のみだが、複数サンプルを選べる
-  // よう プルダウンで選択させる作りにしておく(増やす場合はSAMPLESに追記するだけでよい)。
+  // 複数サンプルをプルダウンで選べる作りになっている(増やす場合はSAMPLESに
+  // 追記するだけでよい)。サンプル2(images2/+landmarks_ai_2.json)は髪飾り・
+  // ツインテール・マフラー・スカート等アクセサリーが多い実データ検証用。
   const SAMPLES=[
     {id:"default", label:"サンプル1", imagesDir:"images/", landmarksFile:"landmarks_ai.json"},
+    {id:"sample2", label:"サンプル2", imagesDir:"images2/", landmarksFile:"landmarks_ai_2.json"},
   ];
   const sampleSelectEl=$("sampleSelect");
   sampleSelectEl.innerHTML=SAMPLES.map(function(s,i){ return '<option value="'+i+'">'+s.label+'</option>'; }).join("");
@@ -2140,6 +2146,7 @@ renderOutlinePanel();
   }
   function loadSampleImages(){
     const sample=currentSample();
+    currentSampleId=sample.id;
     return Promise.all(["front","side","back"].map(function(slot){
       return fetch(sample.imagesDir+slot+".png").then(function(r){
         if(!r.ok)throw 0; return r.blob();
@@ -2151,7 +2158,7 @@ renderOutlinePanel();
       // があればそれを復元する。保存が無ければ従来通り同梱のlandmarks_ai.json
       // (初期状態)を読み込む。画像自体は常にimages/*.pngの同梱アセットを使う。
       let savedRaw=null;
-      try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY); }catch(e){}
+      try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY+":"+sample.id); }catch(e){}
       if(savedRaw){
         try{ applyLoadedJson(JSON.parse(savedRaw)); return; }
         catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
@@ -2178,15 +2185,16 @@ renderOutlinePanel();
   }
   function refreshSampleModeCard(){
     let hasSaved=null;
-    try{ hasSaved=localStorage.getItem(SAMPLE_SESSION_KEY); }catch(e){}
+    try{ hasSaved=localStorage.getItem(SAMPLE_SESSION_KEY+":"+currentSample().id); }catch(e){}
     $("modeSampleDesc").textContent = hasSaved
       ? "前回サンプルモードで編集した内容(ランドマーク/パラメータ等)を読み込んで再開します。"
       : "同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。";
     $("modeSampleResetRow").classList.toggle("hidden", !hasSaved);
   }
+  sampleSelectEl.addEventListener("change", refreshSampleModeCard);
   $("modeSampleReset").onclick=(e)=>{
     e.stopPropagation();
-    try{ localStorage.removeItem(SAMPLE_SESSION_KEY); }catch(err){}
+    try{ localStorage.removeItem(SAMPLE_SESSION_KEY+":"+currentSample().id); }catch(err){}
     refreshSampleModeCard();
     setMsg("サンプルの編集内容を破棄しました。");
   };
