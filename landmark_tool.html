@@ -1959,7 +1959,13 @@ $("generateBtn").onclick=async()=>{
       accessories: accessories.map(a=>{
         const out={name:a.name,mode:a.mode,bones:a.bones};
         if(a.mask&&Object.keys(a.mask).length){
-          out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={bbox:a.mask[v].bbox};return o;},{});
+          // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
+          // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
+          // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による
+          // ピクセル単位の正確なマスクraster(maskDataUrl)も渡し、
+          // pipeline.jsでUint8Arrayにラスタライズしてaccessories.js側で直接
+          // 使えるようにする。
+          out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
         }else{
           out.regions=Object.keys(a.regions||{}).reduce((o,v)=>{o[v]={points:a.regions[v].points};return o;},{});
         }

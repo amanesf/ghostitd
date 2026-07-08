@@ -379,6 +379,28 @@ function maskDataUrlToAlpha(ctx, w, h, maskDataUrl){
 }
 P3D.maskAlphaFromCtx = maskDataUrlToAlpha;
 
+// maskDataUrl(P3D.extractMaskFromColormapの戻り値.maskDataUrl)を実際に画像として
+// 読み込み、w×hのUint8Array(1=前景)に変換する非同期版。アクセサリー彫刻
+// (accessories.js)が、色分けマップ由来の正確なマスクをfront/back/side画像と
+// 同じ座標系のアルファ配列として直接使うために使う(パーツごとに自分の
+// front/side/backマスクだけで彫るため。従来はbboxの中を「白背景でないか」で
+// 塗り直していたため、bbox内にある体側のピクセルまで拾ってしまっていた)。
+function loadMaskAlphaAsync(maskDataUrl, w, h){
+  return new Promise(function(resolve, reject){
+    var img = new Image();
+    img.onload = function(){
+      var c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      var ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(maskDataUrlToAlpha(ctx, w, h));
+    };
+    img.onerror = function(){ reject(new Error("マスク画像の読込に失敗しました")); };
+    img.src = maskDataUrl;
+  });
+}
+P3D.loadMaskAlphaAsync = loadMaskAlphaAsync;
+
 // ---- 縁の色にじみ(prep.stage_bleedのJS移植) ----
 // 透明画素を最も近い不透明画素のRGBで埋め(distance_transform_edtのindices相当を
 // 多元BFSで代用)、アルファをalphaDilate回だけ膨張させる。

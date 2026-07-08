@@ -153,13 +153,27 @@ function stageAccessories(opts){
       var hw=(mxMax-mxMin)/2; mzMin=-hw*0.6; mzMax=hw*0.6;
     }
 
-    var faAcc = localAlpha(opts.frontRgba, faW, faH, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
-                           gp.white_thr, gp.band_h, gp.band_overlap);
-    var baAcc = localAlpha(opts.backRgba, faW, faH, faW-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, faW-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
-                           gp.white_thr, gp.band_h, gp.band_overlap);
-    var sx0=SIDE_REF+mzMin*SCALE+sideOffsetX, sx1=SIDE_REF+mzMax*SCALE+sideOffsetX;
-    var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP)+sideOffsetY, sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP)+sideOffsetY;
-    var saAcc = localAlpha(opts.sideRgba, saW, saH, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
+    // ★2026-07-08バグ修正: mask形式(色分けマップ由来)のアクセサリーは、
+    // パレット色によるピクセル単位の正確なマスク(mask[view].alpha、
+    // pipeline.jsで事前にmaskDataUrlをラスタライズ済み)があればそれを
+    // そのまま使う。従来はbbox内を「白背景でないか」で塗り直すlocalAlphaだけに
+    // 頼っていたため、bbox内にある体側のピクセル(肌・髪・他の服等)まで拾って
+    // 本体位置まで彫ってしまっていた。マスクが無い面(側面が別アクセサリーに
+    // 隠れて抽出できなかった場合等)だけ、従来通りlocalAlphaにフォールバックする。
+    var faAcc = (mask.front && mask.front.alpha) ? mask.front.alpha :
+      localAlpha(opts.frontRgba, faW, faH, mxMin*SCALE+CX, YBOT-myMax*SCALE, mxMax*SCALE+CX, YBOT-myMin*SCALE,
+                 gp.white_thr, gp.band_h, gp.band_overlap);
+    var baAcc = (mask.back && mask.back.alpha) ? mask.back.alpha :
+      localAlpha(opts.backRgba, faW, faH, faW-(mxMax*SCALE+CX)+backOffsetX, YBOT-myMax*SCALE+backOffsetY, faW-(mxMin*SCALE+CX)+backOffsetX, YBOT-myMin*SCALE+backOffsetY,
+                 gp.white_thr, gp.band_h, gp.band_overlap);
+    var saAcc;
+    if(mask.side && mask.side.alpha){
+      saAcc = mask.side.alpha;
+    }else{
+      var sx0=SIDE_REF+mzMin*SCALE+sideOffsetX, sx1=SIDE_REF+mzMax*SCALE+sideOffsetX;
+      var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP)+sideOffsetY, sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP)+sideOffsetY;
+      saAcc = localAlpha(opts.sideRgba, saW, saH, sx0,sy0,sx1,sy1, gp.white_thr, gp.band_h, gp.band_overlap);
+    }
 
     var result = P3D.carveRegion({
       fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:saW, saH:saH,

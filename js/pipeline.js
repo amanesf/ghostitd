@@ -205,6 +205,29 @@ async function runCarvingStages(state, report){
   report("accessories(アクセサリーのcarving)");
   var acc = null;
   if(state.accessories && state.accessories.length){
+    // ★2026-07-08バグ修正: 色分けマップ由来(mask形式)のアクセサリーは、以前は
+    // bboxだけ取り出してその中を「白背景でないか」で塗り直しており、bbox内に
+    // ある体側のピクセル(肌・髪・他の服等)まで拾って本体位置まで彫ってしまう
+    // 不具合があった。ここでmask[view].maskDataUrl(パレット色によるピクセル
+    // 単位の正確なマスク)をfront/back/side画像と同じ座標系のUint8Arrayに
+    // 変換して各accessoryオブジェクトのmask[view].alphaに載せ、accessories.js
+    // 側でlocalAlphaの代わりにこれを直接使えるようにする(パーツごとに自分の
+    // front/side/backマスクだけで彫る)。
+    var maskLoads=[];
+    state.accessories.forEach(function(a){
+      if(!a.mask) return;
+      ["front","back"].forEach(function(v){
+        var m=a.mask[v];
+        if(m && m.maskDataUrl && !m.alpha){
+          maskLoads.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, sizes.front.w, sizes.front.h).then(function(alpha){ m.alpha=alpha; }));
+        }
+      });
+      var ms=a.mask.side;
+      if(ms && ms.maskDataUrl && !ms.alpha){
+        maskLoads.push(P3D.loadMaskAlphaAsync(ms.maskDataUrl, sizes.side.w, sizes.side.h).then(function(alpha){ ms.alpha=alpha; }));
+      }
+    });
+    if(maskLoads.length) await Promise.all(maskLoads);
     acc = P3D.stageAccessories({
       accs: state.accessories,
       frontRgba: rgbaFull.front, backRgba: rgbaFull.back, sideRgba: rgbaFull.side,
