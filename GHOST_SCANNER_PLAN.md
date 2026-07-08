@@ -987,3 +987,101 @@ canvas+`drawAccessoryRegionsPreview`相当の仕組みが、色分けマップ�
 完了(2026-07-08)。Playwrightで生成されるプロンプト文面に各accessoryの
 `reason`・body/accessory判断基準・髪の頭頂分割ルールが含まれることを確認済み。
 実機のGemini画像編集APIでの検証は未実施(既知の不確実要素、他の画像生成系と同様)。
+
+## 計画: アクセサリー二重写り・位置ズレ修正+多角形(手動マスク)機能の廃止(2026-07-09)
+
+ユーザー提供の実データ(髪飾り・ツインテール・マフラー・スカート持ちキャラクター)
+を生成すると、斜め視点で顔・胴体・髪が二重にゴースト状に見える不具合と、側面から
+見て頭部後方に大きな裂けたフラップ状の余剰ジオメトリが出る不具合が発生した。
+あわせて、側面が前方に、正面がやや上にズレる位置ズレも報告された。調査の結果、
+原因は主に2つと、別途ユーザー方針による大きな仕様変更が1つある。
+
+### 原因①: アクセサリー彫刻の「片面しかマスクが無い場合」のフォールバック設計ミス
+
+色分けマップ由来のマスクはアクセサリーごとにfront/side/backの一部にしか存在しない
+ことが普通にある(例: 前髪は背面写真に映らないので`mask.back`が無い、片方の
+ツインテールはもう片方に隠れて`mask.side`が無い)。ところが`js/accessories.js`の
+`stageAccessories()`は、マスクが無い面を**元画像に対する粗い「白背景でなければ
+採用」判定(`localAlpha`)で埋めている**。前髪の場合、bboxを鏡映しした背面画像の
+範囲には後ろ髪や地肌など前髪と無関係な内容が写り込み、それが「背面側のアルファ」
+として扱われる。直近の別修正(`js/carving.js`の`buildWidthTracks`でfront/back合成を
+積集合→和集合に変更、2026-07-08)と組み合わさることで、この「本物の前髪」と
+「無関係な塊」が両方とも彫られてしまい、斜めから見ると二重に見える。
+`dropSmallFragments`(既定: 最大成分の5%未満を除去)は両方とも十分大きいため
+効かない。側面マスクが無いツインテールも同様の理屈で、粗い深さ推定(`hw*0.6`)+
+側面画像への`localAlpha`走査が無関係なピクセルを拾い、後方へのフラップ状の
+張り出しを生む。
+
+**対応方針**: マスク形式のアクセサリーで片面が欠けている場合、元画像を粗い
+しきい値で走査して埋めるのをやめる。
+- front/backのどちらかが欠けている場合: 欠けている面は「情報なし(和集合に
+  対して寄与しない)」として全ゼロのアルファを渡す。
+- sideが欠けている場合: 元のside画像を走査する代わりに、既存の粗い深さ推定
+  (`mzMin=-hw*0.6; mzMax=hw*0.6`から導かれる矩形範囲)をそのまま塗りつぶした
+  矩形アルファとして使う(実画像のピクセルは一切参照しない)。
+- `localAlpha`自体は削除しない(多角形形式がまだ使う可能性がある間の互換用)。
+
+### 原因②: `stageCore`のSIDE_REF計算がfront画像の行indexをside画像に流用している
+
+`js/profile.js`の`stageCore()`が、side画像の校正(SIDE_REF=体幹の側面中心)を
+計算する際に、front画像で測定したYTOP/YBOT(頭頂〜足先の行範囲)をそのまま
+side画像の行indexとして使い回している(`js/profile.js:78-80`のコメントで
+「front/sideの縦キャリブレーションが概ね一致している前提」と明記された既知の
+仮定)。front.pngとside.pngのフレーミング(余白の取り方)が少しでも違うと、
+SIDE_REFが誤った行範囲から計算され、モデル全体が一様に前後(Z)にズレる。
+「側面が前にズレている」という報告と一致する。
+
+**対応方針**: `js/pipeline.js`の`P3D.stageCore(alphaFull.side, sizes.side.w,
+sizes.side.h, prof.YTOP, prof.YBOT)`という呼び出しを、`prof.YTOP, prof.YBOT`
+(front測定値)ではなく`prof.SYTOP, prof.SYBOT`(side自身の頭頂/足先行範囲、
+`js/profile.js:54-55`で既に計算済み)に差し替える。`stageCore`関数自体は変更
+不要。
+
+### 仕様変更: 多角形(手動マスク)アクセサリー機能の廃止
+
+ユーザー方針により、多角形(手動パーツ、`regions.points`)によるアクセサリー
+編集機能は維持コストが高いため今後廃止し、色分けマップ由来の自動マスク方式に
+一本化する。デフォルトサンプル(サンプル1、`landmarks_ai.json`+`images/*.png`)
+は完全に多角形形式で作られているため、多角形削除に伴いジェネレータから削除する
+(`character_3d.html`/`controller.html`は独自の`model.glb`を使っており無関係、
+削除の影響を受けない)。
+
+**削除するもの**:
+- `landmark_tool.html`: 「手動マスク」タブの「パーツ＋」サブタブとその中身
+  一式(`acForm`/`acList`/`acAddBtn`、`buildAcFormHtml`/`wireAcFormEvents`/
+  `renderAcForm`、`pendingAcc.regions`関連、多角形の点編集キャンバス処理)。
+  「領域」サブタブ(`excludeMask`による体シルエット除外機能)は別機能なので
+  残す。`buildJson`/`applyLoadedJson`/`generateBtn`のstate構築コードにある
+  `regions`分岐(else節)を削除し、mask分岐のみ残す。
+- `js/accessories.js`: `frontPointsToModel`/`backPointsToModel`/
+  `sidePointsToModel`、`regions`/`frontPolygon`/`backPolygon`/`sidePolygon`
+  関連の分岐一式。`mask.*.bbox`だけを使う経路に単純化する。`bboxOf`は
+  `pixelBboxToModelBbox`が使うため残す。
+- `js/carving.js`: `carveRegion`内の`frontPolygon`/`backPolygon`/
+  `sidePolygon`/`xyPolygon`引数と、それに依存する`polygonRowIntervals`呼び出し
+  (2箇所)。`polygonRowIntervals`関数自体も他に使われていなければ削除。
+- サンプル1: `images/front.png`・`images/side.png`・`images/back.png`・
+  `landmarks_ai.json`をリポジトリから削除し、`landmark_tool.html`の`SAMPLES`
+  配列からサンプル1のエントリを削除する。サンプル2(`images2/*`+
+  `landmarks_ai_2.json`)を唯一のサンプルにする。
+
+**gen_paramsは維持**: `white_thr`/`band_h`/`band_overlap`は body側の白背景
+しきい値処理や、上記で残す`localAlpha`(移行期間中の互換のため)にまだ必要な
+ため、そのまま残す。
+
+**テスト更新**: `tests/generator-ui.test.js`の「パーツ＋」サブタブ操作の
+アサーションを削除(「領域」サブタブのテストは残す)。
+`tests/generation-pipeline.test.js`の`EXPECTED_BODY_ONLY`/
+`EXPECTED_WITH_ACCESSORY`をサンプル2(マスク形式)ベースで作り直す。
+
+### 実装順序
+1. 原因②(SIDE_REF修正)を先に単独で実装・確認(golden hash更新、他の変更と
+   混ざらないよう独立コミット)。
+2. 原因①(片面欠損時のフォールバック修正)を実装し、サンプル2で二重写り・
+   フラップが解消したことを斜め視点のスクリーンショットで確認する(今回の
+   バグは斜めでのみ顕著だったため、正面/背面だけの確認では不十分)。
+3. 多角形機能を削除。削除後にサンプル2で一通り生成できることを確認し、
+   テストを更新。
+
+### 状態
+計画段階(2026-07-09)、未着手。
