@@ -24,6 +24,11 @@
   html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
   .page{max-width:460px;margin:0 auto;padding:14px 12px 28px}
+  /* ★2026-07-09(UIレビュー): スマホ縦持ち想定の460px固定幅だと、PC/タブレットの
+     広い画面でもキャンバス・自動マスクプレビュー等が常に小さく表示されていた。
+     画面幅に応じて段階的に広げる(スマホは従来通り460pxのまま)。 */
+  @media (min-width:640px){ .page{max-width:640px} }
+  @media (min-width:900px){ .page{max-width:840px} }
   h1{font-size:16px;font-weight:700;margin:0 0 2px;letter-spacing:.01em}
   h1 .eng{display:block;font-family:var(--mono);font-size:9.5px;color:var(--green);
     letter-spacing:.22em;margin:5px 0 0;opacity:.85;font-weight:400}
@@ -96,6 +101,8 @@
   .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:11px}
   .accgroup>summary .accDot{width:7px;height:7px;border-radius:50%;background:#ffe14d;flex:0 0 auto;
     box-shadow:0 0 0 2px rgba(255,225,77,.18)}
+  .accgroup>summary .accPreviewBadge{flex:0 0 auto;font-size:10px;font-weight:400;color:var(--green);
+    background:rgba(57,255,158,.10);border:1px solid rgba(57,255,158,.3);border-radius:6px;padding:2px 6px}
   .accgroup>.accbody{padding:0 12px 12px}
   .accResetGrp{font-size:10.5px;color:var(--mut);border:1px solid var(--line);border-radius:6px;
     background:rgba(255,255,255,.05);padding:2px 8px;cursor:pointer;flex:0 0 auto}
@@ -126,9 +133,16 @@
   .tabpanel.on{display:block}
   .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
   #manualMaskEditArea.locked{opacity:.45;pointer-events:none;filter:grayscale(.4)}
+  /* ★2026-07-09(UIレビュー): 140pxでは色分けマップとの重なりズレが目視で
+     ほぼ確認できなかったため220pxへ拡大し、タップで全画面プレビューできる
+     ようにした(#automaskLightbox)。 */
   #automaskColormaps{display:flex;flex-wrap:wrap;gap:8px}
-  #automaskColormaps .automaskItem{flex:0 0 auto;max-width:140px}
-  #automaskColormaps canvas,#automaskColormaps img{max-width:140px;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block}
+  #automaskColormaps .automaskItem{flex:0 0 auto;max-width:220px}
+  #automaskColormaps canvas,#automaskColormaps img{max-width:220px;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block;cursor:zoom-in}
+  #automaskLightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:50;
+    align-items:center;justify-content:center;padding:20px}
+  #automaskLightbox.on{display:flex}
+  #automaskLightbox img,#automaskLightbox canvas{max-width:100%;max-height:100%;border-radius:10px}
   .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
   .acitem{display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,.04);
     border:1px solid var(--line);border-radius:9px;padding:7px 9px;transition:background .6s ease,border-color .6s ease}
@@ -161,10 +175,17 @@
   <p class="sub">3枚絵 → 全点を自動仮配置 → ドラッグで微調整 → landmarks.json 出力</p>
 
   <div id="editor" class="hidden">
+    <!-- ★2026-07-09(UIレビュー): 「JSON読み込み」(前回作業の再開)が「生成」タブの
+         中だけにあり、他4タブを通過しないと再開できなかったため、全タブ共通で
+         常に見える位置に移した。 -->
+    <div class="bar" id="sessionBar" style="margin-bottom:8px">
+      <button class="btn sm" id="loadJson" style="flex:0 0 auto">📂 JSON読み込み</button>
+      <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
+    </div>
     <div class="tabbar" id="tabbar">
       <button class="tabbtn on" data-tab="lm">マーク</button>
-      <button class="tabbtn" data-tab="automask">自動マスク</button>
       <button class="tabbtn" data-tab="manualmask">手動マスク</button>
+      <button class="tabbtn" data-tab="automask">自動マスク</button>
       <button class="tabbtn" data-tab="params">設定値</button>
       <button class="tabbtn" data-tab="gen">生成</button>
     </div>
@@ -226,6 +247,7 @@
       <div id="automaskList" class="aclist"></div>
       <p class="hint" id="automaskEmptyHint" style="font-size:11px;color:var(--mut)"></p>
     </div>
+    <div id="automaskLightbox"></div>
 
     <!-- 手動マスク(除外範囲=excludeMaskによる体シルエット除外機能のみ)。
          多角形(手動パーツ)によるアクセサリー編集機能は維持コストが高いため
@@ -297,10 +319,8 @@
     <div class="tabpanel acpanel" data-tabpanel="gen">
       <h2>JSON</h2>
       <div class="bar">
-        <button class="btn" id="loadJson">JSON読み込み</button>
         <button class="btn mint" id="export">landmarks.json 出力</button>
         <button class="btn" id="copy">JSONをコピー</button>
-        <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
       </div>
       <h2 style="margin-top:18px">モデル生成</h2>
       <div class="bar">
@@ -423,17 +443,17 @@ const PARAM_META=[
   desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。大きくすると速く軽くなるが丸みが粗くなる。"},
  {group:"解像度/軽量化", key:"acc_vox", label:"アクセサリーのボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
   desc:"ヘッドホン・猫耳・スカート等、個別に彫り出すアクセサリー用の解像度。意味はbody_voxと同じ。"},
- {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
-  desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく。"},
- {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_torso", label:"胴体の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面の丸み具合", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく(専門的には「スーパー楕円指数」と呼ぶ形状パラメータ)。"},
+ {group:"断面の丸み具合", key:"psq_torso", label:"胴体の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"首〜腰(胸/腹/腰)の断面形状。2に近いほど楕円(丸み)に近づき、大きくすると四角形に近づく(角ばった衣装等で有効な場合がある)。腕/脚が胴体に接続する遷移帯の形状にも使われる。"},
- {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_legs", label:"脚の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面の丸み具合", key:"psq_legs", label:"脚の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"腰から下(脚)の断面形状。左右対称なので左右で共通の1個の値。意味はpsq_torsoと同じ。"},
- {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_arms", label:"腕の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面の丸み具合", key:"psq_arms", label:"腕の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"肩→肘→手首の円形断面(arm_circle有効時)に使う指数。左右対称なので左右で共通の1個の値。2に近いほど円形に近く自然な腕になる。"},
- {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_hands", label:"手の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面の丸み具合", key:"psq_hands", label:"手の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
- {group:"断面の丸み具合(スーパー楕円指数)", key:"psq_acc", label:"アクセサリーの断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"断面の丸み具合", key:"psq_acc", label:"アクセサリーの断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"髪・帽子・スカート等、個別に彫り出すアクセサリーの断面形状。意味はpsq_torsoと同じ。"},
  {group:"ノイズ・ガタつき対策", key:"track_gap", label:"輪郭検出のつながりやすさ(ギャップ)", type:"number", min:0, max:30, step:1, unit:"行",
   desc:"大きくすると装飾線や指の隙間で測定が一瞬途切れても同じ塊として繋がりやすくなる(繋げすぎると別部位まで誤って繋がるリスクもある)。小さくすると途切れやすく、彫り込みが縦に凸凹しやすくなる。"},
@@ -441,8 +461,6 @@ const PARAM_META=[
   desc:"幅方向(front/back)のセグメント測定に適用する。大きくすると測定ノイズは減るが細かい起伏も均されて鈍る。小さくすると細部の形状は残るがノイズによる凸凹が出やすい。※奥行き(side計測)には適用されない(顎先のような数行の突出が消えるため)。"},
  {group:"腕の彫刻", key:"arm_circle", label:"腕をボーンに沿った円筒形にする", type:"checkbox",
   desc:"ONだと肩→肘→手首の骨線に沿って、front画像の各列で腕の縦(y)方向の太さを測り、それを奥行き(z)に適用した円形断面で彫る(side計測は腕に使わない。腕が板状/胴体並みの厚みになるのを防ぐ)。OFFにすると従来通りside計測の奥行きをそのまま使う。"},
- {group:"腕の彫刻", key:"arm_tol", label:"(旧方式のパラメータ・現在は未使用)", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
-  desc:"旧・行スキャン方式で使っていた骨線分からの許容距離。現在の列スキャン方式(縦幅を測って奥行きに適用)では使用しない(変更しても効果なし)。"},
  {group:"腕の彫刻", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
   desc:"腕の円形断面の半径(縦幅から傾き補正した値)の上限。これを超える列は腕とみなさない(骨線が肩の付け根など胴体内部を通る列を誤って円形化するのを防ぐ)。小さくしすぎると太い袖の腕が拾われなくなる。arm_circleがONの時のみ有効。"},
  {group:"手の彫刻", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
@@ -480,6 +498,9 @@ const PARAM_META=[
 // ただしgenParams自体(DEFAULT_GEN_PARAMSの値)は従来通りbuildJson()経由で
 // intermediateパッケージに含まれ、ビューアの初期値として使われる
 // (データは残す、UIのみ削除)。
+// ★2026-07-09(UIレビュー): arm_tolも同様の理由でUIから削除した。旧・行スキャン
+// 方式でしか使われておらず、現在の列スキャン方式(arm_circle)では一切参照されない
+// (js/common.jsのDEFAULT_GEN_PARAMSにはarm_tol:0.06のまま残す。互換性のため)。
 let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
 // カテゴリごとのアコーディオン開閉状態(既定は全部閉じる)。再描画(個別リセット等)を
 // またいで開閉状態を保つため、レンダリング関数の外側に保持する。
@@ -615,9 +636,15 @@ function buildParamsPanelHtml(){
         '</div>';
     }).join("");
     const changed=paramGroupChanged(g), isOpen=!!paramGroupOpen[g];
+    // ★2026-07-09(UIレビュー): このグループを開くと画像プレビューが連動するか
+    // どうかが分からず「開いても何も起きないグループがある」と混乱を招いていた
+    // ため、PREVIEW_GROUPSに登録済みのグループにだけ目印を出す。
+    const hasPreview = !!PREVIEW_GROUPS[g];
     return '<details class="accgroup" data-accgroup="'+g+'"'+(isOpen?" open":"")+'>'+
       '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
-      '<span>'+g+'</span><span class="accCount">'+itemList.length+'項目</span>'+
+      '<span>'+g+'</span>'+
+      (hasPreview?'<span class="accPreviewBadge" title="開くと画像プレビューが連動します">👁 プレビュー連動</span>':"")+
+      '<span class="accCount">'+itemList.length+'項目</span>'+
       '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
       '</summary><div class="accbody">'+items+'</div></details>';
   }).join("");
@@ -1535,6 +1562,17 @@ function renderAutomaskTab(){
     wrap.appendChild(label);
     wrap.appendChild(c);
     colWrap.appendChild(wrap);
+    // ★2026-07-09(UIレビュー): サムネイル(220px)だけではマスクと色分けマップの
+    // 重なりズレが確認しづらいため、タップで全画面プレビューを開けるようにする。
+    c.onclick=()=>{
+      const lb=$("automaskLightbox");
+      lb.innerHTML="";
+      const big=document.createElement("canvas");
+      big.width=c.width; big.height=c.height;
+      big.getContext("2d").drawImage(c,0,0);
+      lb.appendChild(big);
+      lb.classList.add("on");
+    };
   });
   listWrap.innerHTML=maskAccs.map(({a,i})=>buildAutomaskItemHtml(a,i)).join("");
   wireAutomaskItemEvents();
@@ -1774,6 +1812,7 @@ wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
 buildLegend();
 renderParamsPanel();
 renderOutlinePanel();
+$("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on"); };
 (function(){
   // ★初期画面(サンプルモード/通常モードの選択)。
   // 「サンプルモード」は同梱のimages2/front.png等+landmarks_ai_2.jsonを
