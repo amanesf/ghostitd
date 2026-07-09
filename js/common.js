@@ -38,7 +38,7 @@ var DEFAULT_GEN_PARAMS = {
   alpha_dilate: 9,
   // ★2026-07-09: 全身のシルエットも色分けマップ+色許容誤差方式に統一した
   // (js/pipeline.jsのrunCarvingStages参照)。body(体=黒)の色許容誤差。
-  body_color_tolerance: 40,
+  body_color_tolerance: 12,
   kb_per_face: 200,
   // ★2026-07-05: 背面/側面写真はそれぞれ別に撮影/作画されるため、前面基準の
   // CX/SCALE/YBOTをそのまま流用(鏡像)する彫り出し/テクスチャ変換に、
@@ -263,7 +263,7 @@ P3D.hexToRgb = hexToRgb;
 // 抽出するようになったため(loadAlphaFromColormap参照)、色距離判定部分を
 // extractMaskFromColormapから切り出して共通化した。
 function colorRegionRawMask(ctx, w, h, targetColorHex, toleranceOpt){
-  var tol = (toleranceOpt===undefined || toleranceOpt===null) ? 40 : toleranceOpt;
+  var tol = (toleranceOpt===undefined || toleranceOpt===null) ? 12 : toleranceOpt;
   var target = hexToRgb(targetColorHex);
   var id = ctx.getImageData(0,0,w,h);
   var data = id.data;

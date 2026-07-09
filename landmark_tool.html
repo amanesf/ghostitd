@@ -127,9 +127,12 @@
   /* ★2026-07-09(UIレビュー): 140pxでは色分けマップとの重なりズレが目視で
      ほぼ確認できなかったため220pxへ拡大し、タップで全画面プレビューできる
      ようにした(#automaskLightbox)。 */
-  #automaskColormaps{display:flex;flex-wrap:wrap;gap:8px}
-  #automaskColormaps .automaskItem{flex:0 0 auto;max-width:220px}
-  #automaskColormaps canvas,#automaskColormaps img{max-width:220px;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block;cursor:zoom-in}
+  /* ★2026-07-10(UIレビュー): 220pxの小さいサムネイルではマスクのズレや
+     色の重なりが見えづらいとの指摘を受け、#imgArea(マーク/設定値タブの
+     編集用画像、width:100%)と同じ、コンテナ幅いっぱいの1列表示にした。 */
+  #automaskColormaps{display:flex;flex-direction:column;gap:10px}
+  #automaskColormaps .automaskItem{width:100%}
+  #automaskColormaps canvas,#automaskColormaps img{width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block;cursor:zoom-in}
   #automaskLightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:50;
     align-items:center;justify-content:center;padding:20px}
   #automaskLightbox.on{display:flex}
@@ -255,13 +258,13 @@
         いる(側面(右)優先、無ければ側面(左))。</p>
       <div class="acitem" id="automaskBodyRow" style="margin-bottom:10px">
         <span class="nm">全身の色許容誤差(白背景との判定基準)</span>
-        <input type="range" id="automaskBodyTolSlider" min="5" max="120" value="40" style="flex:1">
-        <b id="automaskBodyTolVal" style="min-width:2.2em;text-align:right">40</b>
+        <input type="range" id="automaskBodyTolSlider" min="0" max="120" value="12" style="flex:1">
+        <input type="number" id="automaskBodyTolNum" min="0" max="120" value="12" style="width:56px">
       </div>
       <div class="acitem" id="automaskBulkRow" style="margin-bottom:10px">
         <span class="nm">全パーツの色許容誤差を一括変更</span>
-        <input type="range" id="automaskBulkTolSlider" min="5" max="120" value="40" style="flex:1">
-        <b id="automaskBulkTolVal" style="min-width:2.2em;text-align:right">40</b>
+        <input type="range" id="automaskBulkTolSlider" min="0" max="120" value="12" style="flex:1">
+        <input type="number" id="automaskBulkTolNum" min="0" max="120" value="12" style="width:56px">
       </div>
       <div id="automaskColormaps" class="row" style="flex-wrap:wrap"></div>
       <div id="automaskList" class="aclist"></div>
@@ -415,7 +418,7 @@ const DEFAULT_GEN_PARAMS={
   // ★2026-07-09: 全身のシルエットも色分けマップ+色許容誤差方式に統一した
   // ため、body(体=黒)の色許容誤差はここに持つ(自動マスクタブの「全身」
   // スライダーで編集する、accessoryのcolorToleranceと同じ意味の値)。
-  body_color_tolerance:40,
+  body_color_tolerance:12,
   kb_per_face:200,
   back_offset_x:0, back_offset_y:0,
   side_offset_x:0, side_offset_y:0,
@@ -1111,7 +1114,7 @@ function hasColormaps(){
 function extractAccessoryMask(a,v){
   const cm=colormaps[v];
   if(!cm || !a.color) return;
-  const tol=(a.colorTolerance!==undefined && a.colorTolerance!==null)?a.colorTolerance:40;
+  const tol=(a.colorTolerance!==undefined && a.colorTolerance!==null)?a.colorTolerance:12;
   const m=P3D.extractMaskFromColormap(cm.ctx,cm.w,cm.h,a.color,tol);
   a.mask=a.mask||{};
   if(m) a.mask[v]=m; else delete a.mask[v];
@@ -1265,7 +1268,7 @@ function applyLoadedJson(d){
   accessories=(d.accessories||[]).map(a=>{
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
       color:a.color||null,
-      colorTolerance:(a.colorTolerance!==undefined&&a.colorTolerance!==null)?a.colorTolerance:40};
+      colorTolerance:(a.colorTolerance!==undefined&&a.colorTolerance!==null)?a.colorTolerance:12};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -1365,8 +1368,11 @@ function buildAutomaskItemHtml(a, idx){
   // 色許容誤差(colorTolerance)スライダーを出す。無い(旧形式JSON/サンプル)場合は
   // 既に抽出済みのマスクをそのまま使うしかない(再抽出できないため)。
   const tolHtml = hasColormaps() ? (
-    '<label>色許容誤差(パーツ個別。値が大きいほど幅広い色を同じパーツとみなす): <b class="automaskTolVal" data-i="'+idx+'">'+a.colorTolerance+'</b>'+
-    '<input type="range" class="automaskTolSlider" data-i="'+idx+'" min="5" max="120" value="'+a.colorTolerance+'"></label>'
+    '<label>色許容誤差(パーツ個別。値が大きいほど幅広い色を同じパーツとみなす)'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<input type="range" class="automaskTolSlider" data-i="'+idx+'" min="0" max="120" value="'+a.colorTolerance+'" style="flex:1">'+
+    '<input type="number" class="automaskTolNum" data-i="'+idx+'" min="0" max="120" value="'+a.colorTolerance+'" style="width:56px">'+
+    '</div></label>'
   ) : '';
   return '<div class="acform" style="margin-bottom:8px">'+
     '<span class="tag">自動マスク / 面: '+views.join(",")+'</span>'+
@@ -1392,18 +1398,24 @@ function wireAutomaskItemEvents(){
       }
     };
   });
-  // 個別の色許容誤差スライダー。ドラッグ中にlistWrap全体を再描画すると
-  // スライダー自体が作り直されてドラッグが途切れるため、プレビュー
-  // (colWrap)だけを再描画するreextractAndRefresh()を呼ぶ(リスト側のHTMLは
-  // 数値表示(automaskTolVal)だけその場で書き換える)。
+  // 個別の色許容誤差スライダー/数値入力。ドラッグ中にlistWrap全体を
+  // 再描画するとスライダー自体が作り直されてドラッグが途切れるため、
+  // プレビュー(colWrap)だけを再描画するreextractAndRefresh()を呼ぶ
+  // (リスト側のHTMLはスライダー⇔数値入力どうしの値同期だけその場で行う)。
+  function setAccessoryTolerance(i,n){
+    n=Math.max(0,Math.min(120,n));
+    accessories[i].colorTolerance=n;
+    const sl=document.querySelector('.automaskTolSlider[data-i="'+i+'"]');
+    const num=document.querySelector('.automaskTolNum[data-i="'+i+'"]');
+    if(sl)sl.value=n;
+    if(num)num.value=n;
+    reextractAndRefresh();
+  }
   [].forEach.call(document.querySelectorAll(".automaskTolSlider"),sl=>{
-    sl.oninput=()=>{
-      const i=+sl.dataset.i, a=accessories[i], n=parseInt(sl.value,10);
-      a.colorTolerance=n;
-      const label=document.querySelector('.automaskTolVal[data-i="'+i+'"]');
-      if(label)label.textContent=n;
-      reextractAndRefresh();
-    };
+    sl.oninput=()=>{ setAccessoryTolerance(+sl.dataset.i, parseInt(sl.value,10)); };
+  });
+  [].forEach.call(document.querySelectorAll(".automaskTolNum"),num=>{
+    num.onchange=()=>{ setAccessoryTolerance(+num.dataset.i, parseInt(num.value,10)||0); };
   });
   [].forEach.call(document.querySelectorAll(".automaskModeBtn"),btn=>{
     btn.onclick=()=>{
@@ -1494,8 +1506,10 @@ function renderAutomaskTab(){
   if(bulkRow) bulkRow.classList.toggle("hidden", !hasColormaps() || !accessories.length);
   if(bodyRow){
     bodyRow.classList.toggle("hidden", !hasColormaps());
-    const sl=$("automaskBodyTolSlider"), lb=$("automaskBodyTolVal");
-    if(sl && document.activeElement!==sl){ sl.value=genParams.body_color_tolerance; lb.textContent=genParams.body_color_tolerance; }
+    const sl=$("automaskBodyTolSlider"), num=$("automaskBodyTolNum");
+    if(sl && document.activeElement!==sl && document.activeElement!==num){
+      sl.value=genParams.body_color_tolerance; num.value=genParams.body_color_tolerance;
+    }
   }
   if(!maskAccs.length){
     $("automaskColormaps").innerHTML="";
@@ -1702,23 +1716,29 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
 // automaskList/automaskColormapsの外側の静的markupなので、renderAutomaskTab()
 // (listWrap/colWrapの中身だけを作り直す)を呼んでもこのスライダー自体は
 // 壊れずドラッグを継続できる。
-$("automaskBulkTolSlider").oninput=()=>{
-  const n=parseInt($("automaskBulkTolSlider").value,10);
-  $("automaskBulkTolVal").textContent=n;
+function setBulkTolerance(n){
+  n=Math.max(0,Math.min(120,n));
+  $("automaskBulkTolSlider").value=n;
+  $("automaskBulkTolNum").value=n;
   accessories.forEach(a=>{ a.colorTolerance=n; });
   reextractAndRefresh();
   [].forEach.call(document.querySelectorAll(".automaskTolSlider"),sl=>{ sl.value=n; });
-  [].forEach.call(document.querySelectorAll(".automaskTolVal"),lb=>{ lb.textContent=n; });
-};
-// 全身の色許容誤差スライダー。#automaskBodyRowも静的markupなので、
+  [].forEach.call(document.querySelectorAll(".automaskTolNum"),num=>{ num.value=n; });
+}
+$("automaskBulkTolSlider").oninput=()=>{ setBulkTolerance(parseInt($("automaskBulkTolSlider").value,10)); };
+$("automaskBulkTolNum").onchange=()=>{ setBulkTolerance(parseInt($("automaskBulkTolNum").value,10)||0); };
+// 全身の色許容誤差スライダー/数値入力。#automaskBodyRowも静的markupなので、
 // reextractBodyAndRefresh()内でrenderAutomaskPreviews()を呼んでも
 // このスライダー自体は壊れない。
-$("automaskBodyTolSlider").oninput=()=>{
-  const n=parseInt($("automaskBodyTolSlider").value,10);
-  $("automaskBodyTolVal").textContent=n;
+function setBodyTolerance(n){
+  n=Math.max(0,Math.min(120,n));
+  $("automaskBodyTolSlider").value=n;
+  $("automaskBodyTolNum").value=n;
   genParams.body_color_tolerance=n;
   reextractBodyAndRefresh();
-};
+}
+$("automaskBodyTolSlider").oninput=()=>{ setBodyTolerance(parseInt($("automaskBodyTolSlider").value,10)); };
+$("automaskBodyTolNum").onchange=()=>{ setBodyTolerance(parseInt($("automaskBodyTolNum").value,10)||0); };
 (function(){
   // ★初期画面(サンプルモード/JSON読み込み/前回の続きの選択)。
   // 「サンプルモード」は同梱の画像込みJSON(landmarks_ai_2_embedded.json)を

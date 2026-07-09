@@ -1228,7 +1228,7 @@ $("accConfirmListBtn").onclick=function(){
   // ★2026-07-09: 色許容誤差(colorTolerance)はパーツごとの値になり、実際の
   // 抽出はジェネレータ側で行うようになったが、既定値だけはここで一覧確定時に
   // 振っておく(ジェネレータ側で個別/一括に上書きできる)。
-  state.accessories.list.forEach(function(a){ if(a.colorTolerance===undefined) a.colorTolerance=40; });
+  state.accessories.list.forEach(function(a){ if(a.colorTolerance===undefined) a.colorTolerance=12; });
   $("accChatInput").disabled=true; $("accChatSend").disabled=true; $("accConfirmListBtn").disabled=true;
   $("accUnconfirmBtn").style.display=""; $("accConfirmedNote").style.display="";
   state.accessories.confirmed=true;
@@ -1387,7 +1387,7 @@ async function buildLandmarksAiJson(){
     out.accessories=state.accessories.list.map(function(a){
       return {
         name:a.name, mode:a.mode, bones:a.bones, color:a.color,
-        colorTolerance:(a.colorTolerance!==undefined?a.colorTolerance:40),
+        colorTolerance:(a.colorTolerance!==undefined?a.colorTolerance:12),
       };
     });
     var colormaps={};
