@@ -105,52 +105,9 @@ function drawAccessoryRegionsPreview(ctx, img, w, h, accessories, view, scale){
 }
 P3D.scannerDrawAccessoryRegionsPreview = drawAccessoryRegionsPreview;
 
-// ---- 除外マスクの合成(フェーズ6: exclude_from_body_silhouette===trueのみ) ----
-// GHOST_SCANNER_PLAN.mdの通り、プロンプトFのregionsを機械的にcanvas上へ赤で
-// 塗りつぶし、landmark_tool.htmlのexclude_masks(PNG dataURL)と同じ形にする。
-// accessories: exclude_from_body_silhouetteフィールドを含むaccessories配列、
-// view: "front"|"side"|"back"、w,h: そのview画像の原寸サイズ
-// 戻り値: PNG dataURL、対象accessoryが1つもなければnull
-function buildExcludeMaskDataUrl(accessories, view, w, h){
-  var polyTargets = (accessories||[]).filter(function(a){
-    var region = a.regions && a.regions[view];
-    return a.exclude_from_body_silhouette===true && region && region.points && region.points.length>=2;
-  });
-  // マスク方式(色分けマップ由来)のaccessoryも除外マスク合成の対象にする
-  // (計画書「除外マスク(exclude_from_body_silhouette===trueのaccessory色領域から)」)。
-  // マスク自体は元画像と同じ座標系のラスタ(maskDataUrl、白RGB+アルファ=前景)
-  // なので、そのままそのview canvasへ重ね描きするだけでよい。
-  var maskTargets = (accessories||[]).filter(function(a){
-    var m = a.mask && a.mask[view];
-    return a.exclude_from_body_silhouette===true && m && m.maskDataUrl;
-  });
-  if(!polyTargets.length && !maskTargets.length) return null;
-  var c = document.createElement("canvas"); c.width=w; c.height=h;
-  var ctx = c.getContext("2d");
-  ctx.fillStyle = "#ff0000";
-  polyTargets.forEach(function(a){
-    var pts = a.regions[view].points;
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for(var i=1;i<pts.length;i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    ctx.fill();
-  });
-  if(maskTargets.length){
-    // 呼び出し元がすでにマスク画像をHTMLImageElementとして読み込み済みで
-    // 同期描画したい場合に備え、img要素を直接渡せる形も許容する
-    // (a.mask[view]._img があればそれを使い、なければ非同期読み込みは
-    // 呼び出し元の責務とする=ここでは同期描画のみ行う)。
-    maskTargets.forEach(function(a){
-      var m = a.mask[view];
-      if(m._img){
-        ctx.globalCompositeOperation="source-over";
-        ctx.drawImage(m._img, 0, 0, w, h);
-      }
-    });
-  }
-  return c.toDataURL("image/png");
-}
-P3D.scannerBuildExcludeMaskDataUrl = buildExcludeMaskDataUrl;
+// ★2026-07-09: 除外マスク(exclude_masks)合成用のbuildExcludeMaskDataUrl()は
+// js/common.js のP3D.buildExcludeMaskDataUrlへ移した(マスク抽出処理自体が
+// ghost_scanner.htmlからlandmark_tool.htmlへ移り、両ツールで使う共通
+// ユーティリティになったため)。
 
 })(window);

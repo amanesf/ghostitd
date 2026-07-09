@@ -227,20 +227,29 @@
       </div>
     </div>
 
-    <!-- 自動マスク(新規、GHOST_SCANNER_PLAN.md「色分けマップ」方式):
-         front/side/backの色分けマップ画像3枚+抽出済みパーツ一覧を同時表示する。
-         マスクはここでのみ更新され、手動での書き換えはできない(再生成/
-         再アップロードのみ)。 -->
+    <!-- 自動マスク(GHOST_SCANNER_PLAN.md「色分けマップ」方式):
+         front/side/leftSide/backの色分けマップ画像+抽出済みパーツ一覧を
+         同時表示する。★2026-07-09: マスク抽出処理自体(ゴーストスキャナー側
+         では固定の色許容誤差だった)をこちらへ移し、パーツごとに色許容誤差を
+         調整しながらその場で再抽出→プレビューできるようにした
+         (色分けマップがJSONに含まれている場合のみ。無い旧形式JSONでは
+         抽出済みのマスクをそのまま表示するだけになる)。 -->
     <div class="tabpanel acpanel" data-tabpanel="automask">
-      <h2>自動マスク(色分けマップ由来、手動編集不可)
+      <h2>自動マスク(色分けマップ由来)
         <button type="button" class="qbtn" data-help="help-automask">?</button></h2>
       <p class="helpText hidden" id="help-automask">
-        ゴーストスキャナーで生成/アップロードした色分けマップ(front/side/back、
-        体=黒・背景=白・各accessory=パレット色でベタ塗り)から自動抽出された
-        マスク(ラスタ)の一覧です。ここでは再抽出はできません(ゴーストスキャナー
-        側の「色分けマップ生成→領域抽出」タブで再生成/再アップロードしてから、
-        改めてこのツールへ引き継いでください)。多角形(下の「手動マスク」タブ)
-        とは別の独立したデータ形式で、統合はされません。</p>
+        ゴーストスキャナーで生成/アップロードした色分けマップ(front/side/
+        leftSide/back、体=黒・背景=白・各accessory=パレット色でベタ塗り)から、
+        パーツごとの色許容誤差(colorTolerance)を使ってマスク(ラスタ)を抽出した
+        結果です。各パーツの許容誤差はこの下のリストで個別に、または上の
+        「全パーツの色許容誤差を一括変更」でまとめて調整でき、変更すると
+        即座に再抽出してプレビューが更新されます(色分けマップがJSONに
+        含まれている場合のみ。無い場合は抽出済みのマスクをそのまま表示します)。</p>
+      <div class="acitem" id="automaskBulkRow" style="margin-bottom:10px">
+        <span class="nm">全パーツの色許容誤差を一括変更</span>
+        <input type="range" id="automaskBulkTolSlider" min="5" max="120" value="40" style="flex:1">
+        <b id="automaskBulkTolVal" style="min-width:2.2em;text-align:right">40</b>
+      </div>
       <div id="automaskColormaps" class="row" style="flex-wrap:wrap"></div>
       <div id="automaskList" class="aclist"></div>
       <p class="hint" id="automaskEmptyHint" style="font-size:11px;color:var(--mut)"></p>
@@ -683,11 +692,17 @@ function renderParamsPanel(){
   wireParamsPanelEvents(el);
 }
 // 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲の
-// オフスクリーンcanvas)。★2026-07-09: 手塗り編集UIは廃止し、ゴーストスキャナー
-// 側で色分けマップ由来のaccessoryマスクから自動合成されたexclude_masks
-// (JSON)を読み込んで使うだけの読み取り専用データになった。
+// オフスクリーンcanvas)。★2026-07-09: 手塗り編集UIは廃止した。色分けマップ由来の
+// accessoryマスク(下記colormaps参照)から自動合成する(rebuildExcludeMasksFromAccessories
+// 参照。旧: ゴーストスキャナー側で合成→JSONで受け取るだけだったが、マスク抽出
+// 処理自体をこちら側に移したため合成もこちら側で行うようになった)。
 let excludeMask={front:null,side:null,back:null};
 let excludeMaskVer=0; // 除外マスクが変わるたびに増やし、プレビューキャッシュの無効化に使う
+// 色分けマップ(front/side/leftSide/back、体=黒・背景=白・各accessory=パレット色)。
+// ゴーストスキャナーから引き継いだJSONに含まれていれば、ここでオフスクリーン
+// canvasとして保持し、accessory毎の色許容誤差(colorTolerance)を変えながら
+// P3D.extractMaskFromColormapで何度でも再抽出できるようにする(自動マスクタブ)。
+let colormaps={front:null,side:null,leftSide:null,back:null};
 let analysis=null, points=null, sel=null, dragPoint=null;
 let view={z:1,ox:0,oy:0};
 
@@ -1059,6 +1074,23 @@ function loadImgFromDataUrl(dataUrl,slot){
     el.src=dataUrl;
   });
 }
+// 色分けマップのdataURLをオフスクリーンcanvasとして読み込む(loadImgFromDataUrlの
+// colormaps版。Imageのままではなくctxを直接持たせ、extractAccessoryMask()から
+// 何度でも同期的に再抽出できるようにする)。
+function loadColormapFromDataUrl(dataUrl,view){
+  return new Promise((resolve,reject)=>{
+    const el=new Image();
+    el.onload=()=>{
+      const c=document.createElement("canvas");
+      c.width=el.naturalWidth; c.height=el.naturalHeight;
+      const ctx=c.getContext("2d"); ctx.drawImage(el,0,0);
+      colormaps[view]={canvas:c,ctx,w:c.width,h:c.height};
+      resolve();
+    };
+    el.onerror=()=>{ reject(new Error("色分けマップの読込に失敗しました("+view+")")); };
+    el.src=dataUrl;
+  });
+}
 // JSON(画像dataUrl込み)から、画像復元→自動仮配置→残りのJSON内容の反映まで
 // 一括で行う。旧来の「新規作成(3枚アップロード)」「ゴーストスキャナーからの
 // IndexedDB経由引き継ぎ」「サンプルモードの静的ファイル取得」という3通りの
@@ -1074,6 +1106,15 @@ async function bootstrapFromJson(d){
     if(d.image.back && d.image.back.dataUrl) await loadImgFromDataUrl(d.image.back.dataUrl,"back");
     // leftSideは左右非対称キャラ用の任意の面(無くても読み込みは成立する)。
     if(d.image.leftSide && d.image.leftSide.dataUrl) await loadImgFromDataUrl(d.image.leftSide.dataUrl,"leftSide");
+    // 色分けマップ(あれば): ゴーストスキャナーから引き継いだJSONは含む、
+    // サンプル/旧形式のJSONは含まない(その場合はaccessories[].maskが
+    // 既に抽出済みの値としてそのまま使われる、applyLoadedJson参照)。
+    colormaps={front:null,side:null,leftSide:null,back:null};
+    if(d.colormaps){
+      for(const v of ["front","side","leftSide","back"]){
+        if(d.colormaps[v]) await loadColormapFromDataUrl(d.colormaps[v],v);
+      }
+    }
   }catch(e){
     setMsg("画像の復元に失敗しました: "+((e&&e.message)||e));
     return false;
@@ -1121,15 +1162,81 @@ function toImg(e){const c=canvasPt(e),base=(wrap.clientWidth||360)/curImg().w,sc
   return[(c[0]-view.ox)/sc,(c[1]-view.oy)/sc];}
 
 /* ---------- 除外マスク(exclude_masks)用オフスクリーンcanvas。★2026-07-09:
-   手塗り編集(マジックツール/ブラシ)UIは廃止し、JSON読み込み時に
-   d.exclude_masksの画像をそのままcanvasへ描き込むためだけに使う
-   (applyLoadedJson参照)。除外部分=不透明(赤)、非除外=透明。 ---------- */
+   手塗り編集(マジックツール/ブラシ)UIは廃止し、d.exclude_masksの画像
+   (colormapsが無い旧形式JSON向け)、またはrebuildExcludeMasksFromAccessories()
+   が合成した結果をcanvasへ描き込むためだけに使う。除外部分=不透明(赤)、
+   非除外=透明。 ---------- */
 function ensureExcludeCanvas(v){
   if(excludeMask[v])return excludeMask[v];
   const img=imgs[v]; if(!img)return null;
   const c=document.createElement("canvas");c.width=img.w;c.height=img.h;
   excludeMask[v]={canvas:c,ctx:c.getContext("2d")};
   return excludeMask[v];
+}
+/* ---------- 色分けマップからのマスク抽出(自動マスクタブ)。★2026-07-09:
+   従来はゴーストスキャナー側で固定色許容誤差(40)で一度だけ抽出していたが、
+   パーツごとに許容誤差を変えて試行錯誤したいとの要望を受け、抽出処理
+   そのものをこちらへ移した。colormapsが無い(旧形式のJSON/サンプル)場合は
+   何もしない(accessories[].maskに既に入っている抽出済みの値をそのまま使う)。 ---------- */
+function hasColormaps(){
+  return !!(colormaps.front || colormaps.side || colormaps.leftSide || colormaps.back);
+}
+function extractAccessoryMask(a,v){
+  const cm=colormaps[v];
+  if(!cm || !a.color) return;
+  const tol=(a.colorTolerance!==undefined && a.colorTolerance!==null)?a.colorTolerance:40;
+  const m=P3D.extractMaskFromColormap(cm.ctx,cm.w,cm.h,a.color,tol);
+  a.mask=a.mask||{};
+  if(m) a.mask[v]=m; else delete a.mask[v];
+}
+function extractAllAccessoryMasks(){
+  if(!hasColormaps())return;
+  ["front","side","leftSide","back"].forEach(v=>{
+    accessories.forEach(a=>extractAccessoryMask(a,v));
+  });
+}
+// exclude_from_body_silhouette===trueのaccessoryのマスクをOR合成してexclude_masks
+// を作り直す(P3D.buildExcludeMaskDataUrl、js/common.js参照)。マスクdataURLを
+// 一旦Imageとして読み込む必要があるため非同期。
+async function rebuildExcludeMasksFromAccessories(){
+  const targets=accessories.filter(a=>a.exclude_from_body_silhouette);
+  for(const a of targets){
+    for(const v of ["front","side","leftSide","back"]){
+      const m=a.mask&&a.mask[v];
+      if(m&&m.maskDataUrl&&!m._img){
+        m._img=await new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=m.maskDataUrl;});
+      }
+    }
+  }
+  ["front","side","back"].forEach(v=>{
+    const im=imgs[v];
+    if(!im)return;
+    const dataUrl=P3D.buildExcludeMaskDataUrl(accessories,v,im.w,im.h);
+    if(dataUrl){
+      const ec=ensureExcludeCanvas(v);
+      const mi=new Image();
+      mi.onload=()=>{
+        ec.ctx.clearRect(0,0,ec.canvas.width,ec.canvas.height);
+        ec.ctx.drawImage(mi,0,0);
+        excludeMaskVer++;
+        if(v==="front")resyncAnalysisToProfile();
+        if(v===curView)draw();
+      };
+      mi.src=dataUrl;
+    }else if(excludeMask[v]){
+      excludeMask[v]=null;
+      excludeMaskVer++;
+      if(v==="front")resyncAnalysisToProfile();
+      if(v===curView)draw();
+    }
+  });
+}
+// 色許容誤差変更(個別/一括どちらも)のたびに呼ぶ、再抽出→除外マスク再合成→
+// 自動マスクタブ再描画の一連の流れ。
+async function reextractAndRefresh(){
+  extractAllAccessoryMasks();
+  await rebuildExcludeMasksFromAccessories();
+  renderAutomaskPreviews();
 }
 const ptrs=new Map(); let ptrMode=null,lastX=0,lastY=0,pinchD=0;
 let pointsLocked=false; // trueの間は画像上のタップ/ドラッグが常にパンになり、
@@ -1206,10 +1313,21 @@ function buildJson(){
       leftSide:imgs.leftSide?{w:imgs.leftSide.w,h:imgs.leftSide.h,dataUrl:imgObjToDataUrl(imgs.leftSide)}:null},
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
-      const out={name:a.name,mode:a.mode,bones:a.bones};
+      const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
+        colorTolerance:a.colorTolerance,
+        exclude_from_body_silhouette:!!a.exclude_from_body_silhouette};
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
+    // ★2026-07-09: 色分けマップがあれば書き出しにも含める(再読み込み時に
+    // 色許容誤差の再調整を続けられるようにするため。無ければキー自体を省く)。
+    colormaps:(function(){
+      const out={};
+      ["front","side","leftSide","back"].forEach(v=>{
+        if(colormaps[v])out[v]=colormaps[v].canvas.toDataURL("image/png");
+      });
+      return Object.keys(out).length?out:undefined;
+    })(),
     exclude_masks:(function(){
       const out={};
       ["front","side","back"].forEach(v=>{
@@ -1250,8 +1368,15 @@ function applyLoadedJson(d){
   // accessoryはマスク(mask、色分けマップ由来・自動抽出のみ)形式のみを持つ
   // (多角形(regions)形式は2026-07-09に廃止。既存の多角形形式の保存済みJSONとの
   // 互換性は維持しない方針のため、旧形式の救済処理は行わない)。
+  // ★2026-07-09: colorTolerance(パーツごとの色許容誤差)・exclude_from_body_silhouette
+  // (体シルエット除外の対象かどうか)・color(抽出元の色、tolerance変更時の
+  // 再抽出に必要)を追加。d.accessories[].maskは、colormapsが無い(旧形式の
+  // JSON/サンプル)場合の初期値としてそのまま使う(下で再抽出できればそちらが勝つ)。
   accessories=(d.accessories||[]).map(a=>{
-    const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[]};
+    const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
+      color:a.color||null,
+      colorTolerance:(a.colorTolerance!==undefined&&a.colorTolerance!==null)?a.colorTolerance:40,
+      exclude_from_body_silhouette:!!a.exclude_from_body_silhouette};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -1271,22 +1396,31 @@ function applyLoadedJson(d){
   renderParamsPanel();
   excludeMask={front:null,side:null,back:null};
   excludeMaskVer++;
-  const masks=d.exclude_masks||{};
   resyncAnalysisToProfile(); // white_thr変更分をひとまず反映(除外マスクがあれば下でさらに反映)
-  Object.keys(masks).forEach(v=>{
-    if(!imgs[v]||!masks[v])return;
-    const im=new Image();
-    im.onload=()=>{
-      const ec=ensureExcludeCanvas(v);
-      if(ec){
-        ec.ctx.clearRect(0,0,ec.canvas.width,ec.canvas.height);ec.ctx.drawImage(im,0,0);
-        excludeMaskVer++;
-        if(v==="front")resyncAnalysisToProfile(); // front除外マスク反映後にanalysisを揃え直す
-        draw();
-      }
-    };
-    im.src=masks[v];
-  });
+  // ★2026-07-09: colormapsがあれば(=ゴーストスキャナーからの新形式JSON)、
+  // ここで一度マスクを抽出し、そこから導かれるexclude_masksも作り直す
+  // (自動マスクタブを開かなくても生成できるようにするため)。無ければ
+  // (旧形式のJSON/サンプル)、accessories[].maskとd.exclude_masksをそのまま使う。
+  if(hasColormaps()){
+    extractAllAccessoryMasks();
+    rebuildExcludeMasksFromAccessories();
+  }else{
+    const masks=d.exclude_masks||{};
+    Object.keys(masks).forEach(v=>{
+      if(!imgs[v]||!masks[v])return;
+      const im=new Image();
+      im.onload=()=>{
+        const ec=ensureExcludeCanvas(v);
+        if(ec){
+          ec.ctx.clearRect(0,0,ec.canvas.width,ec.canvas.height);ec.ctx.drawImage(im,0,0);
+          excludeMaskVer++;
+          if(v==="front")resyncAnalysisToProfile(); // front除外マスク反映後にanalysisを揃え直す
+          draw();
+        }
+      };
+      im.src=masks[v];
+    });
+  }
   sel=null;
   syncChips();syncViewBtns();draw();
   setMsg("landmarks_ai.json を読み込みました(正面/側面/背面画像は別途読み込み済みのものを使います)。");
@@ -1361,9 +1495,17 @@ function buildAutomaskItemHtml(a, idx){
     }).join("");
     return '<div class="subhead">'+grp.label+'</div><div class="bonesRow">'+rowHtml+'</div>';
   }).join("");
+  // ★2026-07-09: 色分けマップ(colormaps)を引き継いでいる場合だけ、パーツ単位の
+  // 色許容誤差(colorTolerance)スライダーを出す。無い(旧形式JSON/サンプル)場合は
+  // 既に抽出済みのマスクをそのまま使うしかない(再抽出できないため)。
+  const tolHtml = hasColormaps() ? (
+    '<label>色許容誤差(パーツ個別。値が大きいほど幅広い色を同じパーツとみなす): <b class="automaskTolVal" data-i="'+idx+'">'+a.colorTolerance+'</b>'+
+    '<input type="range" class="automaskTolSlider" data-i="'+idx+'" min="5" max="120" value="'+a.colorTolerance+'"></label>'
+  ) : '';
   return '<div class="acform" style="margin-bottom:8px">'+
     '<span class="tag">自動マスク / 面: '+views.join(",")+'</span>'+
     '<label>名前<input type="text" class="automaskNameEdit" data-i="'+idx+'" value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)"></label>'+
+    tolHtml+
     '<label>取り付け方式</label>'+
     '<div class="row">'+
     '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="rigid"?" mint":"")+'" data-i="'+idx+'" data-mode="rigid">rigid(1ボーン固定)</button>'+
@@ -1382,6 +1524,19 @@ function wireAutomaskItemEvents(){
       if(oldKey!==newKey && seamAngles[oldKey]!==undefined){
         seamAngles[newKey]=seamAngles[oldKey];delete seamAngles[oldKey];
       }
+    };
+  });
+  // 個別の色許容誤差スライダー。ドラッグ中にlistWrap全体を再描画すると
+  // スライダー自体が作り直されてドラッグが途切れるため、プレビュー
+  // (colWrap)だけを再描画するreextractAndRefresh()を呼ぶ(リスト側のHTMLは
+  // 数値表示(automaskTolVal)だけその場で書き換える)。
+  [].forEach.call(document.querySelectorAll(".automaskTolSlider"),sl=>{
+    sl.oninput=()=>{
+      const i=+sl.dataset.i, a=accessories[i], n=parseInt(sl.value,10);
+      a.colorTolerance=n;
+      const label=document.querySelector('.automaskTolVal[data-i="'+i+'"]');
+      if(label)label.textContent=n;
+      reextractAndRefresh();
     };
   });
   [].forEach.call(document.querySelectorAll(".automaskModeBtn"),btn=>{
@@ -1405,17 +1560,28 @@ function wireAutomaskItemEvents(){
     };
   });
 }
-function renderAutomaskTab(){
-  const colWrap=$("automaskColormaps"), listWrap=$("automaskList"), hint=$("automaskEmptyHint");
+// マスク画像(白RGB+アルファ=前景)を、そのaccessoryの実際の色(a.color)で
+// 塗り直したcanvasを作る。★2026-07-09(UIレビュー): 以前は白いマスクを
+// 単純に薄く重ねるだけで、どのパーツがどこにあるのか色で見分けられず
+// 分かりづらかった(「マスク画像の色を載せるべき」との指摘)。
+function tintMaskCanvas(maskImg,w,h,color){
+  const c=document.createElement("canvas");c.width=w;c.height=h;
+  const cx=c.getContext("2d");
+  cx.drawImage(maskImg,0,0,w,h);
+  cx.globalCompositeOperation="source-in";
+  cx.fillStyle=color||"#ff2828";
+  cx.fillRect(0,0,w,h);
+  return c;
+}
+// 自動マスクタブ上部の色分けマップ+マスク重ね描きプレビュー(automaskColormaps)
+// だけを再描画する(色許容誤差スライダーのドラッグ中に呼ばれるため、
+// リスト側(automaskList、スライダー自体を含む)は再構築しない)。
+function renderAutomaskPreviews(){
+  const colWrap=$("automaskColormaps");
+  if(!colWrap)return;
   const maskAccs=[];
   accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
   colWrap.innerHTML="";
-  listWrap.innerHTML="";
-  if(!maskAccs.length){
-    hint.textContent="自動マスク(色分けマップ由来)のパーツはありません。ゴーストスキャナーの「色分けマップ生成→領域抽出」タブで抽出してから、このツールへ引き継いでください。";
-    return;
-  }
-  hint.textContent="";
   ["front","side","leftSide","back"].forEach(v=>{
     const im=imgs[v];
     if(!im)return;
@@ -1427,7 +1593,10 @@ function renderAutomaskTab(){
       const m=a.mask[v];
       if(!m||!m.maskDataUrl)return;
       const mi=new Image();
-      mi.onload=()=>{ cx.save(); cx.globalAlpha=0.55; cx.drawImage(mi,0,0,im.w,im.h); cx.restore(); };
+      mi.onload=()=>{
+        const tinted=tintMaskCanvas(mi,im.w,im.h,a.color);
+        cx.save(); cx.globalAlpha=0.6; cx.drawImage(tinted,0,0,im.w,im.h); cx.restore();
+      };
       mi.src=m.maskDataUrl;
     });
     const wrap=document.createElement("div");
@@ -1450,6 +1619,20 @@ function renderAutomaskTab(){
       lb.classList.add("on");
     };
   });
+}
+function renderAutomaskTab(){
+  const listWrap=$("automaskList"), hint=$("automaskEmptyHint"), bulkRow=$("automaskBulkRow");
+  const maskAccs=[];
+  accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
+  listWrap.innerHTML="";
+  if(bulkRow) bulkRow.classList.toggle("hidden", !hasColormaps() || !accessories.length);
+  if(!maskAccs.length){
+    $("automaskColormaps").innerHTML="";
+    hint.textContent="自動マスク(色分けマップ由来)のパーツはありません。ゴーストスキャナーで色分けマップとアクセサリー一覧を引き継いでください。";
+    return;
+  }
+  hint.textContent="";
+  renderAutomaskPreviews();
   listWrap.innerHTML=maskAccs.map(({a,i})=>buildAutomaskItemHtml(a,i)).join("");
   wireAutomaskItemEvents();
 }
@@ -1645,6 +1828,18 @@ buildLegend();
 renderParamsPanel();
 renderOutlinePanel();
 $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on"); };
+// 全パーツの色許容誤差を一括変更するスライダー。#automaskBulkRowは
+// automaskList/automaskColormapsの外側の静的markupなので、renderAutomaskTab()
+// (listWrap/colWrapの中身だけを作り直す)を呼んでもこのスライダー自体は
+// 壊れずドラッグを継続できる。
+$("automaskBulkTolSlider").oninput=()=>{
+  const n=parseInt($("automaskBulkTolSlider").value,10);
+  $("automaskBulkTolVal").textContent=n;
+  accessories.forEach(a=>{ a.colorTolerance=n; });
+  reextractAndRefresh();
+  [].forEach.call(document.querySelectorAll(".automaskTolSlider"),sl=>{ sl.value=n; });
+  [].forEach.call(document.querySelectorAll(".automaskTolVal"),lb=>{ lb.textContent=n; });
+};
 (function(){
   // ★初期画面(サンプルモード/JSON読み込み/前回の続きの選択)。
   // 「サンプルモード」は同梱の画像込みJSON(landmarks_ai_2_embedded.json)を

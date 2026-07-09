@@ -287,8 +287,15 @@
       <p class="hint" id="accConfirmedNote" style="display:none">一覧を確定済みです。名前・色・ボーン等を修正したい場合は「確定を解除してやり直す」を押してください(下の色分けマップ・抽出済みのマスクはリセットされます)。</p>
     </div>
     <div class="card">
-      <h2>6-2. 色分けマップ生成→領域抽出(任意)</h2>
-      <p class="hint">front/side/leftSide/backそれぞれ1枚ずつ、「体=黒・背景=白・各accessory=パレット色でベタ塗り」した色分けマップ画像を生成(または手動アップロード)し、そこから色ごとにマスク(ラスタ)を機械的に抽出します(6-1の確定後に押せます)。1件ずつ座標を当てさせる旧方式より高精度・低コストです。leftSideは左右非対称なアクセサリーが無ければ省略できます。</p>
+      <h2>6-2. 色分けマップ生成</h2>
+      <!-- ★2026-07-09: マスク抽出(色分けマップ→パーツごとのラスタマスク)は
+           ここでは行わず、ジェネレータ(landmark_tool.html)の「自動マスク」タブへ
+           移した。抽出パラメータ(色許容誤差)をパーツごとに試行錯誤するには
+           このツール内で完結させるより、色分けマップとアクセサリー一覧を渡した
+           先で調整→即プレビューできる方が扱いやすいため(ユーザー指摘)。ここでは
+           front/side/leftSide/backの色分けマップ画像を生成/アップロードして
+           渡すところまでを担当する。 -->
+      <p class="hint">front/side/leftSide/backそれぞれ1枚ずつ、「体=黒・背景=白・各accessory=パレット色でベタ塗り」した色分けマップ画像を生成(または手動アップロード)します(6-1の確定後に押せます)。マスクの抽出(色ごとの切り出し・許容誤差の調整)はジェネレータの「自動マスク」タブで行います。leftSideは左右非対称なアクセサリーが無ければ省略できます。</p>
       <!-- ★2026-07-09: 以前はfront/side/back共通の1つのプロンプトを使い回して
            いたが、面ごとに個別確認・個別コピーしたいとの要望を受け、面ごとに
            別々のプロンプトパネル(=個別コピーボタン付き)に分割した。 -->
@@ -312,10 +319,6 @@
       <canvas class="imgPreview" id="colormapSidePreview" width="512" height="512"></canvas>
       <canvas class="imgPreview" id="colormapLeftSidePreview" width="512" height="512"></canvas>
       <canvas class="imgPreview" id="colormapBackPreview" width="512" height="512"></canvas>
-      <button class="btn green" id="maskExtractBtn" disabled>領域を抽出</button>
-      <div id="maskList"></div>
-      <p class="hint">抽出したマスクの形状はここで確認できます(元画像に半透明で重ね描き)。</p>
-      <div id="maskPreviewList"></div>
     </div>
     <button class="btn green" id="paramsNextBtn">次へ(出力)</button>
   </div>
@@ -1241,25 +1244,27 @@ $("accChatSend").onclick=sendAccChat;
 $("accChatInput").addEventListener("keydown",function(e){ if(e.key==="Enter") sendAccChat(); });
 $("accConfirmListBtn").onclick=function(){
   if(!state.accessories.list || !state.accessories.list.length){ setMsg("先に一覧を検出してください。",true); return; }
+  // ★2026-07-09: 色許容誤差(colorTolerance)はパーツごとの値になり、実際の
+  // 抽出はジェネレータ側で行うようになったが、既定値だけはここで一覧確定時に
+  // 振っておく(ジェネレータ側で個別/一括に上書きできる)。
+  state.accessories.list.forEach(function(a){ if(a.colorTolerance===undefined) a.colorTolerance=40; });
   $("accChatInput").disabled=true; $("accChatSend").disabled=true; $("accConfirmListBtn").disabled=true;
   $("accUnconfirmBtn").style.display=""; $("accConfirmedNote").style.display="";
+  state.accessories.confirmed=true;
   refreshColormapPromptText();
   refreshColormapButtons();
-  setMsg("一覧を確定しました。次は色分けマップを生成(または手動アップロード)し、領域を抽出してください。");
+  setMsg("一覧を確定しました。次は色分けマップを生成(または手動アップロード)してください。マスクの抽出はジェネレータの「自動マスク」タブで行います。");
 };
 // 確定後に名前・色・ボーン等を直したくなった場合の再処理経路(再検出/チャットは
 // 確定すると無効化されるため、明示的に解除するボタンが無いと詰んでしまう)。
-// 色分けマップ・抽出済みマスクはaccessory一覧(特に色割当)に依存しているため、
-// 解除時にまとめてリセットする(古い一覧のまま抽出したマスクが残る不整合を防ぐ)。
+// 色分けマップはaccessory一覧(特に色割当)に依存しているため、解除時に
+// まとめてリセットする(古い一覧のままの色分けマップが残る不整合を防ぐ)。
 function resetColormapAndMaskState(){
   state.colormaps = { front:null, side:null, leftSide:null, back:null };
-  (state.accessories.list||[]).forEach(function(a){ delete a.mask; });
   ["Front","Side","LeftSide","Back"].forEach(function(v){
     var c=$("colormap"+v+"Preview");
     if(c) c.getContext("2d").clearRect(0,0,c.width,c.height);
   });
-  $("maskList").innerHTML="";
-  $("maskPreviewList").innerHTML="";
   $("colormapProgress").textContent="";
   state.accessories.confirmed=false;
   refreshColormapButtons();
@@ -1353,83 +1358,6 @@ function wireColormapUpload(view){
 }
 COLORMAP_VIEWS.forEach(wireColormapUpload);
 
-function renderMaskList(list){
-  var el=$("maskList"); el.innerHTML="";
-  (list||[]).forEach(function(a){
-    var d=document.createElement("div");
-    d.className="accItem";
-    d.style.borderColor=a.color||"var(--line)";
-    var views=COLORMAP_VIEWS.filter(function(v){ return a.mask && a.mask[v]; });
-    d.innerHTML="<b style='color:"+(a.color||"#fff")+"'>"+a.name+"</b>"+
-      "マスク取得済みの面="+(views.length?views.join(","):"(なし)");
-    el.appendChild(d);
-  });
-}
-// 抽出したマスクの形状を、元のfront/side/back画像に半透明で重ね描きして
-// 確認できるようにする(GHOST_SCANNER_PLAN.md「運用面の修正6点・④」。以前は
-// ジェネレータの「自動マスク」タブでしか確認できず、生成元であるスキャナー
-// 側で誤りに気づけなかった)。landmark_tool.htmlのrenderAutomaskTabと同じ
-// 重ね描きパターン(alpha 0.55)を踏襲する。
-async function renderMaskPreview(list){
-  var wrap=$("maskPreviewList"); wrap.innerHTML="";
-  var views=COLORMAP_VIEWS;
-  for(var i=0;i<views.length;i++){
-    var v=views[i];
-    var url=state[v] && state[v].dataUrl;
-    if(!url) continue;
-    var img=await P3D.scannerLoadImage(url);
-    var w=img.naturalWidth, h=img.naturalHeight;
-    var c=document.createElement("canvas"); c.width=w; c.height=h;
-    var cx=c.getContext("2d");
-    cx.drawImage(img,0,0,w,h);
-    for(var j=0;j<list.length;j++){
-      var acc=list[j];
-      var m=acc.mask && acc.mask[v];
-      if(!m || !m.maskDataUrl) continue;
-      var mi=await P3D.scannerLoadImage(m.maskDataUrl);
-      cx.save(); cx.globalAlpha=0.55; cx.drawImage(mi,0,0,w,h); cx.restore();
-    }
-    var itemWrap=document.createElement("div"); itemWrap.className="maskPreviewItem";
-    var label=document.createElement("div"); label.className="maskPreviewLabel"; label.textContent=VIEW_LABEL_JP[v];
-    itemWrap.appendChild(label); itemWrap.appendChild(c);
-    wrap.appendChild(itemWrap);
-  }
-}
-// 各view(front/side/back)の色分けマップ画像に対して、accessory一覧の
-// パレット色ごとにP3D.extractMaskFromColormapを呼び、acc.mask[view]に
-// {maskDataUrl,bbox}を格納する(GHOST_SCANNER_PLAN.md「新規実装が必要な
-// 処理(色抽出コア)」節)。多角形化はせずラスタマスクのまま保持する。
-async function extractMasks(){
-  var list = state.accessories.list;
-  if(!list || !list.length){ setMsg("先にアクセサリー一覧を確定してください。",true); return; }
-  $("maskExtractBtn").disabled=true;
-  var views=COLORMAP_VIEWS;
-  for(var i=0;i<views.length;i++){
-    var v=views[i];
-    var dataUrl = state.colormaps[v];
-    if(!dataUrl) continue;
-    var img = await P3D.scannerLoadImage(dataUrl);
-    var w=img.naturalWidth, h=img.naturalHeight;
-    var c=document.createElement("canvas"); c.width=w; c.height=h;
-    var ctx=c.getContext("2d"); ctx.drawImage(img,0,0,w,h);
-    list.forEach(function(acc){
-      var m = P3D.extractMaskFromColormap(ctx, w, h, acc.color, 40);
-      if(m){
-        acc.mask = acc.mask || {};
-        acc.mask[v] = m;
-      }
-    });
-  }
-  // 色分けマップ方式では、以前の多角形(regions)は使わずマスクのみで表現する
-  // (計画書「1accessoryにつきどちらか一方の形式」の通り、抽出できた面については
-  // regionsを持たせず一貫してmaskを優先させる)。
-  renderMaskList(list);
-  await renderMaskPreview(list);
-  state.accessories.confirmed=true;
-  $("maskExtractBtn").disabled=false;
-  setMsg("領域抽出が完了しました。");
-}
-$("maskExtractBtn").onclick=extractMasks;
 refreshColormapPromptText();
 refreshColormapButtons();
 
@@ -1464,62 +1392,25 @@ async function buildLandmarksAiJson(){
   // leftSideは左右非対称なアクセサリー(mask.leftSide)がある場合だけ意味を
   // 持つ任意の面なので、実際に生成/アップロードされている時だけ含める。
   if(state.leftSide && state.leftSide.dataUrl) out.image.leftSide={dataUrl:state.leftSide.dataUrl};
+  // ★2026-07-09: マスク抽出(色分けマップ→パーツごとのラスタマスク)と、そこから
+  // 導かれるexclude_masksの合成は、ジェネレータ(landmark_tool.html)側の
+  // 「自動マスク」タブへ移した(色許容誤差をパーツごとに試行錯誤しながら
+  // その場でプレビューできるようにするため)。ここではaccessory一覧
+  // (名前/取り付け方式/ボーン/色/色許容誤差の既定値/除外フラグ)と、抽出元となる
+  // 色分けマップ画像そのものを渡すところまでを担当する。
   if(state.accessories.list && state.accessories.list.length){
-    // exclude_from_body_silhouetteは内部処理用の一時フィールドなので、
-    // landmarks_ai.json側のaccessoriesからは除く(GHOST_SCANNER_PLAN.md指示通り)。
-    // accessoryごとにregions(多角形、既存)またはmask(色分けマップ由来、新規)の
-    // どちらかを持たせる(GHOST_SCANNER_PLAN.md「スキャナー→ジェネレータの
-    // 引き継ぎJSON契約」節。1accessoryにつきどちらか一方、両方持つ場合は
-    // regionsを優先する既存のjs/accessories.jsの分岐に合わせる)。
     out.accessories=state.accessories.list.map(function(a){
-      var out1={name:a.name, mode:a.mode, bones:a.bones};
-      var hasRegions = a.regions && Object.keys(a.regions).length>0;
-      if(hasRegions) out1.regions=a.regions;
-      if(a.mask && Object.keys(a.mask).length>0){
-        // _img(HTMLImageElement、除外マスク合成用に後段で仕込む一時フィールド)
-        // はJSONに含めない(DOM要素はシリアライズ対象外のため明示的に除く)。
-        out1.mask={};
-        Object.keys(a.mask).forEach(function(v){
-          out1.mask[v] = {maskDataUrl:a.mask[v].maskDataUrl, bbox:a.mask[v].bbox};
-        });
-      }
-      if(!hasRegions && !out1.mask) out1.regions={};
-      return out1;
+      return {
+        name:a.name, mode:a.mode, bones:a.bones, color:a.color,
+        colorTolerance:(a.colorTolerance!==undefined?a.colorTolerance:40),
+        exclude_from_body_silhouette:!!a.exclude_from_body_silhouette,
+      };
     });
-    // 除外マスクはexclude_from_body_silhouette===trueのものだけを機械的に合成する。
-    // regions座標はcalibrateRegionsInPlace()で各viewの実測naturalWidth/Heightを
-    // 基準に補正済みのため、ここでも1024固定ではなく実測サイズを使う。
-    // マスク方式のaccessory分は、scannerBuildExcludeMaskDataUrlがa.mask[view]._img
-    // (HTMLImageElement)を見て合成するため、ここで先に読み込んで仕込んでおく。
-    var frontImg=state.landmarks._img;
-    var viewImgs={
-      front: frontImg,
-      side: await P3D.scannerLoadImage(state.side.dataUrl),
-      back: await P3D.scannerLoadImage(state.back.dataUrl)
-    };
-    for(var ai=0; ai<state.accessories.list.length; ai++){
-      var accM = state.accessories.list[ai];
-      if(!accM.mask) continue;
-      // leftSideも含めた4面分。exclude_masks(体シルエット除外)自体は
-      // front/side/backの3面のみが対象(下記ループ)のためviewImgsには
-      // leftSideを追加しないが、mask._imgのプリロード自体は4面共通で行う。
-      for(var vi=0; vi<COLORMAP_VIEWS.length; vi++){
-        var vv=COLORMAP_VIEWS[vi];
-        var mm = accM.mask[vv];
-        if(mm && mm.maskDataUrl && !mm._img){
-          mm._img = await P3D.scannerLoadImage(mm.maskDataUrl);
-        }
-      }
-    }
-    var exclude_masks={};
-    ["front","side","back"].forEach(function(v){
-      var img=viewImgs[v];
-      var w = img&&img.naturalWidth, h = img&&img.naturalHeight;
-      if(!w||!h) return;
-      var m=P3D.scannerBuildExcludeMaskDataUrl(state.accessories.list, v, w, h);
-      if(m) exclude_masks[v]=m;
+    var colormaps={};
+    COLORMAP_VIEWS.forEach(function(v){
+      if(state.colormaps && state.colormaps[v]) colormaps[v]=state.colormaps[v];
     });
-    if(Object.keys(exclude_masks).length) out.exclude_masks=exclude_masks;
+    if(Object.keys(colormaps).length) out.colormaps=colormaps;
   }
   return out;
 }

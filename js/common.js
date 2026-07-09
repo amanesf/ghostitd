@@ -376,6 +376,32 @@ function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAre
 }
 P3D.extractMaskFromColormap = extractMaskFromColormap;
 
+// ---- 除外マスク(exclude_masks)の合成: exclude_from_body_silhouette===trueの
+// accessoryのマスク(色分けマップ由来)をOR合成し、体シルエット測定からの
+// 除外範囲(PNG dataURL)を作る。★2026-07-09: 元はghost_scanner.html専用の
+// js/scanner_render.jsにあったが(手動除外マスク塗りUI廃止に伴い)、
+// landmark_tool.htmlの自動マスクタブでtolerance変更→再抽出のたびに
+// exclude_masksも作り直す必要が生じたため、両ツールが使う共通ユーティリティ
+// としてこちらへ移した。
+// accessories: exclude_from_body_silhouetteフィールドを含むaccessories配列、
+// view: "front"|"side"|"back"、w,h: そのview画像の原寸サイズ
+// 戻り値: PNG dataURL、対象accessoryが1つもなければnull
+function buildExcludeMaskDataUrl(accessories, view, w, h){
+  var maskTargets = (accessories||[]).filter(function(a){
+    var m = a.mask && a.mask[view];
+    return a.exclude_from_body_silhouette===true && m && m.maskDataUrl && m._img;
+  });
+  if(!maskTargets.length) return null;
+  var c = document.createElement("canvas"); c.width=w; c.height=h;
+  var ctx = c.getContext("2d");
+  maskTargets.forEach(function(a){
+    ctx.globalCompositeOperation="source-over";
+    ctx.drawImage(a.mask[view]._img, 0, 0, w, h);
+  });
+  return c.toDataURL("image/png");
+}
+P3D.buildExcludeMaskDataUrl = buildExcludeMaskDataUrl;
+
 // マスクdataURL(白RGB+アルファ=前景)からUint8Array(w*h, 1=前景)を復元する
 // (3D彫刻側/範囲計算側で真偽画素配列として扱いたい箇所向けのヘルパー)。
 function maskDataUrlToAlpha(ctx, w, h, maskDataUrl){
