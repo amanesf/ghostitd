@@ -51,16 +51,14 @@ async function testEditorTabsAndOverlays(server, browser) {
   const editorVisible = await page.$eval("#editor", (el) => !el.classList.contains("hidden"));
   assert.ok(editorVisible, "sample mode should reach the editor screen");
 
-  // 5タブ再編(GHOST_SCANNER_PLAN.md「色分けマップ」方式): 旧「領域」(ex)は
-  // トップレベルタブから消え、「手動マスク」(manualmask)配下の唯一のパネルに
-  // なった。「パーツ＋」(ac、多角形手動マスク)は2026-07-09に機能ごと廃止した。
-  // 編集にはロック解除チェックボックスも要る。
-  for (const tab of ["automask", "manualmask", "params", "gen", "lm"]) {
+  // ★2026-07-09: 「手動マスク」タブ(旧「領域」ex)は廃止した。exclude_masksは
+  // 色分けマップ由来のaccessoryマスクから自動合成されるため、手塗り編集UIは
+  // 不要という判断(ユーザー合意済み)。「パーツ＋」(ac、多角形手動マスク)も
+  // 同日に機能ごと廃止済み。
+  for (const tab of ["automask", "params", "gen", "lm"]) {
     await page.click(`.tabbtn[data-tab="${tab}"]`);
     await page.waitForTimeout(150);
   }
-  await page.click('.tabbtn[data-tab="manualmask"]');
-  await page.check("#manualMaskUnlock");
 
   // ボーン表示/範囲オーバーレイ(drawBoneOverlaysIfEnabled)
   await page.click('.tabbtn[data-tab="lm"]');

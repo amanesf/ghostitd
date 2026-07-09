@@ -124,7 +124,6 @@
   .tabpanel{display:none}
   .tabpanel.on{display:block}
   .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
-  #manualMaskEditArea.locked{opacity:.45;pointer-events:none;filter:grayscale(.4)}
   /* ★2026-07-09(UIレビュー): 140pxでは色分けマップとの重なりズレが目視で
      ほぼ確認できなかったため220pxへ拡大し、タップで全画面プレビューできる
      ようにした(#automaskLightbox)。 */
@@ -184,7 +183,6 @@
   <div id="editor" class="hidden">
     <div class="tabbar" id="tabbar">
       <button class="tabbtn on" data-tab="lm">マーク</button>
-      <button class="tabbtn" data-tab="manualmask">手動マスク</button>
       <button class="tabbtn" data-tab="automask">自動マスク</button>
       <button class="tabbtn" data-tab="params">設定値</button>
       <button class="tabbtn" data-tab="gen">生成</button>
@@ -249,51 +247,13 @@
     </div>
     <div id="automaskLightbox"></div>
 
-    <!-- 手動マスク(除外範囲=excludeMaskによる体シルエット除外機能のみ)。
-         多角形(手動パーツ)によるアクセサリー編集機能は維持コストが高いため
-         2026-07-09に廃止し、色分けマップ由来の自動マスク方式に一本化した
-         (GHOST_SCANNER_PLAN.md「仕様変更」節)。明示的なチェックボックスを
-         オンにしないと編集できないようにしている(誤操作防止、自動マスクと
-         役割が違うことを意識させるため)。 -->
-    <div class="tabpanel acpanel" data-tabpanel="manualmask" id="manualMaskPanel">
-      <div class="acitem" style="margin-bottom:10px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-          <input type="checkbox" id="manualMaskUnlock">
-          編集を有効にする(誤操作防止のロック。オフの間は下の「領域」を編集できません)
-        </label>
-      </div>
-      <div id="manualMaskEditArea">
-    <div class="tabpanel acpanel" data-tabpanel="ex">
-      <h2>除外範囲（毛先など、シルエット測定から除外したい部分）
-        <button type="button" class="qbtn" data-help="help-ex">?</button></h2>
-      <p class="helpText hidden" id="help-ex">
-        前髪が首にかぶる等、体のシルエットに紛れ込んで幅/奥行きの自動測定を
-        狂わせる部分を、正面/側面/背面それぞれで直接塗って除外できます。
-        「マジックツール」はタップした点から色の近い連続領域を自動選択、
-        「ブラシ」は丸で塗って除外/解除します。赤く表示されている部分が除外範囲です。</p>
-      <p style="font-size:11px;color:var(--mint);margin:0 0 10px">
-        ↑上の画像を直接タップ/なぞって除外・解除できます。</p>
-      <div class="acitem" style="margin-bottom:6px">
-        <span class="nm">ツール</span>
-        <button class="btn sm exmode mint" id="exModeWand" data-exmode="wand" style="flex:0 0 auto">マジック</button>
-        <button class="btn sm exmode" id="exModeBrush" data-exmode="brush" style="flex:0 0 auto">ブラシ</button>
-      </div>
-      <div class="acitem" style="margin-bottom:8px">
-        <span class="nm">操作</span>
-        <button class="btn sm exact mint" id="exActAdd" data-exact="add" style="flex:0 0 auto">除外する</button>
-        <button class="btn sm exact" id="exActRemove" data-exact="remove" style="flex:0 0 auto">解除する</button>
-      </div>
-      <div class="acitem" id="exSliderRow" style="margin-bottom:8px">
-        <span class="nm" id="exSliderLabel">許容誤差</span>
-        <input type="range" id="exSlider" min="5" max="100" value="30" style="flex:1">
-      </div>
-      <div class="row">
-        <button class="btn" id="exUndo">↩ 元に戻す</button>
-        <button class="btn" id="exClear">全解除</button>
-      </div>
-    </div>
-      </div><!-- #manualMaskEditArea -->
-    </div><!-- #manualMaskPanel -->
+    <!-- ★2026-07-09: 手動マスク(除外範囲塗り)タブは廃止した。exclude_masksは
+         ゴーストスキャナー側でaccessory(色分けマップ由来の自動マスク)から
+         機械的に合成される(scannerBuildExcludeMaskDataUrl参照)ため、
+         landmark_tool.html側での手塗り編集は不要という判断(ユーザー合意済み、
+         「複雑なことしすぎ、自動マスクで領域を取ればいい」)。exclude_masks
+         自体(JSON読み込み・シルエット測定への反映・書き出し)は引き続き
+         残す。 -->
 
     <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
          (seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの編集UI)は
@@ -722,14 +682,12 @@ function renderParamsPanel(){
   el.innerHTML=buildParamsPanelHtml();
   wireParamsPanelEvents(el);
 }
-// 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲を
-// 塗ったオフスクリーンcanvas)。キャラのシルエットに紛れ込む前髪等を
-// マジックツール/ブラシで直接塗って除外する(2026-07-03〜、パーツごとの
-// 幅/奥行き上書きパネルの後継)。
+// 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲の
+// オフスクリーンcanvas)。★2026-07-09: 手塗り編集UIは廃止し、ゴーストスキャナー
+// 側で色分けマップ由来のaccessoryマスクから自動合成されたexclude_masks
+// (JSON)を読み込んで使うだけの読み取り専用データになった。
 let excludeMask={front:null,side:null,back:null};
 let excludeMaskVer=0; // 除外マスクが変わるたびに増やし、プレビューキャッシュの無効化に使う
-let exMode="wand", exAction="add";
-let brushCursor=null; // ブラシで塗っている間、現在位置にサイズの円を表示するための画像座標
 let analysis=null, points=null, sel=null, dragPoint=null;
 let view={z:1,ox:0,oy:0};
 
@@ -1051,15 +1009,6 @@ function drawPreviewLayer(x,sc,el,w,h){
   x.fillText("プレビュー中: "+(previewActiveGroup||"輪郭線除去")+"("+VIEWJP[pv]+")",8,16);
   x.restore();
 }
-// 除外マスクの赤い塗りは「領域」タブでの作業対象なので、そのタブでのみ見せる
-// (他タブで常に赤く覆われていると、そのタブ本来の要素の邪魔になるため)。
-function drawExcludeMaskOverlay(x,sc,w,h){
-  const ec=excludeMask[curView];
-  if(!ec||curTab!=="ex")return;
-  x.save();x.globalAlpha=0.45;
-  x.drawImage(ec.canvas,0,0,ec.canvas.width,ec.canvas.height, view.ox,view.oy, w*sc, h*sc);
-  x.restore();
-}
 // マークタブの点だけをgetInteractivePoints側で絞っている。
 // 領域(除外)タブでは何も重ねない。
 function drawLandmarkPoints(x,sc){
@@ -1079,15 +1028,6 @@ function drawBoneOverlaysIfEnabled(x,sc){
   if(boneOverlayOn)drawBoneOverlay(x,sc,sharedBp);
   if(boneRegionOn)drawBoneRegionOverlay(x,sc,sharedBp);
 }
-function drawBrushCursorIfActive(x,sc){
-  if(!brushCursor||curTab!=="ex"||exMode!=="brush")return;
-  const bx=brushCursor[0]*sc+view.ox, by=brushCursor[1]*sc+view.oy;
-  const br=parseInt($("exSlider").value,10)*sc;
-  x.save();x.beginPath();x.arc(bx,by,br,0,Math.PI*2);
-  x.lineWidth=3;x.strokeStyle="rgba(0,0,0,.65)";x.stroke();
-  x.lineWidth=1.5;x.strokeStyle="#ffe14d";x.stroke();
-  x.restore();
-}
 function draw(){
   const previewOn=previewModeActive();
   const CI=previewOn?imgs[previewTargetView()]:curImg();
@@ -1098,10 +1038,8 @@ function draw(){
   const sc=base*view.z;
   if(previewOn) drawPreviewLayer(x,sc,el,w,h);
   else x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
-  drawExcludeMaskOverlay(x,sc,w,h);
   if(!previewOn) drawLandmarkPoints(x,sc);
   drawBoneOverlaysIfEnabled(x,sc);
-  drawBrushCursorIfActive(x,sc);
 }
 
 /* ---------- ファイル読み込み ---------- */
@@ -1182,92 +1120,16 @@ function canvasPt(e){const rc=cvs.getBoundingClientRect();
 function toImg(e){const c=canvasPt(e),base=(wrap.clientWidth||360)/curImg().w,sc=base*view.z;
   return[(c[0]-view.ox)/sc,(c[1]-view.oy)/sc];}
 
-/* ---------- 除外マスク(マジックツール/ブラシで塗る、シルエット測定から
-   除外する範囲)。正面/側面/背面ごとに、その画像と同じ解像度のオフスクリーン
-   canvasを持つ。除外部分=不透明(赤、表示用)、非除外=透明。 ---------- */
+/* ---------- 除外マスク(exclude_masks)用オフスクリーンcanvas。★2026-07-09:
+   手塗り編集(マジックツール/ブラシ)UIは廃止し、JSON読み込み時に
+   d.exclude_masksの画像をそのままcanvasへ描き込むためだけに使う
+   (applyLoadedJson参照)。除外部分=不透明(赤)、非除外=透明。 ---------- */
 function ensureExcludeCanvas(v){
   if(excludeMask[v])return excludeMask[v];
   const img=imgs[v]; if(!img)return null;
   const c=document.createElement("canvas");c.width=img.w;c.height=img.h;
   excludeMask[v]={canvas:c,ctx:c.getContext("2d")};
   return excludeMask[v];
-}
-function paintBrush(v,px,py,radius,add){
-  const ec=ensureExcludeCanvas(v); if(!ec)return;
-  ec.ctx.save();
-  ec.ctx.globalCompositeOperation=add?"source-over":"destination-out";
-  ec.ctx.fillStyle="rgba(255,40,40,1)";
-  ec.ctx.beginPath();ec.ctx.arc(px,py,radius,0,Math.PI*2);ec.ctx.fill();
-  ec.ctx.restore();
-  excludeMaskVer++;
-}
-function floodFillSelect(v,x0,y0,tolerance){
-  // タップした点から色の近い(許容誤差以内)連続領域を選択する(マジック
-  // ツール)。シルエット(ink)の外には広がらない。
-  const img=imgs[v]; if(!img)return null;
-  const w=img.w,h=img.h;
-  if(x0<0||y0<0||x0>=w||y0>=h)return null;
-  if(!img._rgba){
-    const c=document.createElement("canvas");c.width=w;c.height=h;
-    const ctx=c.getContext("2d");ctx.drawImage(img.el,0,0,w,h);
-    img._rgba=ctx.getImageData(0,0,w,h).data;
-  }
-  if(!img._ink)img._ink=buildMask(img.el,w,h);
-  const rgba=img._rgba, ink=img._ink;
-  const idx0=y0*w+x0;
-  if(!ink[idx0])return null; // シルエットの外をタップした
-  const r0=rgba[idx0*4],g0=rgba[idx0*4+1],b0=rgba[idx0*4+2];
-  const tol2=tolerance*tolerance*3;
-  const visited=new Uint8Array(w*h);
-  const stack=[idx0];visited[idx0]=1;
-  const selected=[];
-  while(stack.length){
-    const idx=stack.pop();selected.push(idx);
-    const x=idx%w, y=(idx/w)|0;
-    const nbrs=(x>0?[[idx-1]]:[]).concat(x<w-1?[[idx+1]]:[],y>0?[[idx-w]]:[],y<h-1?[[idx+w]]:[]);
-    for(const[nidx] of nbrs){
-      if(visited[nidx]||!ink[nidx])continue;
-      const o=nidx*4, dr=rgba[o]-r0, dg=rgba[o+1]-g0, db=rgba[o+2]-b0;
-      if(dr*dr+dg*dg+db*db<=tol2){visited[nidx]=1;stack.push(nidx);}
-    }
-  }
-  return{w,h,indices:selected};
-}
-function applyExcludeSelection(v,sel,add){
-  if(!sel)return;
-  const ec=ensureExcludeCanvas(v); if(!ec)return;
-  const imgData=ec.ctx.getImageData(0,0,sel.w,sel.h), data=imgData.data;
-  for(const idx of sel.indices){
-    const o=idx*4;
-    if(add){data[o]=255;data[o+1]=40;data[o+2]=40;data[o+3]=255;}
-    else{data[o+3]=0;}
-  }
-  ec.ctx.putImageData(imgData,0,0);
-  excludeMaskVer++;
-}
-// 除外マスクの元に戻す(直近5操作、面をまたいで通しで管理)。ブラシは
-// ひとストローク単位(pointerdown時に1回だけ)、マジックツール/全解除は
-// 1タップ/1クリックごとにスナップショットを取る。
-let exUndo=[];
-const EX_UNDO_MAX=5;
-function exSnapshot(v){
-  const existed=!!excludeMask[v];
-  const imgData=existed?excludeMask[v].ctx.getImageData(0,0,excludeMask[v].canvas.width,excludeMask[v].canvas.height):null;
-  exUndo.push({view:v,existed,imgData});
-  if(exUndo.length>EX_UNDO_MAX)exUndo.shift();
-}
-function exUndoLast(){
-  const last=exUndo.pop();
-  if(!last){setMsg("これ以上元に戻せません。");return;}
-  if(!last.existed){
-    excludeMask[last.view]=null;
-  }else{
-    const ec=ensureExcludeCanvas(last.view);
-    if(ec)ec.ctx.putImageData(last.imgData,0,0);
-  }
-  excludeMaskVer++;
-  if(last.view===curView)draw();
-  setMsg(VIEWJP[last.view]+"の除外操作を1つ元に戻しました(残り"+exUndo.length+"回分)。");
 }
 const ptrs=new Map(); let ptrMode=null,lastX=0,lastY=0,pinchD=0;
 let pointsLocked=false; // trueの間は画像上のタップ/ドラッグが常にパンになり、
@@ -1280,25 +1142,8 @@ cvs.addEventListener("pointerdown",e=>{
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   try{cvs.setPointerCapture(e.pointerId);}catch(_){}
   if(ptrs.size===1){
-    if(curTab==="ex"&&!pointsLocked&&!isManualMaskLocked()){
-      const p=toImg(e), px=Math.round(p[0]), py=Math.round(p[1]);
-      if(exMode==="brush"){
-        ptrMode="paint";
-        brushCursor=[px,py];
-        exSnapshot(curView); // ひとストローク単位で1回だけ記録
-        paintBrush(curView,px,py,parseInt($("exSlider").value,10),exAction==="add");
-        draw();
-      }else{
-        ptrMode=null;
-        const s=floodFillSelect(curView,px,py,parseInt($("exSlider").value,10));
-        if(s){exSnapshot(curView);applyExcludeSelection(curView,s,exAction==="add");}
-        else setMsg("シルエットの外をタップしました。キャラクターの上をタップしてください。");
-        draw();
-      }
-      return;
-    }
     let near=null,nd=1e9;
-    if(!pointsLocked&&!isManualMaskLocked()){
+    if(!pointsLocked){
       const p=toImg(e);
       const pts=getInteractivePoints(curView);
       pts.forEach(pp=>{const dd=Math.hypot(pp.pos[0]-p[0],pp.pos[1]-p[1]);if(dd<nd){nd=dd;near=pp;}});
@@ -1319,11 +1164,6 @@ cvs.addEventListener("pointermove",e=>{
       const imx=(mx-view.ox)/(base*z0),imy=(my-view.oy)/(base*z0);
       view.z=z1;view.ox=mx-imx*base*z1;view.oy=my-imy*base*z1;draw();}
     pinchD=d;
-  }else if(ptrMode==="paint"){
-    const p=toImg(e);
-    brushCursor=[Math.round(p[0]),Math.round(p[1])];
-    paintBrush(curView,brushCursor[0],brushCursor[1],parseInt($("exSlider").value,10),exAction==="add");
-    draw();
   }else if(ptrMode==="point"&&dragPoint){
     const p=toImg(e);dragPoint.set([Math.round(p[0]),Math.round(p[1])]);draw();
   }else if(ptrMode==="pan"){
@@ -1331,8 +1171,7 @@ cvs.addEventListener("pointermove",e=>{
   }
 });
 function endPtr(e){ptrs.delete(e.pointerId);
-  if(ptrs.size===0){ ptrMode=null;dragPoint=null;
-    if(brushCursor){brushCursor=null;draw();} }
+  if(ptrs.size===0){ ptrMode=null;dragPoint=null; }
   else if(ptrs.size===1){const v=[...ptrs.values()][0];ptrMode="pan";lastX=v.x;lastY=v.y;}
   else if(ptrs.size>=2){pinchD=_dist();}}
 cvs.addEventListener("pointerup",endPtr);
@@ -1432,7 +1271,6 @@ function applyLoadedJson(d){
   renderParamsPanel();
   excludeMask={front:null,side:null,back:null};
   excludeMaskVer++;
-  exUndo=[];
   const masks=d.exclude_masks||{};
   resyncAnalysisToProfile(); // white_thr変更分をひとまず反映(除外マスクがあれば下でさらに反映)
   Object.keys(masks).forEach(v=>{
@@ -1469,54 +1307,33 @@ function loadJsonFile(file){
   r.readAsText(file);
 }
 
-/* ---------- タブ(ランドマーク/アクセサリー/幅奥行き/境目角度を切り替え、縦スクロールを短縮) ---------- */
-// curTabは既存の値("lm"/"ex"/"params"/"gen")をそのまま使い続ける
+/* ---------- タブ(ランドマーク/自動マスク/設定値/生成を切り替え) ---------- */
+// curTabは既存の値("lm"/"params"/"gen"等)をそのまま使い続ける
 // (CLAUDE.mdの通り、単一の巨大IIFEスコープでの変数衝突リスクを避けるため
-// 全体grep済み。他に"curTab"という名前の別意味の変数は無い)。「領域」(ex)は、
-// 5タブ再編後は最上段のタブバーには出さず、「手動マスク」(data-tab="manualmask")
-// 配下の唯一のパネルとして選ぶ形にする(2026-07-09、多角形アクセサリー編集
-// 機能「パーツ＋」(ac)廃止に伴いサブタブ切り替え自体が不要になったが、
-// トップレベルのタブボタン一覧には無いcurTab値("ex")のときにどのタブボタン/
-// パネルを「on」にするかの特別扱いの仕組みはそのまま残している)。
-const MANUAL_MASK_SUBTABS=["ex"];
+// 全体grep済み。他に"curTab"という名前の別意味の変数は無い)。
+// ★2026-07-09: 「手動マスク」タブ(data-tab="manualmask"、サブタブ"ex")は
+// 廃止した。exclude_masksは色分けマップ由来のaccessoryマスクから自動合成
+// されるため、手塗り編集は不要という判断(ユーザー合意済み)。
 let curTab="lm";
 // 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
 // タブ(自動マスク/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
-const IMG_TABS=["lm","ex","params"];
+const IMG_TABS=["lm","params"];
 function syncTabs(){
-  const topLevelTab = MANUAL_MASK_SUBTABS.includes(curTab) ? "manualmask" : curTab;
-  [].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===topLevelTab);});
+  [].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===curTab);});
   [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{
-    if(p.dataset.tabpanel==="manualmask"){ p.classList.toggle("on", MANUAL_MASK_SUBTABS.includes(curTab)); return; }
     p.classList.toggle("on",p.dataset.tabpanel===curTab);
   });
-  if(MANUAL_MASK_SUBTABS.includes(curTab)){
-    [].forEach.call(document.querySelectorAll("#manualMaskSubTabbar > .tabbtn"),b=>{b.classList.toggle("on",b.dataset.subtab===curTab);});
-    $("manualMaskEditArea").classList.toggle("locked", !manualMaskUnlocked);
-  }
   if(curTab==="automask") renderAutomaskTab();
   $("imgArea").classList.toggle("hidden",!IMG_TABS.includes(curTab));
 }
 [].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{
   b.onclick=()=>{
-    // 「手動マスク」を初めて選んだ場合は直前のサブタブ(既定は"ex")に入る。
-    curTab = (b.dataset.tab==="manualmask") ? (MANUAL_MASK_SUBTABS.includes(curTab)?curTab:"ex") : b.dataset.tab;
+    curTab = b.dataset.tab;
     syncTabs();
     syncViewBtns();
     if(IMG_TABS.includes(curTab))draw();
   };
 });
-[].forEach.call(document.querySelectorAll("#manualMaskSubTabbar > .tabbtn"),b=>{
-  b.onclick=()=>{curTab=b.dataset.subtab;syncTabs();syncViewBtns();draw();};
-});
-// 「手動マスク」タブは誤操作防止のため、明示的にチェックボックスをオンにするまで
-// 編集(点ドラッグ・ブラシ塗り等)ができない(GHOST_SCANNER_PLAN.md「UI変更」節)。
-let manualMaskUnlocked=false;
-function isManualMaskLocked(){ return MANUAL_MASK_SUBTABS.includes(curTab) && !manualMaskUnlocked; }
-$("manualMaskUnlock").onchange=e=>{
-  manualMaskUnlocked=e.target.checked;
-  $("manualMaskEditArea").classList.toggle("locked", !manualMaskUnlocked);
-};
 
 /* ---------- アクセサリー(ヘッドホン/猫耳/カメラ小物/スカート等) ---------- */
 function syncViewBtns(){
@@ -1800,48 +1617,6 @@ $("lockToggle").onclick=function(){
   $("lockToggle").classList.toggle("mint",pointsLocked);
   setMsg(pointsLocked?"点をロックしました。画像上のドラッグは常に表示の移動/拡大縮小になります。":"ロックを解除しました。");
 };
-let exToleranceVal=30, exBrushSizeVal=20;
-function syncExSlider(){
-  const s=$("exSlider");
-  if(exMode==="brush"){
-    $("exSliderLabel").textContent="ブラシサイズ";
-    s.min=4;s.max=80;s.value=exBrushSizeVal;
-  }else{
-    $("exSliderLabel").textContent="許容誤差";
-    s.min=5;s.max=100;s.value=exToleranceVal;
-  }
-}
-$("exSlider").oninput=()=>{
-  const n=parseInt($("exSlider").value,10);
-  if(exMode==="brush")exBrushSizeVal=n;else exToleranceVal=n;
-};
-[].forEach.call(document.querySelectorAll("[data-exmode]"),btn=>{
-  btn.onclick=()=>{
-    exMode=btn.dataset.exmode;
-    [].forEach.call(document.querySelectorAll(".exmode"),b=>b.classList.toggle("mint",b===btn));
-    syncExSlider();
-    // マジック⇔ブラシでスライダーの意味(許容誤差/ブラシサイズ)が入れ替わる
-    // ことに気づきやすいよう、切り替え時に一瞬色を光らせる。
-    const row=$("exSliderRow");
-    row.classList.add("flash");
-    setTimeout(()=>row.classList.remove("flash"),500);
-  };
-});
-[].forEach.call(document.querySelectorAll("[data-exact]"),btn=>{
-  btn.onclick=()=>{
-    exAction=btn.dataset.exact;
-    [].forEach.call(document.querySelectorAll(".exact"),b=>b.classList.toggle("mint",b===btn));
-  };
-});
-$("exClear").onclick=()=>{
-  if(!excludeMask[curView])return;
-  exSnapshot(curView);
-  excludeMask[curView]=null; // nullに戻し、書き出し時にこの面のマスク自体を省く
-  excludeMaskVer++;
-  draw();
-  setMsg(VIEWJP[curView]+"の除外範囲を全解除しました。");
-};
-$("exUndo").onclick=exUndoLast;
 [].forEach.call(document.querySelectorAll(".qbtn[data-help]"),b=>{
   b.onclick=()=>{
     const box=document.getElementById(b.dataset.help);
