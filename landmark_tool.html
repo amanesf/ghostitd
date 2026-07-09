@@ -174,14 +174,11 @@
        ガードもあった。画像もJSONに埋め込むようになった(buildJson参照)ため、
        モード選択画面も含め常時見える最上位置に移し、真っさらな状態からでも
        このボタン1つで開始できるようにした。 -->
-  <!-- ★2026-07-09: モード選択画面(#modeChoice)にも同じ動作の「JSONから
-       読み込み」カードがあり、常時表示だとモード選択中に同じ機能のボタンが
-       画面に2つ並んで紛らわしいため、モード選択中はこちらを隠す
-       (編集画面(#editor)に入ったら表示する)。 -->
-  <div class="bar hidden" id="sessionBar" style="margin-bottom:8px">
-    <button class="btn sm" id="loadJson" style="flex:0 0 auto">📂 JSON読み込み</button>
-    <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
-  </div>
+  <!-- ★2026-07-10: JSON読み込みはモード選択画面(#modeChoice)の「JSONから
+       読み込み」カード(#modeJsonBtn)からのみ行う運用に統一した(編集画面
+       に入った後は不要なため、そこに常時表示されていたボタンは廃止した)。
+       #jsonFile自体は#modeJsonBtnのクリック先として引き続き使うため残す。 -->
+  <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
 
   <div id="editor" class="hidden">
     <div class="tabbar" id="tabbar">
@@ -369,9 +366,11 @@
 (function(){
 "use strict";
 
-// 標準人体プロポーション（このキャラ固有値ではない＝stage_landmarks の STD と同一）
-const STD={head_bottom:0.125,shoulder:0.182,waist:0.375,hip:0.500,knee_frac:0.47,ankle_frac:0.91,elbow_frac:0.47};
-// L=画像左 / R=画像右（pipeline.py の leg_runs と同規約）
+// ★2026-07-10: STD(標準人体プロポーション)/buildMask/analyzeSilhouette/
+// placeAllLandmarksはjs/common.jsへ切り出し済み(ゴーストスキャナー側でも
+// AIを使わずランドマークを仮配置したい場合に再利用するため)。ここではその
+// 参照だけを保持する(既存コードの参照箇所は無改修で動くよう同名にしている)。
+const STD=P3D.STD;
 // フェーズ0(2026-07-07): 点定義/配色はjs/common.jsに切り出し済み(ゴースト
 // スキャナーの簡易プレビューでも同じ見た目を再利用するため)。ここではその
 // 参照だけを保持する(既存コードの参照箇所は無改修で動くよう同名にしている)。
@@ -736,86 +735,10 @@ function startAutosaveLoop(){
 }
 
 /* ---------- シルエット解析（stage_profile/stage_landmarks のJS移植） ---------- */
-function buildMask(img,W,H,thr){
-  thr=thr||238;
-  const c=document.createElement("canvas");c.width=W;c.height=H;
-  const x=c.getContext("2d");x.drawImage(img,0,0,W,H);
-  const d=x.getImageData(0,0,W,H).data, m=new Uint8Array(W*H);
-  for(let i=0;i<W*H;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2],a=d[i*4+3];
-    m[i]=(a>40 && !(r>thr&&g>thr&&b>thr))?1:0;}
-  return m;
-}
-function rowRuns(mask,W,y,minGap,minLen){
-  minGap=minGap||4;minLen=minLen||0;
-  const out=[];let s=-1,p=-1;
-  for(let x=0;x<W;x++){
-    if(mask[y*W+x]){ if(s<0){s=x;p=x;} else if(x<=p+minGap)p=x; else{ if(p-s>=minLen)out.push([s,p]); s=x;p=x; } }
-  }
-  if(s>=0&&p-s>=minLen)out.push([s,p]);
-  return out;
-}
-function analyze(mask,W,H){
-  let ytop=-1,ybot=-1;
-  for(let y=0;y<H;y++){for(let x=0;x<W;x++)if(mask[y*W+x]){if(ytop<0)ytop=y;ybot=y;break;}}
-  if(ytop<0)return null;
-  const BH=ybot-ytop, NOISE=Math.max(6,Math.round(0.01*BH));
-  const tc=[];
-  for(let f=0.32;f<=0.50;f+=0.012){const y=Math.round(ytop+f*BH),r=rowRuns(mask,W,y,4,NOISE);
-    if(r.length){const big=r.reduce((a,b)=>(b[1]-b[0])>(a[1]-a[0])?b:a);tc.push((big[0]+big[1])/2);}}
-  tc.sort((a,b)=>a-b);const cx=tc.length?tc[tc.length>>1]:W/2;
-  const widthAt=v=>{const y=Math.min(Math.max(Math.round(ytop+v*BH),0),H-1),r=rowRuns(mask,W,y,4,NOISE);
-    if(!r.length)return{full:0,n:0,r:[],y};return{full:r[r.length-1][1]-r[0][0],n:r.length,r,y};};
-  const sm=(a,k)=>{k=k||5;return a.map((_,i)=>{let s=0,c=0;for(let j=-(k>>1);j<=(k>>1);j++){const t=i+j;if(t>=0&&t<a.length){s+=a[t];c++;}}return s/c;});};
-  const vs=[];for(let v=0.06;v<=0.42;v+=0.0018)vs.push(v);
-  const ws=sm(vs.map(v=>widthAt(v).full));
-  let j=0,best=-1;for(let i=0;i<ws.length-1;i++){const d=ws[i+1]-ws[i];if(d>best){best=d;j=i;}}
-  let shoulder_v=vs[j];
-  const pre=Math.min.apply(null,ws.slice(0,j+1)), post=Math.max.apply(null,ws.slice(j,Math.min(j+20,ws.length)));
-  const shoulder_detected=post>1.8*Math.max(pre,1);
-  if(!shoulder_detected)shoulder_v=STD.shoulder;
-  const preFull=widthAt(Math.max(shoulder_v-0.01,0.02)).full;
-  const shoulder_hw=preFull>0?preFull/2:BH*0.10;
-  let merge_end_v=Math.min(shoulder_v+0.20,0.46);
-  for(let v=shoulder_v+0.01;v<=Math.min(shoulder_v+0.30,0.48);v+=0.0025){const w=widthAt(v);if(w.full>0&&w.full<1.5*Math.max(preFull,1)&&w.n<=1){merge_end_v=v;break;}}
-  let waist_v=STD.waist,waist_hw=shoulder_hw*0.75,waist_detected=false,mn=1e9;
-  for(let v=merge_end_v+0.01;v<=0.48;v+=0.0025){const w=widthAt(v);if(w.n===1&&w.full>0&&w.full<mn){mn=w.full;waist_v=v;waist_hw=w.full/2;waist_detected=true;}}
-  let hip_v=STD.hip,hip_detected=false;
-  for(let v=waist_v+0.02;v<=0.62;v+=0.002){const w=widthAt(v);const big=w.r.filter(rr=>rr[1]-rr[0]>NOISE);if(big.length>=2){hip_v=v;hip_detected=true;break;}}
-  return{ytop,ybot,BH,cx,NOISE,mask,W,H,shoulder_v,shoulder_hw,shoulder_detected,merge_end_v,waist_v,waist_hw,waist_detected,hip_v,hip_detected};
-}
-function placeAll(A){
-  const{ytop,BH,cx,W,mask,NOISE}=A, yOf=v=>Math.round(ytop+v*BH), P={};
-  P.head_top=[cx,ytop];
-  const hb=A.shoulder_v*(STD.head_bottom/STD.shoulder);P.chin=[cx,yOf(hb)];
-  // ★2026-07-08追加: 目・口角の粗い初期配置(シルエットのみからは実際の目鼻立ちの
-  // 位置は分からないため、頭頂〜あごの間を単純に内分するだけの仮位置を置く。
-  // ドラッグでの手動調整、またはゴーストスキャナー側のAI推定での上書きが前提)。
-  const headH=yOf(hb)-ytop;
-  const eyeHw=A.shoulder_hw*0.28, mouthHw=A.shoulder_hw*0.12;
-  P.eye_L=[cx-eyeHw, ytop+headH*0.46];P.eye_R=[cx+eyeHw, ytop+headH*0.46];
-  P.mouth_L=[cx-mouthHw, ytop+headH*0.82];P.mouth_R=[cx+mouthHw, ytop+headH*0.82];
-  const shY=yOf(A.shoulder_v);
-  P.shoulder_L=[cx-A.shoulder_hw,shY];P.shoulder_R=[cx+A.shoulder_hw,shY];
-  P.clavicle_L=[cx-A.shoulder_hw*0.45,shY+BH*0.012];P.clavicle_R=[cx+A.shoulder_hw*0.45,shY+BH*0.012];
-  const armY=yOf((A.shoulder_v+A.merge_end_v)/2);let xl=cx,xr=cx;
-  for(let y=shY;y<=yOf(A.merge_end_v);y++){const r=rowRuns(mask,W,y,4,NOISE);for(const rr of r){if(rr[0]<xl)xl=rr[0];if(rr[1]>xr)xr=rr[1];}}
-  const shL=cx-A.shoulder_hw,shR=cx+A.shoulder_hw;
-  const wrR=shR+0.88*(xr-shR),wrL=shL+0.88*(xl-shL);
-  P.wrist_R=[wrR,armY];P.wrist_L=[wrL,armY];
-  P.elbow_R=[shR+0.5*(wrR-shR),armY];P.elbow_L=[shL+0.5*(wrL-shL),armY];
-  const waY=yOf(A.waist_v);P.waist_L=[cx-A.waist_hw,waY];P.waist_R=[cx+A.waist_hw,waY];
-  P.hip=[cx,yOf(A.hip_v)];
-  const legAt=v=>{const y=yOf(v),r=rowRuns(mask,W,y,4,NOISE).filter(rr=>rr[1]-rr[0]>NOISE);
-    const L=r.filter(rr=>(rr[0]+rr[1])/2<cx),R=r.filter(rr=>(rr[0]+rr[1])/2>=cx);
-    const pick=l=>l.length?l.reduce((a,b)=>(b[1]-b[0])>(a[1]-a[0])?b:a):null;
-    const pl=pick(L),pr=pick(R);
-    return{L:pl?(pl[0]+pl[1])/2:cx-A.shoulder_hw*0.3,R:pr?(pr[0]+pr[1])/2:cx+A.shoulder_hw*0.3,y};};
-  const kv=A.hip_v+STD.knee_frac*(1-A.hip_v),av=A.hip_v+STD.ankle_frac*(1-A.hip_v);
-  const k=legAt(kv),an=legAt(av),to=legAt(0.992);
-  P.knee_L=[k.L,k.y];P.knee_R=[k.R,k.y];P.ankle_L=[an.L,an.y];P.ankle_R=[an.R,an.y];P.toe_L=[to.L,to.y];P.toe_R=[to.R,to.y];
-  const out={};for(const kk in P)out[kk]=[Math.round(P[kk][0]),Math.round(P[kk][1])];
-  return out;
-}
+// buildMask/analyze/placeAllはjs/common.jsのP3D.buildMask/P3D.analyzeSilhouette/
+// P3D.placeAllLandmarksへ移した(既存呼び出し箇所は無改修で動くよう同名の
+// ローカル参照を残す)。
+const buildMask=P3D.buildMask, analyze=P3D.analyzeSilhouette, placeAll=P3D.placeAllLandmarks;
 function deriveFromPoints(P,A){
   const{ytop,BH}=A, v=y=>(y-ytop)/BH;
   const sh_v=v((P.shoulder_L[1]+P.shoulder_R[1])/2);
@@ -1087,7 +1010,6 @@ function runAnalyze(){
   if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
   analysis=A;points=placeAll(A);sel=null;curView="front";
   $("editor").classList.remove("hidden");
-  $("sessionBar").classList.remove("hidden");
   syncViewBtns();
   resyncAnalysisToProfile();
   draw();
@@ -1653,7 +1575,6 @@ $("copy").onclick=copyJson;
 // 正面画像を読み込んでください」というガードは不要になった。points未確定
 // (=まだ編集画面に入っていない)状態でも、画像込みのJSONを直接読み込んで
 // そこから開始できる(loadJsonFile()内のbootstrapFromJson()分岐)。
-$("loadJson").onclick=()=>{ $("jsonFile").click(); };
 $("jsonFile").onchange=e=>{const f=e.target.files[0];if(f)loadJsonFile(f);e.target.value="";};
 
 /* ---------- モデル生成(3DtoolJS: ブラウザ完結でGLBを作りビューアへ遷移) ---------- */

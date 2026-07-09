@@ -547,6 +547,102 @@ P3D.LM_GROUP_JP = LM_GROUP_JP;
 // 開始した場合のみ許可し、それ以外はpointerdownを無視(preventDefault)する。
 // landmark_tool.html/character_3d.html両方が本ファイルを読み込むため、ここに
 // documentへの委譲リスナーとして実装することで全range inputに一括で効かせる。
+// ---- ランドマークの粗い自動配置(白背景シルエットからの推定) ----
+// ★2026-07-10: landmark_tool.htmlにあったSTD/buildMask/rowRuns/analyze/
+// placeAllを、ghost_scanner.html側でも「AI(Gemini)を使わずランドマークを
+// 仮配置したい」場合に再利用できるようこちらへ移した(手動でスキャナーを
+// 完結させたい場合の代替経路。あくまで一般的な体型比率からの粗い仮配置
+// なので、実際の絵柄に合わせた微調整はジェネレータ(landmark_tool.html)側の
+// ドラッグ編集で行う前提)。
+// 標準人体プロポーション(このキャラ固有値ではない)。
+var STD={head_bottom:0.125,shoulder:0.182,waist:0.375,hip:0.500,knee_frac:0.47,ankle_frac:0.91,elbow_frac:0.47};
+P3D.STD=STD;
+// L=画像左 / R=画像右（pipeline.py の leg_runs と同規約）
+function buildMask(img,W,H,thr){
+  thr=thr||238;
+  var c=document.createElement("canvas");c.width=W;c.height=H;
+  var x=c.getContext("2d");x.drawImage(img,0,0,W,H);
+  var d=x.getImageData(0,0,W,H).data, m=new Uint8Array(W*H);
+  for(var i=0;i<W*H;i++){var r=d[i*4],g=d[i*4+1],b=d[i*4+2],a=d[i*4+3];
+    m[i]=(a>40 && !(r>thr&&g>thr&&b>thr))?1:0;}
+  return m;
+}
+P3D.buildMask=buildMask;
+function rowRuns(mask,W,y,minGap,minLen){
+  minGap=minGap||4;minLen=minLen||0;
+  var out=[],s=-1,p=-1;
+  for(var x=0;x<W;x++){
+    if(mask[y*W+x]){ if(s<0){s=x;p=x;} else if(x<=p+minGap)p=x; else{ if(p-s>=minLen)out.push([s,p]); s=x;p=x; } }
+  }
+  if(s>=0&&p-s>=minLen)out.push([s,p]);
+  return out;
+}
+// mask: buildMask()の戻り値, W,H: 画像サイズ。戻り値: シルエット計測結果
+// (ytop/ybot/cx/肩・腰・股の推定位置等)、シルエットが検出できなければnull。
+function analyzeSilhouette(mask,W,H){
+  var ytop=-1,ybot=-1;
+  for(var y=0;y<H;y++){for(var x=0;x<W;x++)if(mask[y*W+x]){if(ytop<0)ytop=y;ybot=y;break;}}
+  if(ytop<0)return null;
+  var BH=ybot-ytop, NOISE=Math.max(6,Math.round(0.01*BH));
+  var tc=[];
+  for(var f=0.32;f<=0.50;f+=0.012){var yy=Math.round(ytop+f*BH),r=rowRuns(mask,W,yy,4,NOISE);
+    if(r.length){var big=r.reduce(function(a,b){return (b[1]-b[0])>(a[1]-a[0])?b:a;});tc.push((big[0]+big[1])/2);}}
+  tc.sort(function(a,b){return a-b;});var cx=tc.length?tc[tc.length>>1]:W/2;
+  var widthAt=function(v){var yy=Math.min(Math.max(Math.round(ytop+v*BH),0),H-1),r=rowRuns(mask,W,yy,4,NOISE);
+    if(!r.length)return{full:0,n:0,r:[],y:yy};return{full:r[r.length-1][1]-r[0][0],n:r.length,r:r,y:yy};};
+  var sm=function(a,k){k=k||5;return a.map(function(_,i){var s=0,c=0;for(var j=-(k>>1);j<=(k>>1);j++){var t=i+j;if(t>=0&&t<a.length){s+=a[t];c++;}}return s/c;});};
+  var vs=[];for(var v=0.06;v<=0.42;v+=0.0018)vs.push(v);
+  var ws=sm(vs.map(function(v){return widthAt(v).full;}));
+  var j=0,best=-1;for(var i2=0;i2<ws.length-1;i2++){var d=ws[i2+1]-ws[i2];if(d>best){best=d;j=i2;}}
+  var shoulder_v=vs[j];
+  var pre=Math.min.apply(null,ws.slice(0,j+1)), post=Math.max.apply(null,ws.slice(j,Math.min(j+20,ws.length)));
+  var shoulder_detected=post>1.8*Math.max(pre,1);
+  if(!shoulder_detected)shoulder_v=STD.shoulder;
+  var preFull=widthAt(Math.max(shoulder_v-0.01,0.02)).full;
+  var shoulder_hw=preFull>0?preFull/2:BH*0.10;
+  var merge_end_v=Math.min(shoulder_v+0.20,0.46);
+  for(var v2=shoulder_v+0.01;v2<=Math.min(shoulder_v+0.30,0.48);v2+=0.0025){var w=widthAt(v2);if(w.full>0&&w.full<1.5*Math.max(preFull,1)&&w.n<=1){merge_end_v=v2;break;}}
+  var waist_v=STD.waist,waist_hw=shoulder_hw*0.75,waist_detected=false,mn=1e9;
+  for(var v3=merge_end_v+0.01;v3<=0.48;v3+=0.0025){var w2=widthAt(v3);if(w2.n===1&&w2.full>0&&w2.full<mn){mn=w2.full;waist_v=v3;waist_hw=w2.full/2;waist_detected=true;}}
+  var hip_v=STD.hip,hip_detected=false;
+  for(var v4=waist_v+0.02;v4<=0.62;v4+=0.002){var w3=widthAt(v4);var big2=w3.r.filter(function(rr){return rr[1]-rr[0]>NOISE;});if(big2.length>=2){hip_v=v4;hip_detected=true;break;}}
+  return{ytop:ytop,ybot:ybot,BH:BH,cx:cx,NOISE:NOISE,mask:mask,W:W,H:H,shoulder_v:shoulder_v,shoulder_hw:shoulder_hw,shoulder_detected:shoulder_detected,merge_end_v:merge_end_v,waist_v:waist_v,waist_hw:waist_hw,waist_detected:waist_detected,hip_v:hip_v,hip_detected:hip_detected};
+}
+// A: analyzeSilhouette()の戻り値。戻り値: {点キー: [x,y]}(22点、front画像の
+// 実寸ピクセル座標)。あくまで一般的な体型比率からの粗い仮配置。
+function placeAllLandmarks(A){
+  var ytop=A.ytop,BH=A.BH,cx=A.cx,W=A.W,mask=A.mask,NOISE=A.NOISE, yOf=function(v){return Math.round(ytop+v*BH);}, P={};
+  P.head_top=[cx,ytop];
+  var hb=A.shoulder_v*(STD.head_bottom/STD.shoulder);P.chin=[cx,yOf(hb)];
+  var headH=yOf(hb)-ytop;
+  var eyeHw=A.shoulder_hw*0.28, mouthHw=A.shoulder_hw*0.12;
+  P.eye_L=[cx-eyeHw, ytop+headH*0.46];P.eye_R=[cx+eyeHw, ytop+headH*0.46];
+  P.mouth_L=[cx-mouthHw, ytop+headH*0.82];P.mouth_R=[cx+mouthHw, ytop+headH*0.82];
+  var shY=yOf(A.shoulder_v);
+  P.shoulder_L=[cx-A.shoulder_hw,shY];P.shoulder_R=[cx+A.shoulder_hw,shY];
+  P.clavicle_L=[cx-A.shoulder_hw*0.45,shY+BH*0.012];P.clavicle_R=[cx+A.shoulder_hw*0.45,shY+BH*0.012];
+  var armY=yOf((A.shoulder_v+A.merge_end_v)/2),xl=cx,xr=cx;
+  for(var y=shY;y<=yOf(A.merge_end_v);y++){var r=rowRuns(mask,W,y,4,NOISE);for(var k=0;k<r.length;k++){var rr=r[k];if(rr[0]<xl)xl=rr[0];if(rr[1]>xr)xr=rr[1];}}
+  var shL=cx-A.shoulder_hw,shR=cx+A.shoulder_hw;
+  var wrR=shR+0.88*(xr-shR),wrL=shL+0.88*(xl-shL);
+  P.wrist_R=[wrR,armY];P.wrist_L=[wrL,armY];
+  P.elbow_R=[shR+0.5*(wrR-shR),armY];P.elbow_L=[shL+0.5*(wrL-shL),armY];
+  var waY=yOf(A.waist_v);P.waist_L=[cx-A.waist_hw,waY];P.waist_R=[cx+A.waist_hw,waY];
+  P.hip=[cx,yOf(A.hip_v)];
+  var legAt=function(v){var y=yOf(v),r=rowRuns(mask,W,y,4,NOISE).filter(function(rr){return rr[1]-rr[0]>NOISE;});
+    var L=r.filter(function(rr){return (rr[0]+rr[1])/2<cx;}),R=r.filter(function(rr){return (rr[0]+rr[1])/2>=cx;});
+    var pick=function(l){return l.length?l.reduce(function(a,b){return (b[1]-b[0])>(a[1]-a[0])?b:a;}):null;};
+    var pl=pick(L),pr=pick(R);
+    return{L:pl?(pl[0]+pl[1])/2:cx-A.shoulder_hw*0.3,R:pr?(pr[0]+pr[1])/2:cx+A.shoulder_hw*0.3,y:y};};
+  var kv=A.hip_v+STD.knee_frac*(1-A.hip_v),av=A.hip_v+STD.ankle_frac*(1-A.hip_v);
+  var kk=legAt(kv),an=legAt(av),to=legAt(0.992);
+  P.knee_L=[kk.L,kk.y];P.knee_R=[kk.R,kk.y];P.ankle_L=[an.L,an.y];P.ankle_R=[an.R,an.y];P.toe_L=[to.L,to.y];P.toe_R=[to.R,to.y];
+  var out={};for(var key in P)out[key]=[Math.round(P[key][0]),Math.round(P[key][1])];
+  return out;
+}
+P3D.analyzeSilhouette=analyzeSilhouette;
+P3D.placeAllLandmarks=placeAllLandmarks;
+
 document.addEventListener('pointerdown', function(e){
   var el = e.target;
   if(!el || el.tagName!=='INPUT' || el.type!=='range') return;

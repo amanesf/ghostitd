@@ -246,6 +246,12 @@
       <p class="hint">確定したfront画像から22点(骨格関節点18+目/口角4)の目印を推定します。誤りがあれば下のチャットで修正を指示できます(このタブ内でのみ会話を継続)。</p>
       <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="lmPromptText"></pre></details>
       <button class="btn mint" id="lmRunBtn">ランドマークを推定</button>
+      <!-- ★2026-07-10: Gemini(APIキー)が無くても手動でスキャナーを完結できる
+           ようにするための代替経路。一般的な体型比率から22点を機械的に仮配置
+           するだけで、実際の絵柄(手足の角度・髪型等)には一切合わせていない
+           「叩き台」に過ぎない。ジェネレータ(landmark_tool.html)側のドラッグ
+           編集で実際の見た目に合わせて位置を追い込む前提。 -->
+      <button class="btn sm" id="lmManualBtn">標準位置で仮配置(AI不使用・後でジェネレータ側で調整)</button>
       <canvas class="imgPreview" id="lmPreview" width="512" height="512" style="touch-action:none;cursor:grab"></canvas>
       <p class="hint">プレビュー上をドラッグすると全点が平行移動、ホイール/トラックパッドのピンチ・2本指ピンチで拡大縮小します(画像中心基準)。下の数値でも微調整できます。「反映」を押すまではプレビューだけの仮表示です。</p>
       <div class="modelRow">
@@ -1120,6 +1126,34 @@ function runLandmarkInitial(){
   });
 }
 $("lmRunBtn").onclick=runLandmarkInitial;
+// ★2026-07-10: AI(Gemini)を使わずランドマークを仮配置する代替経路。
+// js/common.jsのP3D.buildMask/P3D.analyzeSilhouette/P3D.placeAllLandmarks
+// (landmark_tool.htmlの初期仮配置と同じロジック)で、front画像の白背景
+// シルエットから一般的な体型比率に基づく22点を機械的に求めるだけで、
+// 実際の絵柄には合わせていない。チャットでの修正はGemini必須のため
+// 使えないままにし(有効化しない)、細かい位置合わせはジェネレータ側の
+// ドラッグ編集に委ねる想定。
+function runLandmarkManual(){
+  if(!state.front.dataUrl){ setMsg("先に正面(front)を確定してください。",true); return; }
+  $("lmManualBtn").disabled=true;
+  setMsg("標準位置で仮配置中...");
+  P3D.scannerLoadImage(state.front.dataUrl).then(function(img){
+    state.landmarks._img=img;
+    var mask=P3D.buildMask(img, img.naturalWidth, img.naturalHeight);
+    var A=P3D.analyzeSilhouette(mask, img.naturalWidth, img.naturalHeight);
+    if(!A) throw new Error("frontのシルエットを検出できません(背景が白以外?)");
+    state.landmarks.pointsPx=P3D.placeAllLandmarks(A);
+    appendChatLine($("lmChatLog"),"model","(AI不使用)一般的な体型比率から22点を仮配置しました。実際の絵柄には合わせていないため、ジェネレータ側のドラッグ編集で位置を調整してください。");
+    refreshLmPreview();
+    $("lmManualBtn").disabled=false;
+    $("lmNextBtn").disabled=false;
+    setMsg("標準位置で仮配置しました。この後ジェネレータ側で実際の絵柄に合わせて調整してください。");
+  }).catch(function(e){
+    $("lmManualBtn").disabled=false;
+    setMsg("仮配置に失敗しました: "+e.message,true);
+  });
+}
+$("lmManualBtn").onclick=runLandmarkManual;
 function sendLmChat(){
   var text=$("lmChatInput").value.trim();
   if(!text) return;
@@ -1286,8 +1320,6 @@ function refreshColormapButtons(){
   var ready = !!(state.accessories.list && state.accessories.list.length && state.front.confirmed);
   $("colormapGenBtn").disabled = !ready;
   ["Front","Side","LeftSide","Back"].forEach(function(v){ $("colormapUpload"+v+"Btn").disabled = !state.front.confirmed; });
-  // leftSideは左右非対称なアクセサリーが無ければ省略できるため必須にしない。
-  $("maskExtractBtn").disabled = !(state.colormaps.front && state.colormaps.side && state.colormaps.back);
 }
 async function showColormapPreview(view, dataUrl){
   await showImageOnCanvas($("colormap"+view.charAt(0).toUpperCase()+view.slice(1)+"Preview"), dataUrl);
