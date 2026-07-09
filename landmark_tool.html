@@ -240,11 +240,17 @@
       <p class="helpText hidden" id="help-automask">
         ゴーストスキャナーで生成/アップロードした色分けマップ(front/side/
         leftSide/back、体=黒・背景=白・各accessory=パレット色でベタ塗り)から、
-        パーツごとの色許容誤差(colorTolerance)を使ってマスク(ラスタ)を抽出した
-        結果です。各パーツの許容誤差はこの下のリストで個別に、または上の
-        「全パーツの色許容誤差を一括変更」でまとめて調整でき、変更すると
-        即座に再抽出してプレビューが更新されます(色分けマップがJSONに
-        含まれている場合のみ。無い場合は抽出済みのマスクをそのまま表示します)。</p>
+        全身/パーツそれぞれの色許容誤差(colorTolerance)を使ってマスク(ラスタ)
+        を抽出した結果です。全身は下の「全身の色許容誤差」、各パーツは
+        リストで個別に、またはその下の「全パーツの色許容誤差を一括変更」で
+        まとめて調整でき、変更すると即座に再抽出してプレビューが更新されます
+        (色分けマップがJSONに含まれている場合のみ。無い場合は抽出済みの
+        マスクをそのまま表示します)。</p>
+      <div class="acitem" id="automaskBodyRow" style="margin-bottom:10px">
+        <span class="nm">全身の色許容誤差(白背景との判定基準)</span>
+        <input type="range" id="automaskBodyTolSlider" min="5" max="120" value="40" style="flex:1">
+        <b id="automaskBodyTolVal" style="min-width:2.2em;text-align:right">40</b>
+      </div>
       <div class="acitem" id="automaskBulkRow" style="margin-bottom:10px">
         <span class="nm">全パーツの色許容誤差を一括変更</span>
         <input type="range" id="automaskBulkTolSlider" min="5" max="120" value="40" style="flex:1">
@@ -256,13 +262,12 @@
     </div>
     <div id="automaskLightbox"></div>
 
-    <!-- ★2026-07-09: 手動マスク(除外範囲塗り)タブは廃止した。exclude_masksは
-         ゴーストスキャナー側でaccessory(色分けマップ由来の自動マスク)から
-         機械的に合成される(scannerBuildExcludeMaskDataUrl参照)ため、
-         landmark_tool.html側での手塗り編集は不要という判断(ユーザー合意済み、
-         「複雑なことしすぎ、自動マスクで領域を取ればいい」)。exclude_masks
-         自体(JSON読み込み・シルエット測定への反映・書き出し)は引き続き
-         残す。 -->
+    <!-- ★2026-07-09: 手動マスク(除外範囲塗り)タブと、それが生成していた
+         exclude_masksという概念そのものを廃止した。全身のシルエットも
+         色分けマップ(体=黒)由来の色許容誤差方式で抽出するようになり、
+         アクセサリー色の画素は体色と一致しないため、そもそもスカート等が
+         体の輪郭に紛れ込む問題が起こらなくなった(ユーザー合意済み、
+         「複雑なことしすぎ、自動マスクで領域を取ればいい」)。 -->
 
     <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
          (seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの編集UI)は
@@ -279,7 +284,6 @@
         landmarks_ai.json に保存され、次回パイプライン実行時に反映されます。
         触らなければ全て既定値のまま動作します（各項目に既定値を記載）。</p>
       <div id="paramsPanel"></div>
-      <div id="outlinePanel"></div>
       <div class="row" style="margin-top:8px">
         <button class="btn" id="paramsResetAll">全て既定値に戻す</button>
       </div>
@@ -400,9 +404,11 @@ const DEFAULT_GEN_PARAMS={
   body_smooth_iters:0, acc_smooth_iters:0,
   arm_circle:true, arm_tol:0.06, arm_max_hw:0.2,
   hand_extrude:true, hand_depth:0.01, hand_max_hw:0.1, hand_len:0.25,
-  subpixel:true,
-  white_thr:240, alpha_dilate:9,
-  band_h:220, band_overlap:40,
+  alpha_dilate:9,
+  // ★2026-07-09: 全身のシルエットも色分けマップ+色許容誤差方式に統一した
+  // ため、body(体=黒)の色許容誤差はここに持つ(自動マスクタブの「全身」
+  // スライダーで編集する、accessoryのcolorToleranceと同じ意味の値)。
+  body_color_tolerance:40,
   kb_per_face:200,
   back_offset_x:0, back_offset_y:0,
   side_offset_x:0, side_offset_y:0,
@@ -444,16 +450,8 @@ const PARAM_META=[
   desc:"列走査で測った手の縦半幅がこれを超える(=手の線が胴体等の内部を通っている)列は手扱いしない安全弁。arm_max_hwの手版。hand_extrudeがONの時のみ有効。"},
  {group:"手の彫刻", key:"hand_len", label:"手の長さ(手首から先)", type:"number", min:0.02, max:0.3, step:0.005, unit:"(model単位)",
   desc:"手首から指方向へ何model単位分を「手」として押し出し扱いにするかの長さ。長すぎると前腕側まで手扱いになり、短すぎると指先が手扱いから外れて胴体側面の奥行きに戻ってしまう。hand_extrudeがONの時のみ有効。"},
- {group:"ノイズ・ガタつき対策", key:"subpixel", label:"サブピクセル境界補正", type:"checkbox",
-  desc:"ONだと2値マスクの境界を元画像の連続値から線形補間し、整数ピクセル単位の階段を滑らかにする。OFFにすると旧来通り整数ピクセル境界を使う(縦方向の階段が目立ちやすくなる)。"},
- {group:"背景/しきい値", key:"white_thr", label:"白背景と判定するしきい値", type:"number", min:200, max:255, step:1, unit:"(0-255)",
-  desc:"上げると薄いグレーも背景と判定されやすくなる(白い衣装の淡い陰影を削ってしまうリスクがある)。下げると背景判定が厳しくなり輪郭が太めに残ることがある。prep/carving/accessoriesの3箇所で共通して使う値。"},
- {group:"背景/しきい値", key:"alpha_dilate", label:"縁の色にじみの膨張量", type:"number", min:0, max:30, step:1, unit:"px",
+ {group:"エッジ処理", key:"alpha_dilate", label:"縁の色にじみの膨張量", type:"number", min:0, max:30, step:1, unit:"px",
   desc:"増やすとテクスチャ縁の透明の隙間(拡大縮小時ににじみが出るのを防ぐ処理)が広がるが、輪郭のディテールがわずかに丸まる。"},
- {group:"アクセサリーの背景除去", key:"band_h", label:"帯の高さ", type:"number", min:40, max:800, step:10, unit:"px",
-  desc:"垂れた髪のように縦長のアクセサリーの背景除去を帯状に分割する高さ。小さくしすぎると帯の継ぎ目で背景判定が不連続になりやすい。大きくすると根本近くの隙間を局所的に判定する効果が薄れる。"},
- {group:"アクセサリーの背景除去", key:"band_overlap", label:"帯どうしの重なり", type:"number", min:0, max:200, step:5, unit:"px",
-  desc:"帯の境界付近での判定の不連続を防ぐための重なり幅。band_hより十分小さい値にする。"},
  {group:"背面/側面ズレ補正", key:"back_offset_x", label:"背面画像 左右ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
   desc:"背面写真は前面写真とは別に撮影/作画されるため、前面基準の彫り出し/貼り付けにpx単位のズレが残ることがある。正の値で背面の彫り出し/テクスチャ参照位置を右へ、負の値で左へずらす。実際のビューアで見た目を確認しながら調整する。"},
  {group:"背面/側面ズレ補正", key:"back_offset_y", label:"背面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
@@ -463,7 +461,7 @@ const PARAM_META=[
  {group:"背面/側面ズレ補正", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
   desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
  {group:"背面/側面ズレ補正", key:"leftside_offset_x", label:"側面(左)画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
-  desc:"左右非対称キャラ用のleftSide(左向き側面)画像のズレ補正。意味・使い方はside_offset_xと同じ(mask.leftSideを持つアクセサリーだけに影響する)。"},
+  desc:"左右非対称キャラ用のleftSide(左向き側面)画像のズレ補正。意味・使い方はside_offset_xと同じ(mask.leftSideを持つアクセサリーだけに影響する。全身の奥行きは常にside(右)画像のみを使い、leftSideは使わない)。"},
  {group:"背面/側面ズレ補正", key:"leftside_offset_y", label:"側面(左)画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
   desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
 ];
@@ -488,48 +486,37 @@ let paramGroupOpen={};
 // 「純粋な2D画像処理だけで完結する」パラメータ群のみが対象(彫刻/メッシュ
 // 系パラメータのグループはここに含めない)。
 const PREVIEW_GROUPS={
-  "背景/しきい値":{view:"front",keys:["white_thr","alpha_dilate"]},
-  "アクセサリーの背景除去":{view:"front",keys:["band_h","band_overlap"]},
+  "エッジ処理":{view:"front",keys:["alpha_dilate"]},
   "背面/側面ズレ補正":{view:"back",keys:["back_offset_x","back_offset_y","side_offset_x","side_offset_y"]},
   "ノイズ・ガタつき対策":{view:"front",keys:["track_gap","track_win"]},
 };
 let previewActiveGroup=null; // 現在プレビュー中のPARAM_METAグループ名(展開中のグループ)
-// シルエット外周の輪郭線除去プレビュー用パラメータ(pipeline側には未実装の
-// プレビュー専用機能のため、genParams/landmarks_ai.jsonには含めない)。
-let outlineParams={enabled:false,band_px:6,dark_thr:90};
-const OUTLINE_DEFAULT={band_px:6,dark_thr:90};
 // プレビュー画像のキャッシュ(同一view+パラメータで毎フレーム再計算しない
-// ように、直前の入力をキーにして保持する。white_thr変更のたびに全画素の
-// 背景マスクBFS+bleedをやり直すのはやや重いため)。
+// ように、直前の入力をキーにして保持する)。
 let previewCache={key:null,view:null,canvas:null,w:0,h:0};
 function previewCacheKey(view){
-  return [view, genParams.white_thr, genParams.alpha_dilate, excludeMaskVer,
-    outlineParams.enabled, outlineParams.band_px, outlineParams.dark_thr].join("|");
+  return [view, genParams.alpha_dilate, genParams.body_color_tolerance].join("|");
 }
+// ★2026-07-09: 体シルエットの2値化を色分けマップ+色許容誤差方式に統一した
+// ため、プレビューもP3D.loadAlphaFromColormapを使う(white_thr/除外マスク/
+// 輪郭線除去プレビューは全て廃止)。
 function buildPreviewCanvas(view){
-  const img=imgs[view]; if(!img)return null;
+  const img=imgs[view]; const cm=colormaps[view]; if(!img||!cm)return null;
   const key=previewCacheKey(view);
   if(previewCache.key===key && previewCache.view===view) return previewCache;
   try{
-    const ex=excludeMask[view]?P3D.excludeMaskToBool(excludeMask[view],img.w,img.h):null;
-    const thr=genParams.white_thr;
-    const loaded=P3D.loadRgbaRemoveWhite(img.el, thr, ex);
-    let bled=P3D.bleedEdges(loaded.rgba, loaded.w, loaded.h, loaded.alpha, genParams.alpha_dilate);
-    if(outlineParams.enabled){
-      const alpha2=new Uint8Array(loaded.w*loaded.h);
-      for(let i=0;i<alpha2.length;i++)alpha2[i]=bled[i*4+3]>0?1:0;
-      bled=P3D.removeSilhouetteOutline(bled, loaded.w, loaded.h, alpha2, outlineParams.band_px, outlineParams.dark_thr);
-    }
-    const c=document.createElement("canvas");c.width=loaded.w;c.height=loaded.h;
-    c.getContext("2d").putImageData(new ImageData(bled,loaded.w,loaded.h),0,0);
-    previewCache={key,view,canvas:c,w:loaded.w,h:loaded.h};
+    const alpha=P3D.loadAlphaFromColormap(cm.ctx, cm.w, cm.h, genParams.body_color_tolerance);
+    const rgba=P3D.imageToImageData(img.el, img.w, img.h).data;
+    const bled=P3D.bleedEdges(rgba, img.w, img.h, alpha, genParams.alpha_dilate);
+    const c=document.createElement("canvas");c.width=img.w;c.height=img.h;
+    c.getContext("2d").putImageData(new ImageData(bled,img.w,img.h),0,0);
+    previewCache={key,view,canvas:c,w:img.w,h:img.h};
     return previewCache;
   }catch(e){ console.error("プレビュー生成に失敗しました",e); return null; }
 }
-// パラメータグループ展開中(またはシルエット輪郭線除去プレビューON)は
-// 「設定値」タブでプレビューを表示する。
+// パラメータグループ展開中は「設定値」タブでプレビューを表示する。
 function previewModeActive(){
-  return curTab==="params" && (!!previewActiveGroup || outlineParams.enabled);
+  return curTab==="params" && !!previewActiveGroup;
 }
 // プレビュー対象view("設定値"タブでの自動切替先)を決める。展開中の
 // パラメータグループの推奨viewを使い、その面の画像が無ければ現在のviewに
@@ -538,48 +525,6 @@ function previewTargetView(){
   const group=previewActiveGroup && PREVIEW_GROUPS[previewActiveGroup];
   const wantView=group?group.view:curView;
   return imgs[wantView]?wantView:curView;
-}
-function renderOutlinePanel(){
-  const el=$("outlinePanel"); if(!el)return;
-  const changed=outlineParams.band_px!==OUTLINE_DEFAULT.band_px||outlineParams.dark_thr!==OUTLINE_DEFAULT.dark_thr;
-  const isOpen=!!paramGroupOpen["輪郭線除去(プレビュー専用)"];
-  el.innerHTML='<details class="accgroup" data-accgroup="輪郭線除去(プレビュー専用)"'+(isOpen?" open":"")+'>'+
-    '<summary>'+(changed?'<span class="accDot" title="既定値から変更あり"></span>':"")+
-    '<span>シルエット輪郭線の除去(プレビュー専用)</span><span class="accCount">試験機能</span></summary>'+
-    '<div class="accbody">'+
-    '<p class="helpText">線画イラストの外周にできる黒い輪郭線を、前景マスクをNpx収縮した'+
-    '帯の中の暗いピクセルだけ内側の色で塗りのばして消すプレビューです。内部の黒髪・黒服等は'+
-    '対象外(帯の外なので変更されません)。実際のモデル生成には未反映のプレビュー専用機能です。</p>'+
-    '<div class="acform" style="margin-bottom:6px">'+
-    '<label style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px">'+
-    '<span style="color:var(--txt);font-size:12px">有効にする(プレビュー)</span>'+
-    '<input type="checkbox" id="outlineEnabled" '+(outlineParams.enabled?"checked":"")+' style="width:18px;height:18px">'+
-    '</label></div>'+
-    '<div class="acform" style="margin-bottom:6px">'+
-    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">帯の幅(収縮量)</div>'+
-    '<div style="display:flex;align-items:center;gap:6px">'+
-    '<input type="range" id="outlineBandRange" value="'+outlineParams.band_px+'" min="1" max="30" step="1" style="flex:1">'+
-    '<input type="number" id="outlineBandNum" value="'+outlineParams.band_px+'" min="1" max="30" step="1" style="width:70px">'+
-    '<span style="color:var(--mut);font-size:10.5px">px</span></div></div>'+
-    '<div class="acform">'+
-    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">暗さのしきい値(これ未満の輝度を除去対象に)</div>'+
-    '<div style="display:flex;align-items:center;gap:6px">'+
-    '<input type="range" id="outlineThrRange" value="'+outlineParams.dark_thr+'" min="0" max="255" step="1" style="flex:1">'+
-    '<input type="number" id="outlineThrNum" value="'+outlineParams.dark_thr+'" min="0" max="255" step="1" style="width:70px">'+
-    '</div></div>'+
-    '</div></details>';
-  const enEl=$("outlineEnabled");
-  enEl.onchange=()=>{ outlineParams.enabled=enEl.checked; renderOutlinePanel(); if(IMG_TABS.includes(curTab))draw(); };
-  const bandR=$("outlineBandRange"), bandN=$("outlineBandNum");
-  const thrR=$("outlineThrRange"), thrN=$("outlineThrNum");
-  const syncBand=v=>{outlineParams.band_px=v;bandR.value=v;bandN.value=v;if(IMG_TABS.includes(curTab))draw();};
-  const syncThr=v=>{outlineParams.dark_thr=v;thrR.value=v;thrN.value=v;if(IMG_TABS.includes(curTab))draw();};
-  bandR.oninput=()=>syncBand(parseInt(bandR.value,10));
-  bandN.onchange=()=>syncBand(Math.max(1,Math.min(30,parseInt(bandN.value,10)||OUTLINE_DEFAULT.band_px)));
-  thrR.oninput=()=>syncThr(parseInt(thrR.value,10));
-  thrN.onchange=()=>syncThr(Math.max(0,Math.min(255,parseInt(thrN.value,10)||OUTLINE_DEFAULT.dark_thr)));
-  const d=el.querySelector("details.accgroup");
-  if(d)d.addEventListener("toggle",()=>{ paramGroupOpen[d.dataset.accgroup]=d.open; });
 }
 function paramGroupChanged(g){
   return PARAM_META.some(m=>m.group===g && genParams[m.key]!==DEFAULT_GEN_PARAMS[m.key]);
@@ -639,9 +584,6 @@ function wireParamsPanelEvents(el){
         genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
       }
       sync();
-      // white_thrはランドマーク配置の基準(analysis.ytop/ybot/cx)にも影響するため
-      // 変更のたびに実際の生成パイプラインと同じ基準に揃え直す
-      if(key==="white_thr"){resyncAnalysisToProfile();draw();}
     };
   });
   [].forEach.call(el.querySelectorAll("[data-param-range]"),rg=>{
@@ -650,7 +592,6 @@ function wireParamsPanelEvents(el){
       const n=parseFloat(rg.value);
       genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
       const numEl=el.querySelector('[data-param="'+key+'"]'); if(numEl)numEl.value=genParams[key];
-      if(key==="white_thr"){resyncAnalysisToProfile();draw();}
     };
   });
   [].forEach.call(el.querySelectorAll("[data-reset-param]"),btn=>{
@@ -691,13 +632,11 @@ function renderParamsPanel(){
   el.innerHTML=buildParamsPanelHtml();
   wireParamsPanelEvents(el);
 }
-// 除外マスク(正面/側面/背面それぞれ、シルエット測定から除外する範囲の
-// オフスクリーンcanvas)。★2026-07-09: 手塗り編集UIは廃止した。色分けマップ由来の
-// accessoryマスク(下記colormaps参照)から自動合成する(rebuildExcludeMasksFromAccessories
-// 参照。旧: ゴーストスキャナー側で合成→JSONで受け取るだけだったが、マスク抽出
-// 処理自体をこちら側に移したため合成もこちら側で行うようになった)。
-let excludeMask={front:null,side:null,back:null};
-let excludeMaskVer=0; // 除外マスクが変わるたびに増やし、プレビューキャッシュの無効化に使う
+// ★2026-07-09: exclude_masks(体シルエット除外範囲)の概念自体を廃止した。
+// 全身のシルエットも色分けマップ(体=黒)由来の色許容誤差方式で抽出する
+// ようになり、アクセサリー色の画素は色距離判定の時点で体色とは一致しない
+// ため、そもそもスカート等が体の輪郭に紛れ込む問題が起こらない
+// (js/pipeline.jsのrunCarvingStages参照)。
 // 色分けマップ(front/side/leftSide/back、体=黒・背景=白・各accessory=パレット色)。
 // ゴーストスキャナーから引き継いだJSONに含まれていれば、ここでオフスクリーン
 // canvasとして保持し、accessory毎の色許容誤差(colorTolerance)を変えながら
@@ -1007,21 +946,8 @@ function drawPreviewLayer(x,sc,el,w,h){
   }else{
     x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
   }
-  if(previewActiveGroup==="アクセサリーの背景除去"){
-    // band_h/band_overlapの帯の切れ目を目安線として重ねる(実際の
-    // アクセサリー背景除去は個別パーツ単位の帯分割処理だが、ここでは
-    // 「どの高さで帯が切り替わるか」だけを可視化する簡易プレビュー)。
-    const bandH=Math.max(10,genParams.band_h||220), overlap=Math.min(genParams.band_overlap||0,bandH-1);
-    const step=Math.max(1,bandH-overlap);
-    x.save();x.setLineDash([6,4]);x.lineWidth=1.5;x.strokeStyle="rgba(122,162,255,.85)";
-    for(let by=0; by<h; by+=step){
-      const py=by*sc+view.oy;
-      x.beginPath();x.moveTo(view.ox,py);x.lineTo(view.ox+w*sc,py);x.stroke();
-    }
-    x.restore();
-  }
   x.save();x.font="bold 11px sans-serif";x.fillStyle="#39ff9e";x.textAlign="left";
-  x.fillText("プレビュー中: "+(previewActiveGroup||"輪郭線除去")+"("+VIEWJP[pv]+")",8,16);
+  x.fillText("プレビュー中: "+(previewActiveGroup||"")+"("+VIEWJP[pv]+")",8,16);
   x.restore();
 }
 // マークタブの点だけをgetInteractivePoints側で絞っている。
@@ -1130,7 +1056,13 @@ async function bootstrapFromJson(d){
   return true;
 }
 function runAnalyze(){
-  const{el,w,h}=imgs.front, mask=buildMask(el,w,h), A=analyze(mask,w,h);
+  // ★2026-07-09: 色分けマップが必須になったため、初期のランドマーク仮配置も
+  // 固定しきい値(旧buildMask)ではなく色分けマップ(体=黒)+色許容誤差方式で
+  // シルエットを検出する(resyncAnalysisToProfileが使う方式と揃える)。
+  const{el,w,h}=imgs.front;
+  const cm=colormaps.front;
+  const mask=cm ? P3D.loadAlphaFromColormap(cm.ctx,cm.w,cm.h,genParams.body_color_tolerance) : buildMask(el,w,h);
+  const A=analyze(mask,w,h);
   if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
   analysis=A;points=placeAll(A);sel=null;curView="front";
   $("editor").classList.remove("hidden");
@@ -1140,17 +1072,18 @@ function runAnalyze(){
   draw();
   setMsg("前処理OK  shoulder v="+A.shoulder_v.toFixed(3)+"(det="+A.shoulder_detected+") waist v="+A.waist_v.toFixed(3)+" hip v="+A.hip_v.toFixed(3));
 }
-// ★2026-07-04: ランドマーク配置用のanalysis.ytop/ybot/cx(旧buildMask、しきい値
-// 固定238・除外マスク非対応)と、実際の生成パイプラインが使うprofile(genParams.
-// white_thr・除外マスク反映)が食い違い、ボーン/腕/手の位置が実メッシュとズレる
-// 原因になっていた。ここで両者を同じ2値化・同じ除外マスクに揃えて
-// analysis.ytop/ybot/BH/cxを上書きする(auto placement由来のshoulder_v等はそのまま)。
+// ★2026-07-04: ランドマーク配置用のanalysis.ytop/ybot/cxと、実際の生成
+// パイプラインが使うprofileが食い違い、ボーン/腕/手の位置が実メッシュと
+// ズレる原因になっていた。ここで両者を同じ2値化方式に揃えてanalysis.ytop/
+// ybot/BH/cxを上書きする(auto placement由来のshoulder_v等はそのまま)。
+// ★2026-07-09: 体シルエットの2値化を色分けマップ+色許容誤差方式に統一した
+// ため、こちらも同じP3D.loadAlphaFromColormapを使う(js/pipeline.jsの
+// runCarvingStagesと同じ関数・同じgenParams.body_color_tolerance)。
 function resyncAnalysisToProfile(){
-  if(!analysis || !imgs.front) return;
-  const {el,w,h}=imgs.front;
-  const thr=(genParams&&genParams.white_thr!==undefined)?genParams.white_thr:238;
-  const exFront=excludeMask.front?P3D.excludeMaskToBool(excludeMask.front,w,h):null;
-  const alpha=P3D.loadRgbaRemoveWhite(el, thr, exFront).alpha;
+  if(!analysis || !imgs.front || !colormaps.front) return;
+  const {w,h}=imgs.front;
+  const cm=colormaps.front;
+  const alpha=P3D.loadAlphaFromColormap(cm.ctx, cm.w, cm.h, genParams.body_color_tolerance);
   const fp=P3D.frontProfileOnly(alpha, w, h);
   analysis.ytop=fp.YTOP; analysis.ybot=fp.YBOT; analysis.BH=fp.YBOT-fp.YTOP; analysis.cx=fp.CX;
 }
@@ -1161,23 +1094,10 @@ function canvasPt(e){const rc=cvs.getBoundingClientRect();
 function toImg(e){const c=canvasPt(e),base=(wrap.clientWidth||360)/curImg().w,sc=base*view.z;
   return[(c[0]-view.ox)/sc,(c[1]-view.oy)/sc];}
 
-/* ---------- 除外マスク(exclude_masks)用オフスクリーンcanvas。★2026-07-09:
-   手塗り編集(マジックツール/ブラシ)UIは廃止し、d.exclude_masksの画像
-   (colormapsが無い旧形式JSON向け)、またはrebuildExcludeMasksFromAccessories()
-   が合成した結果をcanvasへ描き込むためだけに使う。除外部分=不透明(赤)、
-   非除外=透明。 ---------- */
-function ensureExcludeCanvas(v){
-  if(excludeMask[v])return excludeMask[v];
-  const img=imgs[v]; if(!img)return null;
-  const c=document.createElement("canvas");c.width=img.w;c.height=img.h;
-  excludeMask[v]={canvas:c,ctx:c.getContext("2d")};
-  return excludeMask[v];
-}
 /* ---------- 色分けマップからのマスク抽出(自動マスクタブ)。★2026-07-09:
    従来はゴーストスキャナー側で固定色許容誤差(40)で一度だけ抽出していたが、
-   パーツごとに許容誤差を変えて試行錯誤したいとの要望を受け、抽出処理
-   そのものをこちらへ移した。colormapsが無い(旧形式のJSON/サンプル)場合は
-   何もしない(accessories[].maskに既に入っている抽出済みの値をそのまま使う)。 ---------- */
+   パーツ(と全身)ごとに許容誤差を変えて試行錯誤したいとの要望を受け、
+   抽出処理そのものをこちらへ移した。colormapsが必須(旧形式JSONは廃止)。 ---------- */
 function hasColormaps(){
   return !!(colormaps.front || colormaps.side || colormaps.leftSide || colormaps.back);
 }
@@ -1195,47 +1115,18 @@ function extractAllAccessoryMasks(){
     accessories.forEach(a=>extractAccessoryMask(a,v));
   });
 }
-// exclude_from_body_silhouette===trueのaccessoryのマスクをOR合成してexclude_masks
-// を作り直す(P3D.buildExcludeMaskDataUrl、js/common.js参照)。マスクdataURLを
-// 一旦Imageとして読み込む必要があるため非同期。
-async function rebuildExcludeMasksFromAccessories(){
-  const targets=accessories.filter(a=>a.exclude_from_body_silhouette);
-  for(const a of targets){
-    for(const v of ["front","side","leftSide","back"]){
-      const m=a.mask&&a.mask[v];
-      if(m&&m.maskDataUrl&&!m._img){
-        m._img=await new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=m.maskDataUrl;});
-      }
-    }
-  }
-  ["front","side","back"].forEach(v=>{
-    const im=imgs[v];
-    if(!im)return;
-    const dataUrl=P3D.buildExcludeMaskDataUrl(accessories,v,im.w,im.h);
-    if(dataUrl){
-      const ec=ensureExcludeCanvas(v);
-      const mi=new Image();
-      mi.onload=()=>{
-        ec.ctx.clearRect(0,0,ec.canvas.width,ec.canvas.height);
-        ec.ctx.drawImage(mi,0,0);
-        excludeMaskVer++;
-        if(v==="front")resyncAnalysisToProfile();
-        if(v===curView)draw();
-      };
-      mi.src=dataUrl;
-    }else if(excludeMask[v]){
-      excludeMask[v]=null;
-      excludeMaskVer++;
-      if(v==="front")resyncAnalysisToProfile();
-      if(v===curView)draw();
-    }
-  });
-}
-// 色許容誤差変更(個別/一括どちらも)のたびに呼ぶ、再抽出→除外マスク再合成→
+// アクセサリーの色許容誤差変更(個別/一括どちらも)のたびに呼ぶ、再抽出→
 // 自動マスクタブ再描画の一連の流れ。
-async function reextractAndRefresh(){
+function reextractAndRefresh(){
   extractAllAccessoryMasks();
-  await rebuildExcludeMasksFromAccessories();
+  renderAutomaskPreviews();
+}
+// 全身の色許容誤差(genParams.body_color_tolerance)変更のたびに呼ぶ。
+// analysis.ytop/ybot/cx(ランドマーク配置の基準)も実際の生成パイプラインと
+// 同じ抽出方式を使うため、あわせて揃え直す。
+function reextractBodyAndRefresh(){
+  resyncAnalysisToProfile();
+  draw();
   renderAutomaskPreviews();
 }
 const ptrs=new Map(); let ptrMode=null,lastX=0,lastY=0,pinchD=0;
@@ -1314,24 +1205,16 @@ function buildJson(){
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-        colorTolerance:a.colorTolerance,
-        exclude_from_body_silhouette:!!a.exclude_from_body_silhouette};
+        colorTolerance:a.colorTolerance};
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
-    // ★2026-07-09: 色分けマップがあれば書き出しにも含める(再読み込み時に
-    // 色許容誤差の再調整を続けられるようにするため。無ければキー自体を省く)。
+    // ★2026-07-09: 色分けマップは書き出しにも含める(再読み込み時に
+    // 色許容誤差の再調整を続けられるようにするため。必須のため常に含む)。
     colormaps:(function(){
       const out={};
       ["front","side","leftSide","back"].forEach(v=>{
         if(colormaps[v])out[v]=colormaps[v].canvas.toDataURL("image/png");
-      });
-      return Object.keys(out).length?out:undefined;
-    })(),
-    exclude_masks:(function(){
-      const out={};
-      ["front","side","back"].forEach(v=>{
-        if(excludeMask[v])out[v]=excludeMask[v].canvas.toDataURL("image/png");
       });
       return out;
     })(),
@@ -1368,15 +1251,14 @@ function applyLoadedJson(d){
   // accessoryはマスク(mask、色分けマップ由来・自動抽出のみ)形式のみを持つ
   // (多角形(regions)形式は2026-07-09に廃止。既存の多角形形式の保存済みJSONとの
   // 互換性は維持しない方針のため、旧形式の救済処理は行わない)。
-  // ★2026-07-09: colorTolerance(パーツごとの色許容誤差)・exclude_from_body_silhouette
-  // (体シルエット除外の対象かどうか)・color(抽出元の色、tolerance変更時の
-  // 再抽出に必要)を追加。d.accessories[].maskは、colormapsが無い(旧形式の
-  // JSON/サンプル)場合の初期値としてそのまま使う(下で再抽出できればそちらが勝つ)。
+  // ★2026-07-09: colorTolerance(パーツごとの色許容誤差)・color(抽出元の色、
+  // tolerance変更時の再抽出に必要)を追加。d.accessories[].maskは、
+  // 下のextractAllAccessoryMasks()が色分けマップから再抽出するまでの
+  // 初期値(JSONに保存されていた前回の抽出結果)として使う。
   accessories=(d.accessories||[]).map(a=>{
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
       color:a.color||null,
-      colorTolerance:(a.colorTolerance!==undefined&&a.colorTolerance!==null)?a.colorTolerance:40,
-      exclude_from_body_silhouette:!!a.exclude_from_body_silhouette};
+      colorTolerance:(a.colorTolerance!==undefined&&a.colorTolerance!==null)?a.colorTolerance:40};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -1394,33 +1276,10 @@ function applyLoadedJson(d){
   const colorGradSl=$("colorGradSlider"); if(colorGradSl) colorGradSl.value=colorGradWidth;
   genParams=Object.assign({},DEFAULT_GEN_PARAMS,d.gen_params||{});
   renderParamsPanel();
-  excludeMask={front:null,side:null,back:null};
-  excludeMaskVer++;
-  resyncAnalysisToProfile(); // white_thr変更分をひとまず反映(除外マスクがあれば下でさらに反映)
-  // ★2026-07-09: colormapsがあれば(=ゴーストスキャナーからの新形式JSON)、
-  // ここで一度マスクを抽出し、そこから導かれるexclude_masksも作り直す
-  // (自動マスクタブを開かなくても生成できるようにするため)。無ければ
-  // (旧形式のJSON/サンプル)、accessories[].maskとd.exclude_masksをそのまま使う。
-  if(hasColormaps()){
-    extractAllAccessoryMasks();
-    rebuildExcludeMasksFromAccessories();
-  }else{
-    const masks=d.exclude_masks||{};
-    Object.keys(masks).forEach(v=>{
-      if(!imgs[v]||!masks[v])return;
-      const im=new Image();
-      im.onload=()=>{
-        const ec=ensureExcludeCanvas(v);
-        if(ec){
-          ec.ctx.clearRect(0,0,ec.canvas.width,ec.canvas.height);ec.ctx.drawImage(im,0,0);
-          excludeMaskVer++;
-          if(v==="front")resyncAnalysisToProfile(); // front除外マスク反映後にanalysisを揃え直す
-          draw();
-        }
-      };
-      im.src=masks[v];
-    });
-  }
+  // ★2026-07-09: 色分けマップから全身/アクセサリー双方のマスクを再抽出する
+  // (自動マスクタブを開かなくても生成できるようにするため)。
+  resyncAnalysisToProfile();
+  extractAllAccessoryMasks();
   sel=null;
   syncChips();syncViewBtns();draw();
   setMsg("landmarks_ai.json を読み込みました(正面/側面/背面画像は別途読み込み済みのものを使います)。");
@@ -1621,11 +1480,16 @@ function renderAutomaskPreviews(){
   });
 }
 function renderAutomaskTab(){
-  const listWrap=$("automaskList"), hint=$("automaskEmptyHint"), bulkRow=$("automaskBulkRow");
+  const listWrap=$("automaskList"), hint=$("automaskEmptyHint"), bulkRow=$("automaskBulkRow"), bodyRow=$("automaskBodyRow");
   const maskAccs=[];
   accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
   listWrap.innerHTML="";
   if(bulkRow) bulkRow.classList.toggle("hidden", !hasColormaps() || !accessories.length);
+  if(bodyRow){
+    bodyRow.classList.toggle("hidden", !hasColormaps());
+    const sl=$("automaskBodyTolSlider"), lb=$("automaskBodyTolVal");
+    if(sl && document.activeElement!==sl){ sl.value=genParams.body_color_tolerance; lb.textContent=genParams.body_color_tolerance; }
+  }
   if(!maskAccs.length){
     $("automaskColormaps").innerHTML="";
     hint.textContent="自動マスク(色分けマップ由来)のパーツはありません。ゴーストスキャナーで色分けマップとアクセサリー一覧を引き継いでください。";
@@ -1728,7 +1592,7 @@ $("generateBtn").onclick=async()=>{
         out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
         return out;
       }),
-      excludeMask, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, genParams,
+      colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, genParams,
     };
     // ★フェーズ1(2026-07-07〜): 「生成」は完成GLBまで作らず、重い彫刻(marching
     // cubes)までの中間データ(中間パッケージ)を作ってビューアに渡す。ビューア側
@@ -1826,7 +1690,6 @@ function wireBoneToggle(overlayId,regionId){
 wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
 buildLegend();
 renderParamsPanel();
-renderOutlinePanel();
 $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on"); };
 // 全パーツの色許容誤差を一括変更するスライダー。#automaskBulkRowは
 // automaskList/automaskColormapsの外側の静的markupなので、renderAutomaskTab()
@@ -1839,6 +1702,15 @@ $("automaskBulkTolSlider").oninput=()=>{
   reextractAndRefresh();
   [].forEach.call(document.querySelectorAll(".automaskTolSlider"),sl=>{ sl.value=n; });
   [].forEach.call(document.querySelectorAll(".automaskTolVal"),lb=>{ lb.textContent=n; });
+};
+// 全身の色許容誤差スライダー。#automaskBodyRowも静的markupなので、
+// reextractBodyAndRefresh()内でrenderAutomaskPreviews()を呼んでも
+// このスライダー自体は壊れない。
+$("automaskBodyTolSlider").oninput=()=>{
+  const n=parseInt($("automaskBodyTolSlider").value,10);
+  $("automaskBodyTolVal").textContent=n;
+  genParams.body_color_tolerance=n;
+  reextractBodyAndRefresh();
 };
 (function(){
   // ★初期画面(サンプルモード/JSON読み込み/前回の続きの選択)。

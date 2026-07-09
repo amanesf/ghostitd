@@ -18,43 +18,6 @@ function extractRgbaWindow(fullRgba, fullW, fullH, x0,y0,x1,y1){
   return {rgba:out, w:w, h:h, x0:x0, y0:y0};
 }
 
-// accessories.py _local_alpha_band相当
-function localAlphaBand(fullRgba, fullW, fullH, x0,y0,x1,y1, whiteThr){
-  var win = extractRgbaWindow(fullRgba, fullW, fullH, x0,y0,x1,y1);
-  var out = new Uint8Array(fullW*fullH);
-  if(!win) return out;
-  var background = P3D.whiteBackgroundMask(win.rgba, win.w, win.h, whiteThr, null);
-  for(var y=0;y<win.h;y++){
-    for(var x=0;x<win.w;x++){
-      var i=y*win.w+x;
-      if(!background[i]) out[(win.y0+y)*fullW+(win.x0+x)]=1;
-    }
-  }
-  return out;
-}
-
-// accessories.py _local_alpha相当(帯分割)。2026-07-09の多角形(regions)形式
-// 廃止に伴いstageAccessories自体はもう呼ばなくなったが、gen_paramsの
-// white_thr/band_h/band_overlapは移行期間中の互換のためそのまま残す方針
-// (GHOST_SCANNER_PLAN.md「gen_paramsは維持」節)に合わせ、この関数自体も
-// 削除せず残している。
-function localAlpha(fullRgba, fullW, fullH, x0,y0,x1,y1, whiteThr, bandH, bandOverlap, pad){
-  pad = (pad===undefined) ? 25 : pad;
-  var x0i=Math.max(0,x0-pad), x1i=Math.min(fullW,x1+pad);
-  var y0i=Math.max(0,y0), y1i=Math.min(fullH,y1);
-  var out=new Uint8Array(fullW*fullH);
-  if(x1i-x0i<2 || y1i-y0i<2) return out;
-  var y=y0i, step=Math.max(1, bandH-bandOverlap);
-  while(y<y1i){
-    var by0=Math.max(0,y-pad), by1=Math.min(fullH, y+bandH+pad);
-    var band = localAlphaBand(fullRgba, fullW, fullH, x0i,by0,x1i,by1, whiteThr);
-    for(var i=0;i<out.length;i++){ if(band[i]) out[i]=1; }
-    y+=step;
-  }
-  return out;
-}
-P3D.localAlpha = localAlpha;
-
 // 矩形範囲をそのまま塗りつぶしたアルファ(実画像のピクセルは一切参照しない)。
 // mask形式アクセサリーでside面のマスクが無い場合、粗い深さ推定の矩形を
 // そのまま使うためのもの(GHOST_SCANNER_PLAN.md 原因①対応)。
@@ -234,7 +197,6 @@ function stageAccessories(opts){
       // carveRegion自体には常にsmoothIters:0を渡し、平滑化はfinishAccessoryMesh
       // 側で別途適用する。
       smoothIters: 0,
-      whiteThr: gp.white_thr,
     });
     if(!result){ console.warn("  accessories: carve失敗、このアクセサリーはモデルに含まれません:", name); return; }
     var rawV=result.V, rawF=result.F;

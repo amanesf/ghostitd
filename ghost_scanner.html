@@ -258,7 +258,7 @@
       </div>
       <button class="btn sm" id="lmOffsetReset">リセット</button>
       <button class="btn sm mint" id="lmOffsetApply">この位置で反映</button>
-      <p class="hint">この補正(位置+倍率)は、ランドマークだけでなく除外マスク・アクセサリー領域指定(タブ6)にも同じ値を自動適用します(Geminiの座標のズレは面ごとに共通の傾向であることが多いため)。</p>
+      <p class="hint">この補正(位置+倍率)は、ランドマークだけでなくアクセサリー領域指定(タブ6)にも同じ値を自動適用します(Geminiの座標のズレは面ごとに共通の傾向であることが多いため)。</p>
       <div class="chatLog" id="lmChatLog"></div>
       <div class="chatRow">
         <input id="lmChatInput" placeholder="例: 右肘をもう少し下に" disabled/>
@@ -273,7 +273,7 @@
     <div class="card">
       <h2>6-1. アクセサリー検出(名称のみ、任意)</h2>
       <p class="hint">まず「何を抽出するか」の一覧だけを決める(精度を上げるため、範囲指定は次のステップで1件ずつ個別に行う)。front/side/back 3枚同時入力でbody/accessoryを二分類します(スキップ可)。</p>
-      <p class="hint"><b>「アクセサリー」と「除外マスク」は別の分類です。</b>アクセサリーは「体の輪郭からはみ出るかどうか」で決まる3Dパーツの分割単位(スカート・髪の房・尻尾など、体に密着していない全て)。除外マスクは、そのアクセサリーのうち<b>体そのもののシルエット計測を狂わせる、体の輪郭より外側に完全にはみ出た部分だけ</b>が対象になる別基準のフラグです(下の一覧の「除外マスク」欄を参照。例: 前髪・後ろ髪はアクセサリーだが体の地肌を覆っているため除外マスク対象外、ツインテールは体の外側にはみ出ているため除外マスク対象)。</p>
+      <p class="hint">アクセサリーは「体の輪郭からはみ出るかどうか」で決まる3Dパーツの分割単位です(スカート・髪の房・尻尾など、体に密着していない全て)。体に密着してその輪郭に沿う服(通常のシャツ・ズボン・靴等)はbody(黒塗り)として扱われます。</p>
       <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="accPromptText"></pre></details>
       <button class="btn mint" id="accRunBtn">アクセサリー一覧を検出</button>
       <div id="accList"></div>
@@ -809,22 +809,6 @@ var PROMPT_F =
 "背中まで長く流れる後ろ髪やツインテールのように体の動きに緩やかに追従\n"+
 "させたいものは`head`+`neck`や`head`+`chest`のような複数ボーン(soft)を\n"+
 "検討してください。\n\n"+
-"## 除外マスク用フラグ(重要、body/accessory分類とは別基準)\n"+
-"各accessoryについて、**シルエット測定(体の輪郭検出)から除外すべきかどうか**\n"+
-"を別途判定してください。これは「3Dパーツとして分けるかどうか」とは異なる\n"+
-"基準です。判断基準: **その部分の下に、隠れた体の輪郭を推測する手がかりが\n"+
-"無いか**。\n"+
-"- `true`(除外すべき)の例: ツインテール・アホ毛・後れ毛など体の輪郭の外側に\n"+
-"  完全に飛び出している髪、体の輪郭より外側に大きく張り出すスカート・マント\n"+
-"  ・広がった袖(隠れている脚/腕はその下に実在するので推測で構わない)\n"+
-"- `false`(除外すべきでない)の例: **前髪・後ろ髪など、頭部の地肌そのものを\n"+
-"  覆っている髪**(除外すると頭部の輪郭を測定する手がかりが画像上に一切\n"+
-"  残らなくなるため)。体に密着し輪郭をそのまま表す衣服の一部(既にbody\n"+
-"  扱いのものは対象外)\n\n"+
-"特に注意: 前髪・後ろ髪は3Dパーツとしては分離してaccessory化しますが、\n"+
-"**除外マスクには含めないでください**(`exclude_from_body_silhouette: false`)。\n"+
-"頭部の地肌が画像に描かれていないキャラクターがほとんどのため、ここを\n"+
-"除外すると頭部の基準サイズが求められなくなります。\n\n"+
 "## 出力手順(このステップでは領域(regions)は出力不要です。まず「何を\n"+
 "抽出するか」の一覧を確定させ、各accessoryの範囲指定は後続のステップで\n"+
 "1件ずつ個別に行います。色の割当はこちら側で機械的に行うため、colorフィールド\n"+
@@ -836,10 +820,9 @@ var PROMPT_F =
 '   (1つのボーンに固定なら"rigid"、複数ボーンにまたがり体の動きに追従\n'+
 '   するなら"soft"。例: スカート→hips+thigh_L+thigh_R、soft。\n'+
 '   ヘッドホン→head、rigid。尻尾→hips、rigid)\n'+
-"2. 各accessoryについて、上記の「除外マスク用フラグ」を判定してください\n"+
-"3. 各accessoryについて、front/side/backのうちどの面に実際に写っているか\n"+
+"2. 各accessoryについて、front/side/backのうちどの面に実際に写っているか\n"+
 "   (visible_views)を挙げてください(隠れて見えない面は含めない)\n"+
-"4. 各accessoryについて、`reason`には**なぜaccessory(体の輪郭からはみ出る\n"+
+"3. 各accessoryについて、`reason`には**なぜaccessory(体の輪郭からはみ出る\n"+
 "   もの)と判断したか**という理由だけでなく、**キャラクターの体のどの部分に、\n"+
 "   具体的にどのように付いている/生えているか**という位置の説明も必ず含めて、\n"+
 "   文章で具体的に書いてください。この`reason`は後続の別の作業(この画像を\n"+
@@ -859,7 +842,6 @@ var PROMPT_F =
 '      "bones": ["hips", "thigh_L", "thigh_R"],\n'+
 '      "reason": "腰の位置から円錐状に大きく広がり、太もものシルエットより外側に\\n'+
 '張り出しているプリーツ状の布。腰のベルト付近から膝上あたりまでの範囲を覆う",\n'+
-'      "exclude_from_body_silhouette": true,\n'+
 '      "visible_views": ["front", "side", "back"]\n'+
 "    }\n"+
 "  ]\n"+
@@ -1188,7 +1170,6 @@ function renderAccList(list){
     var hasRegion = a.regions && Object.keys(a.regions).length>0;
     d.innerHTML="<b style='color:"+(a.color||"#fff")+"'>"+a.name+"</b>"+
       "mode="+a.mode+" / bones="+(a.bones||[]).join(",")+
-      " / 除外マスク="+(a.exclude_from_body_silhouette?"あり":"なし")+
       " / 写っている面="+(a.visible_views||[]).join(",")+
       " / 領域="+(hasRegion?"取得済み":"未取得");
     el.appendChild(d);
@@ -1396,14 +1377,17 @@ async function buildLandmarksAiJson(){
   // 導かれるexclude_masksの合成は、ジェネレータ(landmark_tool.html)側の
   // 「自動マスク」タブへ移した(色許容誤差をパーツごとに試行錯誤しながら
   // その場でプレビューできるようにするため)。ここではaccessory一覧
-  // (名前/取り付け方式/ボーン/色/色許容誤差の既定値/除外フラグ)と、抽出元となる
+  // (名前/取り付け方式/ボーン/色/色許容誤差の既定値)と、抽出元となる
   // 色分けマップ画像そのものを渡すところまでを担当する。
+  // ★2026-07-09: exclude_from_body_silhouette(除外マスク用フラグ)は、
+  // 全身のシルエットも色分けマップ由来の色許容誤差方式で抽出するように
+  // なり(アクセサリー色の画素は体色=黒と一致しないため自動的に除外される)
+  // 不要になったため廃止した。
   if(state.accessories.list && state.accessories.list.length){
     out.accessories=state.accessories.list.map(function(a){
       return {
         name:a.name, mode:a.mode, bones:a.bones, color:a.color,
         colorTolerance:(a.colorTolerance!==undefined?a.colorTolerance:40),
-        exclude_from_body_silhouette:!!a.exclude_from_body_silhouette,
       };
     });
     var colormaps={};
@@ -1452,7 +1436,7 @@ function buildSessionJson(){
     accessories:{
       list:(state.accessories.list||[]).map(function(a){
         return {name:a.name, mode:a.mode, bones:a.bones, color:a.color, reason:a.reason,
-          exclude_from_body_silhouette:a.exclude_from_body_silhouette, visible_views:a.visible_views};
+          colorTolerance:a.colorTolerance, visible_views:a.visible_views};
       }),
       confirmed: state.accessories.confirmed
     },

@@ -8,7 +8,8 @@ var P3D = global.P3D = global.P3D || {};
  * opts: {
  *   frontAlpha,backAlpha,sideAlpha: Uint8Array(front/back/side_cut相当。除外マスク適用済み)
  *   faW,faH,saW,saH: 画像サイズ
- *   frontCont,backCont,sideCont: Float32Array|null (subpixel補正用連続値)
+ *   frontCont,backCont,sideCont: Float32Array|null (常にnull。色分けマップ由来の
+ *     マスクは既にくっきりした2値のためサブピクセル補正は行わない)
  *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション
  *   pivots: skeleton.computePivots()の戻り値.pivots(+extraPivotsをmergeしたもの)
  *   gp: gen_params(パラメータタブの現在値)
@@ -54,9 +55,10 @@ function stageVisualHull(opts){
   var result = P3D.carveRegion({
     fa: opts.frontAlpha, ba: opts.backAlpha, sa: opts.sideAlpha,
     faW: opts.faW, faH: opts.faH, saW: opts.saW, saH: opts.saH,
-    faCont: gp.subpixel ? opts.frontCont : null,
-    baCont: gp.subpixel ? opts.backCont : null,
-    saCont: gp.subpixel ? opts.sideCont : null,
+    // ★2026-07-09: 全身のシルエットが色分けマップ由来(既にくっきりした2値)に
+    // なったため、白背景しきい値による写真の明度を使ったサブピクセル境界
+    // 補正は行わない(js/pipeline.jsから常にnullが渡される)。
+    faCont: opts.frontCont, baCont: opts.backCont, saCont: opts.sideCont,
     SCALE: opts.SCALE, CX: opts.CX, YBOT: opts.YBOT, SYTOP: opts.SYTOP, SYBOT: opts.SYBOT, SIDE_REF: opts.SIDE_REF,
     backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
     sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
@@ -71,7 +73,6 @@ function stageVisualHull(opts){
     armLines: armLines, armMaxHw: gp.arm_max_hw,
     handLines: handLines.length ? handLines : null,
     handDepthHw: gp.hand_depth, handMaxHw: gp.hand_max_hw,
-    whiteThr: gp.white_thr,
   });
   if(!result) throw new Error("visual_hull: carving produced an empty mesh");
   var rawV=result.V, rawF=result.F;

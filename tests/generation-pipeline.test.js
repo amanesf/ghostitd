@@ -17,6 +17,10 @@
 // JSONをそのまま使う代わりに、テスト内でaccessoriesを空にした一時JSONを
 // 組み立てて「JSON読み込み」機能経由で読み込ませている(手動でアクセサリーを
 // 追加するUI(旧「パーツ＋」タブ)は廃止済みのため)。
+// ★2026-07-09(同日中に再更新): 全身のシルエットも色分けマップ+色許容誤差
+// 方式に統一したため、サンプルをcolormaps(front/side/leftSide/back)込みの
+// 新形式に作り直した(旧形式=colormapsを持たないJSONのサポートは廃止)。
+// アクセサリーの色もcolormaps上の実際の配色に合わせて再設定した。
 //
 // 生成結果を意図的に変える変更(例: 彫刻アルゴリズムの改善、パラメータ
 // 既定値の変更)をした場合は、このテストが失敗するのが正しい挙動です。
@@ -32,12 +36,12 @@ const { chromium } = require("playwright");
 const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 
 const EXPECTED_BODY_ONLY = {
-  byteLength: 512120,
-  sha256: "91eee9aa7789371e3a378726a1db6fe8f69ca0a3c9e0ab28f2bc2d3025974e14",
+  byteLength: 533048,
+  sha256: "ce00ec68ad3de38b18684777e347eaa0b7a524a9e5791de9aa69deac67ae4d51",
 };
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 791912,
-  sha256: "a96a31addf3af956e5775221604b47564bfeccca7fbaea7f674a5031bb049db8",
+  byteLength: 837432,
+  sha256: "eb172a674d98b6c9224f08bedd20caa69557405faae537e47fda6c0288f46ad6",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

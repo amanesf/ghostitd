@@ -35,9 +35,10 @@ var DEFAULT_GEN_PARAMS = {
   body_smooth_iters: 0, acc_smooth_iters: 0,
   arm_circle: true, arm_tol: 0.06, arm_max_hw: 0.2,
   hand_extrude: true, hand_depth: 0.01, hand_max_hw: 0.1, hand_len: 0.25,
-  subpixel: true,
-  white_thr: 240, alpha_dilate: 9,
-  band_h: 220, band_overlap: 40,
+  alpha_dilate: 9,
+  // ★2026-07-09: 全身のシルエットも色分けマップ+色許容誤差方式に統一した
+  // (js/pipeline.jsのrunCarvingStages参照)。body(体=黒)の色許容誤差。
+  body_color_tolerance: 40,
   kb_per_face: 200,
   // ★2026-07-05: 背面/側面写真はそれぞれ別に撮影/作画されるため、前面基準の
   // CX/SCALE/YBOTをそのまま流用(鏡像)する彫り出し/テクスチャ変換に、
@@ -149,50 +150,6 @@ function imageToImageData(img, w, h){
 }
 P3D.imageToImageData = imageToImageData;
 
-// ---- 背景マスク(common.white_background_maskのJS移植) ----
-// rgba: ImageData.data (Uint8ClampedArray, RGBA), w,h: サイズ
-// alsoPassable: Uint8Array(w*h)、1=通行可能として扱う(除外マスクのブリッジ用)
-// 戻り値: Uint8Array(w*h)、1=背景
-function whiteBackgroundMask(rgba, w, h, whiteThr, alsoPassable){
-  whiteThr = (whiteThr===undefined) ? 250 : whiteThr;
-  var n=w*h;
-  var passable=new Uint8Array(n);
-  for(var i=0;i<n;i++){
-    var o=i*4;
-    var r=rgba[o],g=rgba[o+1],b=rgba[o+2];
-    var mn=Math.min(r,g,b);
-    passable[i] = (mn>whiteThr) ? 1 : 0;
-  }
-  if(alsoPassable){
-    for(var i2=0;i2<n;i2++){ if(alsoPassable[i2]) passable[i2]=1; }
-  }
-  // 外周(画像の縁)に連結したpassable領域だけをBFSでbackgroundとする
-  var bg=new Uint8Array(n);
-  var visited=new Uint8Array(n);
-  var stack=[];
-  function pushIfPassable(idx){
-    if(!visited[idx] && passable[idx]){ visited[idx]=1; stack.push(idx); }
-  }
-  for(var x=0;x<w;x++){ pushIfPassable(x); pushIfPassable((h-1)*w+x); }
-  for(var y=0;y<h;y++){ pushIfPassable(y*w); pushIfPassable(y*w+(w-1)); }
-  while(stack.length){
-    var idx=stack.pop();
-    bg[idx]=1;
-    var x=idx%w, y=(idx/w)|0;
-    if(x>0) pushIfPassable(idx-1);
-    if(x<w-1) pushIfPassable(idx+1);
-    if(y>0) pushIfPassable(idx-w);
-    if(y<h-1) pushIfPassable(idx+w);
-    // 8連結(ndimage.labelの既定structureが8連結のため一致させる)
-    if(x>0&&y>0) pushIfPassable(idx-w-1);
-    if(x<w-1&&y>0) pushIfPassable(idx-w+1);
-    if(x>0&&y<h-1) pushIfPassable(idx+w-1);
-    if(x<w-1&&y<h-1) pushIfPassable(idx+w+1);
-  }
-  return bg;
-}
-P3D.whiteBackgroundMask = whiteBackgroundMask;
-
 // ---- 連結成分の穴埋め(scipy.ndimage.binary_fill_holesのJS簡易版) ----
 // mask: Uint8Array(w*h) 1=前景。外周から辿れない0領域(=穴)を1で埋める。
 function fillHoles(mask, w, h){
@@ -260,40 +217,6 @@ function significantComponentsMask(mask, w, h, minAreaPx){
 }
 P3D.significantComponentsMask = significantComponentsMask;
 
-// ---- 背景除去(prep.load_rgba_remove_whiteのJS移植) ----
-// img: HTMLImageElement, whiteThr: number, excludeMask: Uint8Array(w*h)|null
-// 戻り値: {w,h,rgba(Uint8ClampedArray,元画像そのまま), alpha(Uint8Array, 1=前景)}
-function loadRgbaRemoveWhite(img, whiteThr, excludeMask){
-  var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
-  var id=imageToImageData(img, w, h);
-  var background = whiteBackgroundMask(id.data, w, h, whiteThr, excludeMask);
-  var bridgedHole = new Uint8Array(w*h);
-  var hasExclude=false;
-  if(excludeMask){ for(var i=0;i<excludeMask.length;i++){ if(excludeMask[i]){hasExclude=true;break;} } }
-  if(hasExclude){
-    var backgroundNoBridge = whiteBackgroundMask(id.data, w, h, whiteThr, null);
-    for(var i2=0;i2<bridgedHole.length;i2++){
-      bridgedHole[i2] = (background[i2] && !backgroundNoBridge[i2]) ? 1 : 0;
-    }
-  }
-  var alpha=new Uint8Array(w*h);
-  for(var i3=0;i3<alpha.length;i3++) alpha[i3] = background[i3] ? 0 : 1;
-  // ★2026-07-09バグ修正: 以前はlargestComponent()で「最大の1つの連結成分だけ」
-  // を残していたが、これは「キャラクターのシルエットは常に1つに繋がっている」
-  // という前提に依存しており、除外範囲(exclude_masks)がスカート等の
-  // 連結部分を削ると胴体と脚が分断され、脚側が丸ごと消える不具合があった
-  // (前髪が体幹と離れて描かれる、腕がポーズで体幹から離れる等でも同種の
-  // 問題が起きうる)。最初から「シルエットは複数の領域に分かれることがある」
-  // 前提に設計し直し、ノイズ(圧縮アーティファクト等の小さすぎる領域)だけを
-  // 除去するsignificantComponentsMask()に置き換える(色分けマップからの
-  // マスク抽出で既に使っているのと同じ関数)。
-  alpha = significantComponentsMask(alpha, w, h);
-  alpha = fillHoles(alpha, w, h);
-  for(var i4=0;i4<alpha.length;i4++){ if(bridgedHole[i4]) alpha[i4]=0; }
-  return {w:w, h:h, rgba:id.data, alpha:alpha};
-}
-P3D.loadRgbaRemoveWhite = loadRgbaRemoveWhite;
-
 // ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面)画像は、side
 // (右向き側面)と全く同じ座標変換式(SIDE_REF起点の(px-SIDE_REF)/SCALE)を
 // 再利用できるよう、読み込み時点で水平反転して「characterが右を向いている」
@@ -335,12 +258,11 @@ P3D.hexToRgb = hexToRgb;
 // targetColorHex: 抽出したい色("#rrggbb"), toleranceOpt: 色距離許容誤差
 // (デフォルト40。アンチエイリアス境界のにじみを吸収するため、RGB各成分の
 // 差の二乗和のルート=ユークリッド距離で判定する)。
-// 戻り値: {maskDataUrl, bbox:[x0,y0,x1,y1](ピクセル座標、y0<y1)} | null
-// (該当色の画素が1つも無ければnull)。一定面積以上の連結成分を全てOR合成して
-// 採用する(GHOST_SCANNER_PLAN.md「運用面の修正6点・②」。以前は最大成分1つ
-// だけを採用しており、同一色の領域が複数の孤立した塊に分かれるケースで
-// 小さい方が失われていた)。
-function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAreaPxOpt){
+// 戻り値: Uint8Array(w*h)、1=対象色の画素(連結成分フィルタ前の生の判定)。
+// ★2026-07-09: body(体=黒)もaccessoryと同じ色分けマップ+色許容誤差方式で
+// 抽出するようになったため(loadAlphaFromColormap参照)、色距離判定部分を
+// extractMaskFromColormapから切り出して共通化した。
+function colorRegionRawMask(ctx, w, h, targetColorHex, toleranceOpt){
   var tol = (toleranceOpt===undefined || toleranceOpt===null) ? 40 : toleranceOpt;
   var target = hexToRgb(targetColorHex);
   var id = ctx.getImageData(0,0,w,h);
@@ -351,6 +273,17 @@ function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAre
     var dr=data[i]-target[0], dg=data[i+1]-target[1], db=data[i+2]-target[2];
     if(dr*dr+dg*dg+db*db <= tol2) raw[p]=1;
   }
+  return raw;
+}
+P3D.colorRegionRawMask = colorRegionRawMask;
+
+// 戻り値: {maskDataUrl, bbox:[x0,y0,x1,y1](ピクセル座標、y0<y1)} | null
+// (該当色の画素が1つも無ければnull)。一定面積以上の連結成分を全てOR合成して
+// 採用する(GHOST_SCANNER_PLAN.md「運用面の修正6点・②」。以前は最大成分1つ
+// だけを採用しており、同一色の領域が複数の孤立した塊に分かれるケースで
+// 小さい方が失われていた)。
+function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAreaPxOpt){
+  var raw = colorRegionRawMask(ctx, w, h, targetColorHex, toleranceOpt);
   var comp = significantComponentsMask(raw, w, h, minAreaPxOpt);
   var x0=w, x1=-1, y0=h, y1=-1, any=false;
   for(var y=0;y<h;y++){
@@ -376,31 +309,53 @@ function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAre
 }
 P3D.extractMaskFromColormap = extractMaskFromColormap;
 
-// ---- 除外マスク(exclude_masks)の合成: exclude_from_body_silhouette===trueの
-// accessoryのマスク(色分けマップ由来)をOR合成し、体シルエット測定からの
-// 除外範囲(PNG dataURL)を作る。★2026-07-09: 元はghost_scanner.html専用の
-// js/scanner_render.jsにあったが(手動除外マスク塗りUI廃止に伴い)、
-// landmark_tool.htmlの自動マスクタブでtolerance変更→再抽出のたびに
-// exclude_masksも作り直す必要が生じたため、両ツールが使う共通ユーティリティ
-// としてこちらへ移した。
-// accessories: exclude_from_body_silhouetteフィールドを含むaccessories配列、
-// view: "front"|"side"|"back"、w,h: そのview画像の原寸サイズ
-// 戻り値: PNG dataURL、対象accessoryが1つもなければnull
-function buildExcludeMaskDataUrl(accessories, view, w, h){
-  var maskTargets = (accessories||[]).filter(function(a){
-    var m = a.mask && a.mask[view];
-    return a.exclude_from_body_silhouette===true && m && m.maskDataUrl && m._img;
-  });
-  if(!maskTargets.length) return null;
-  var c = document.createElement("canvas"); c.width=w; c.height=h;
-  var ctx = c.getContext("2d");
-  maskTargets.forEach(function(a){
-    ctx.globalCompositeOperation="source-over";
-    ctx.drawImage(a.mask[view]._img, 0, 0, w, h);
-  });
-  return c.toDataURL("image/png");
+// ---- 体(全身)のシルエット抽出: 色分けマップの「白背景でない領域」方式 ----
+// ★2026-07-09: 当初は体(色分けマップ上は黒)をaccessoryと同じ「対象色との
+// 色距離」で抽出していたが、マフラーが首を・スカートが腰を覆う等、体の上に
+// アクセサリーが重なる場所では、その行の画素が体色(黒)と一致しなくなり、
+// visual hull(全身の輪郭カービング)が行単位で連続性を追えず、頭部が胴体から、
+// 脚が腰から浮いて分離するバグを引き起こした(旧来のwhite_thr方式では
+// 「白でなければ全て体」という判定だったため、体の上に重なるアクセサリーの
+// 画素もそのまま体のシルエット測定に使え、この問題が起きなかった)。
+// 色分けマップは元々「背景=白、それ以外=キャラクター」という前提で作られて
+// いるため、体のシルエットも同じ考え方(白でなければ体)で抽出するのが正しい。
+// これはwhiteBackgroundMask(旧)と同じロジックだが、写真ではなくノイズの
+// 少ない色分けマップに対して行うため、しきい値ではなく色許容誤差
+// (白との色距離)で判定する。
+// ctx,w,h: 色分けマップが描画済みのcanvas context、toleranceOpt: 白との
+// 色許容誤差(既定40。大きくするほど淡い色も背景とみなされやすくなる)。
+// 戻り値: Uint8Array(w*h)、1=体のシルエット(穴埋め・ノイズ除去済み)。
+function loadAlphaFromColormap(ctx, w, h, toleranceOpt){
+  var passable = colorRegionRawMask(ctx, w, h, "#ffffff", toleranceOpt);
+  var w_ = w, h_ = h, n = w_*h_;
+  // 外周(画像の縁)に連結したpassable(白に近い)領域だけを背景とする
+  // (whiteBackgroundMaskと同じBFS。内部の白い衣装等を誤って背景扱いしない)。
+  var bg = new Uint8Array(n);
+  var visited = new Uint8Array(n);
+  var stack = [];
+  function pushIfPassable(idx){ if(!visited[idx] && passable[idx]){ visited[idx]=1; stack.push(idx); } }
+  for(var x=0;x<w_;x++){ pushIfPassable(x); pushIfPassable((h_-1)*w_+x); }
+  for(var y=0;y<h_;y++){ pushIfPassable(y*w_); pushIfPassable(y*w_+(w_-1)); }
+  while(stack.length){
+    var idx=stack.pop();
+    bg[idx]=1;
+    var xx=idx%w_, yy=(idx/w_)|0;
+    if(xx>0) pushIfPassable(idx-1);
+    if(xx<w_-1) pushIfPassable(idx+1);
+    if(yy>0) pushIfPassable(idx-w_);
+    if(yy<h_-1) pushIfPassable(idx+w_);
+    if(xx>0&&yy>0) pushIfPassable(idx-w_-1);
+    if(xx<w_-1&&yy>0) pushIfPassable(idx-w_+1);
+    if(xx>0&&yy<h_-1) pushIfPassable(idx+w_-1);
+    if(xx<w_-1&&yy<h_-1) pushIfPassable(idx+w_+1);
+  }
+  var alpha = new Uint8Array(n);
+  for(var i=0;i<n;i++) alpha[i] = bg[i] ? 0 : 1;
+  alpha = significantComponentsMask(alpha, w, h);
+  alpha = fillHoles(alpha, w, h);
+  return alpha;
 }
-P3D.buildExcludeMaskDataUrl = buildExcludeMaskDataUrl;
+P3D.loadAlphaFromColormap = loadAlphaFromColormap;
 
 // マスクdataURL(白RGB+アルファ=前景)からUint8Array(w*h, 1=前景)を復元する
 // (3D彫刻側/範囲計算側で真偽画素配列として扱いたい箇所向けのヘルパー)。
@@ -499,85 +454,6 @@ function bleedEdges(rgba, w, h, alpha, alphaDilate){
 }
 P3D.bleedEdges = bleedEdges;
 
-// ---- 前景マスクの収縮(erosion, 4連結、N回) ----
-// mask: Uint8Array(w*h) 1=前景。境界からiterations px分だけ内側に後退させた
-// マスクを返す(輪郭線除去プレビュー: 前景マスクをNpx収縮して「外周の帯」を
-// 求めるために使う)。
-function erodeMaskPx(mask, w, h, iterations){
-  iterations = iterations || 0;
-  var cur = mask;
-  for(var it=0; it<iterations; it++){
-    var next=new Uint8Array(w*h);
-    for(var y=0;y<h;y++){
-      for(var x=0;x<w;x++){
-        var idx=y*w+x;
-        if(!cur[idx]){ next[idx]=0; continue; }
-        var keep = (x>0?cur[idx-1]:0) && (x<w-1?cur[idx+1]:0) &&
-                   (y>0?cur[idx-w]:0) && (y<h-1?cur[idx+w]:0);
-        next[idx] = keep ? 1 : 0;
-      }
-    }
-    cur = next;
-  }
-  return cur;
-}
-P3D.erodeMaskPx = erodeMaskPx;
-
-// ---- シルエット外周の黒い輪郭線除去(プレビュー用) ----
-// 前景マスクをbandPx収縮し、前景かつ収縮後マスクの外側にある「帯」の中で
-// 暗い(輝度<darkThr)ピクセルだけを、bleedEdgesのBFSを反転させた方向
-// (帯の暗ピクセル→最も近い健全な前景色)で塗りのばして置き換える。
-// シード(健全色の供給元)は「前景かつ帯の暗ピクセルではない」画素全体
-// (=収縮後の内部領域＋帯の中の明るい画素)なので、輪郭線がシルエットの
-// 外周だけにあるという前提の下では内部の黒髪・黒服などは一切変更されない
-// (収縮によって内部領域自体がそもそも帯の外＝対象外になるため)。
-// rgba: Uint8ClampedArray(w*h*4), alpha: Uint8Array(w*h) 1=前景
-// 戻り値: 新しいUint8ClampedArray(w*h*4)(alphaはそのまま維持)
-function removeSilhouetteOutline(rgba, w, h, alpha, bandPx, darkThr){
-  bandPx = (bandPx===undefined) ? 6 : bandPx;
-  darkThr = (darkThr===undefined) ? 90 : darkThr;
-  var n = w*h;
-  if(bandPx<=0) return new Uint8ClampedArray(rgba);
-  var eroded = erodeMaskPx(alpha, w, h, bandPx);
-  var darkBand = new Uint8Array(n);
-  for(var i=0;i<n;i++){
-    if(!alpha[i] || eroded[i]) continue; // 前景外 or 内部領域は対象外
-    var o=i*4;
-    var lum = 0.299*rgba[o] + 0.587*rgba[o+1] + 0.114*rgba[o+2];
-    if(lum < darkThr) darkBand[i]=1;
-  }
-  // 多元BFS: シード=前景かつdarkBandでない画素。前景内だけを伝播して
-  // darkBand画素へ最も近い健全画素のindexを求める(bleedEdgesと同じBFSを
-  // 「透明→不透明」ではなく「帯の暗部→帯外の健全前景」方向に使う)。
-  var nearestIdx=new Int32Array(n).fill(-1);
-  var visited=new Uint8Array(n);
-  var queue=[]; var qh=0;
-  for(var i2=0;i2<n;i2++){
-    if(alpha[i2] && !darkBand[i2]){ nearestIdx[i2]=i2; visited[i2]=1; queue.push(i2); }
-  }
-  while(qh<queue.length){
-    var idx=queue[qh++];
-    var src=nearestIdx[idx];
-    var x=idx%w, y=(idx/w)|0;
-    var nbrs=[];
-    if(x>0)nbrs.push(idx-1); if(x<w-1)nbrs.push(idx+1);
-    if(y>0)nbrs.push(idx-w); if(y<h-1)nbrs.push(idx+w);
-    for(var k=0;k<nbrs.length;k++){
-      var ni=nbrs[k];
-      if(!visited[ni] && alpha[ni]){ visited[ni]=1; nearestIdx[ni]=src; queue.push(ni); }
-    }
-  }
-  var out = new Uint8ClampedArray(rgba);
-  for(var i3=0;i3<n;i3++){
-    if(!darkBand[i3]) continue;
-    var src2 = nearestIdx[i3];
-    if(src2<0) continue;
-    var so=src2*4, oo=i3*4;
-    out[oo]=rgba[so]; out[oo+1]=rgba[so+1]; out[oo+2]=rgba[so+2];
-  }
-  return out;
-}
-P3D.removeSilhouetteOutline = removeSilhouetteOutline;
 
 // ---- 複数のTypedArrayを1本に連結する ----
 // pipeline.js(stageAccessories内)とaccessories.jsで同一の実装(concatF32)が

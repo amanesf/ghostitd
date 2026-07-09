@@ -15,17 +15,6 @@ function cloneCanvasEl(src){
   return c;
 }
 
-function excludeMaskToBool(ecObj, w, h){
-  // ecObj: {canvas, ctx} (landmark_tool.htmlのexcludeMask[view]) または null
-  if(!ecObj) return null;
-  var ctx = ecObj.canvas.getContext('2d');
-  var id = ctx.getImageData(0,0,w,h);
-  var out = new Uint8Array(w*h);
-  for(var i=0;i<w*h;i++){ out[i] = (id.data[i*4+3] > 128) ? 1 : 0; }
-  return out;
-}
-P3D.excludeMaskToBool = excludeMaskToBool;
-
 // landmarks.py の AIツール由来ブロック(clavicle_*_m/wrist_*_mx/elbow_*_mx/
 // knee_v/ankle_v/toe_v/elbow_frac/chest_v)のJS移植。
 // points: landmark_tool.htmlの points オブジェクト({key:[px,py]})
@@ -88,12 +77,23 @@ function buildDerivedLandmarks(points, analysis, derivedBase){
 P3D.buildDerivedLandmarks = buildDerivedLandmarks;
 
 /**
+ * ★奥行き(Z軸)計算に使う側面画像について: 全身の奥行き(stageVisualHull)は
+ * 常にside(右向き側面)だけを使う。leftSide(左向き側面)は使わない
+ * (下記のleftSide変数はmask.leftSideを持つ非対称アクセサリーの彫刻専用で、
+ * side用のSIDE_REF起点の変換式(px-SIDE_REF)/SCALEをそのまま再利用できる
+ * よう、読み込み時に水平反転してから独自にキャリブレーションする)。
+ * side/leftSideのどちらを使うか、どちらを反転するかを変更する場合は、
+ * このコメントとrunCarvingStages内のleftSide計算部分の両方を必ず更新する
+ * こと(2026-07-09、ユーザー指摘によりこの前提を明文化)。
+ *
  * state: {
  *   imgs: {front:{el,w,h}, side:{...}, back:{...}}  (landmark_tool.htmlのimgs)
+ *   colormaps: {front:{canvas,ctx,w,h}, side:{...}, leftSide:{...}, back:{...}}
+ *     (landmark_tool.htmlのcolormaps。体・アクセサリーとも色分けマップ由来の
+ *     色許容誤差方式でシルエットを抽出するため必須)
  *   points, analysis: landmark_tool.htmlの同名変数
  *   deriveFromPoints: function(points,analysis)->derivedBase (呼び出し元の関数をそのまま渡す)
  *   accessories: landmark_tool.htmlのaccessories配列
- *   excludeMask: landmark_tool.htmlのexcludeMask({front,side,back})
  *   seamAngles: landmark_tool.htmlのseamAngles
  *   seamNoSide: landmark_tool.htmlのseamNoSide(パーツ別「側面画像を使わない」フラグ)
  *   seamSmoothIters: landmark_tool.htmlのseamSmoothIters(境界線平滑化の強さ)
@@ -113,7 +113,7 @@ P3D.buildDerivedLandmarks = buildDerivedLandmarks;
 async function runCarvingStages(state, report){
   var gp = state.genParams;
 
-  report("prep(背景除去)");
+  report("prep(体シルエット抽出)");
   var views=['front','side','back'];
   var rgbaFull={}, alphaFull={}, sizes={};
   views.forEach(function(v){
@@ -123,12 +123,17 @@ async function runCarvingStages(state, report){
     rgbaFull[v] = id.data;
     sizes[v] = {w:w,h:h};
   });
-  var excludeBool = {};
-  views.forEach(function(v){ excludeBool[v] = excludeMaskToBool(state.excludeMask[v], sizes[v].w, sizes[v].h); });
+  // ★2026-07-09: 全身のシルエットも色分けマップから抽出するようにした
+  // (以前は素の写真に白背景しきい値(white_thr)を掛けていた)。ただし
+  // 「体色(黒)と一致する画素だけを体とみなす」方式にすると、マフラーが
+  // 首を・スカートが腰を覆う行では体色の画素が無くなり、visual hullが
+  // 頭部/脚を胴体から浮いた別パーツとして彫ってしまうバグがあった(P3D.
+  // loadAlphaFromColormap参照)。色分けマップは元々「背景=白、それ以外は
+  // キャラクター」という前提で作られているため、体のシルエットも
+  // 「白でなければ体」という判定(旧white_thr方式と同じ考え方)で抽出する。
   views.forEach(function(v){
-    var img = state.imgs[v].el;
-    var res = P3D.loadRgbaRemoveWhite(img, gp.white_thr, excludeBool[v]);
-    alphaFull[v] = res.alpha;
+    var cm = state.colormaps[v];
+    alphaFull[v] = P3D.loadAlphaFromColormap(cm.ctx, cm.w, cm.h, gp.body_color_tolerance);
   });
   await tick();
 
@@ -166,18 +171,19 @@ async function runCarvingStages(state, report){
   var SCALE = prof.YBOT-prof.YTOP;
   console.log("  profile: CX",prof.CX,"YTOP",prof.YTOP,"YBOT",prof.YBOT,"SIDE_REF",core.SIDE_REF,"SYTOP",prof.SYTOP,"SYBOT",prof.SYBOT);
 
-  // ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面。色分けマップの
-  // ことが多く、通常写真である必要はない。白背景+非白=シルエットとして
-  // 扱えれば十分)がある場合、sideと同じキャリブレーション手順を、水平反転
-  // したアルファに対して行う(P3D.flipAlphaHorizontal参照。反転することで
-  // side用の各種変換式(SIDE_REF起点)をそのまま再利用できるようにするため)。
-  // 体本体(stageVisualHull)はside(右)のみを使い、leftSideは片方だけに
-  // ある非対称アクセサリー(例: 左だけのツインテール)の彫刻にのみ使う。
+  // ★奥行き(Z)計算に使う側面画像はside(右)固定、leftSide(左)は使わない★
+  // 2026-07-09(左右非対称キャラ対応): leftSide(左向き側面。色分けマップ)が
+  // ある場合、sideと同じキャリブレーション手順を、水平反転したアルファに
+  // 対して行う(P3D.flipAlphaHorizontal参照。反転することでside用の各種
+  // 変換式(SIDE_REF起点)をそのまま再利用できるようにするため)。体本体
+  // (stageVisualHull)はside(右)のみを使い、leftSideは片方だけにある
+  // 非対称アクセサリー(例: 左だけのツインテール)の彫刻にのみ使う。
   var leftSide = null;
-  if(state.imgs.leftSide){
+  if(state.imgs.leftSide && state.colormaps.leftSide){
     var lImg = state.imgs.leftSide.el, lW = state.imgs.leftSide.w, lH = state.imgs.leftSide.h;
-    var lLoaded = P3D.loadRgbaRemoveWhite(lImg, gp.white_thr, null);
-    var lAlphaFlipped = P3D.flipAlphaHorizontal(lLoaded.alpha, lW, lH);
+    var lCm = state.colormaps.leftSide;
+    var lAlpha = P3D.loadAlphaFromColormap(lCm.ctx, lCm.w, lCm.h, gp.body_color_tolerance);
+    var lAlphaFlipped = P3D.flipAlphaHorizontal(lAlpha, lW, lH);
     var lBounds = P3D.boolBounds(lAlphaFlipped, lW, lH);
     var lCore = P3D.stageCore(lAlphaFlipped, lW, lH, lBounds[0], lBounds[1]);
     leftSide = { w:lW, h:lH, SYTOP:lBounds[0], SYBOT:lBounds[1], SIDE_REF:lCore.SIDE_REF };
@@ -193,28 +199,21 @@ async function runCarvingStages(state, report){
   console.log("  skeleton: pivots for", Object.keys(pivRes.pivots).length, "bones +", Object.keys(pivRes.extraPivots).length, "extra");
   await tick();
 
-  var frontAlpha = alphaFull.front.slice();
-  var backAlpha = alphaFull.back.slice();
-  var sideAlpha = alphaFull.side.slice();
-  if(excludeBool.front) for(var i=0;i<frontAlpha.length;i++){ if(excludeBool.front[i]) frontAlpha[i]=0; }
-  if(excludeBool.back) for(var i2=0;i2<backAlpha.length;i2++){ if(excludeBool.back[i2]) backAlpha[i2]=0; }
-  if(excludeBool.side) for(var i3=0;i3<sideAlpha.length;i3++){ if(excludeBool.side[i3]) sideAlpha[i3]=0; }
+  var frontAlpha = alphaFull.front;
+  var backAlpha = alphaFull.back;
+  var sideAlpha = alphaFull.side;
 
-  function contArray(rgba){
-    var n=rgba.length/4;
-    var out=new Float32Array(n);
-    for(var i=0;i<n;i++){ out[i]=Math.min(rgba[i*4],rgba[i*4+1],rgba[i*4+2]); }
-    return out;
-  }
-  var frontCont = gp.subpixel ? contArray(rgbaFull.front) : null;
-  var backCont = gp.subpixel ? contArray(rgbaFull.back) : null;
-  var sideCont = gp.subpixel ? contArray(rgbaFull.side) : null;
-
+  // ★2026-07-09: 色分けマップ由来のalphaFullは既に色距離判定によるくっきりした
+  // 2値マスクであり、白背景しきい値による写真の明度(frontCont等)を使った
+  // サブピクセル境界補正は意味を持たない(js/accessories.jsで色分けマップ由来の
+  // マスク形式アクセサリーに同じ補正を適用すると境界が不規則に暴れ、破綻した
+  // メッシュになる不具合が見つかり、faCont等を常にnullにした時と同じ理由)。
+  // 体本体も同様にfrontCont/backCont/sideContは常にnullにする。
   report("visual_hull(全身のvisual hull carving)");
   var body = P3D.stageVisualHull({
     frontAlpha:frontAlpha, backAlpha:backAlpha, sideAlpha:sideAlpha,
     faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
-    frontCont:frontCont, backCont:backCont, sideCont:sideCont,
+    frontCont:null, backCont:null, sideCont:null,
     SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
     pivots:pivots, gp:gp,
   });

@@ -105,9 +105,4 @@ function drawAccessoryRegionsPreview(ctx, img, w, h, accessories, view, scale){
 }
 P3D.scannerDrawAccessoryRegionsPreview = drawAccessoryRegionsPreview;
 
-// ★2026-07-09: 除外マスク(exclude_masks)合成用のbuildExcludeMaskDataUrl()は
-// js/common.js のP3D.buildExcludeMaskDataUrlへ移した(マスク抽出処理自体が
-// ghost_scanner.htmlからlandmark_tool.htmlへ移り、両ツールで使う共通
-// ユーティリティになったため)。
-
 })(window);
