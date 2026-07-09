@@ -271,6 +271,12 @@
         <input type="range" id="automaskBulkTolSlider" min="0" max="120" value="12" style="flex:1">
         <input type="number" id="automaskBulkTolNum" min="0" max="120" value="12" style="width:56px">
       </div>
+      <div class="acitem" id="automaskVisibilityRow" style="margin-bottom:10px;flex-wrap:wrap">
+        <span class="nm">プレビューに表示する項目</span>
+        <button type="button" class="btn sm" id="automaskVisAllBtn" style="flex:0 0 auto">全選択</button>
+        <button type="button" class="btn sm" id="automaskVisNoneBtn" style="flex:0 0 auto">全解除</button>
+        <div id="automaskVisChecks" style="width:100%;display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"></div>
+      </div>
       <div id="automaskColormaps" class="row" style="flex-wrap:wrap"></div>
       <div id="automaskList" class="aclist"></div>
       <p class="hint" id="automaskEmptyHint" style="font-size:11px;color:var(--mut)"></p>
@@ -1501,6 +1507,26 @@ function alphaToMaskCanvas(alpha,w,h){
   return c;
 }
 const AUTOMASK_BODY_TINT="#3388ff";
+// ★2026-07-10(UIレビュー): 全身+複数のアクセサリーを同時に色付き表示すると
+// 重なって見分けがつかないとの指摘を受け、プレビューに表示する項目
+// (全身/パーツ別)をチェックボックスで個別にON/OFFできるようにした。
+// 既定は全部ON。キーは"body"またはaccessories配列のindex(文字列)。
+let automaskVisible={body:true};
+function renderAutomaskVisibilityChecks(maskAccs){
+  const wrap=$("automaskVisChecks");
+  if(!wrap)return;
+  if(automaskVisible.body===undefined)automaskVisible.body=true;
+  wrap.innerHTML='<label style="display:flex;align-items:center;gap:4px;font-size:11.5px">'+
+    '<input type="checkbox" class="automaskVisChk" data-key="body" '+(automaskVisible.body?"checked":"")+'>全身</label>'+
+    maskAccs.map(({a,i})=>{
+      if(automaskVisible[i]===undefined)automaskVisible[i]=true;
+      return '<label style="display:flex;align-items:center;gap:4px;font-size:11.5px">'+
+        '<input type="checkbox" class="automaskVisChk" data-key="'+i+'" '+(automaskVisible[i]?"checked":"")+'>'+(a.name||"(無名)")+'</label>';
+    }).join("");
+  [].forEach.call(wrap.querySelectorAll(".automaskVisChk"),cb=>{
+    cb.onchange=()=>{ automaskVisible[cb.dataset.key]=cb.checked; renderAutomaskPreviews(); };
+  });
+}
 function renderAutomaskPreviews(){
   const colWrap=$("automaskColormaps");
   if(!colWrap)return;
@@ -1518,13 +1544,14 @@ function renderAutomaskPreviews(){
     // 変化が見えないとの指摘を受け、抽出された全身のシルエットも(アクセサリー
     // と同様に)色付きで重ね描きするようにした(青、アクセサリーより薄め)。
     const cm=colormaps[v];
-    if(cm){
+    if(cm && automaskVisible.body){
       const bodyAlpha=P3D.loadAlphaFromColormap(cm.ctx,cm.w,cm.h,genParams.body_color_tolerance);
       const bodyMaskCanvas=alphaToMaskCanvas(bodyAlpha,cm.w,cm.h);
       const bodyTinted=tintMaskCanvas(bodyMaskCanvas,im.w,im.h,AUTOMASK_BODY_TINT);
       cx.save(); cx.globalAlpha=0.35; cx.drawImage(bodyTinted,0,0,im.w,im.h); cx.restore();
     }
-    maskAccs.forEach(({a})=>{
+    maskAccs.forEach(({a,i})=>{
+      if(!automaskVisible[i])return;
       const m=a.mask[v];
       if(!m||!m.maskDataUrl)return;
       const mi=new Image();
@@ -1569,12 +1596,15 @@ function renderAutomaskTab(){
       sl.value=genParams.body_color_tolerance; num.value=genParams.body_color_tolerance;
     }
   }
+  const visRow=$("automaskVisibilityRow");
+  if(visRow) visRow.classList.toggle("hidden", !maskAccs.length);
   if(!maskAccs.length){
     $("automaskColormaps").innerHTML="";
     hint.textContent="自動マスク(色分けマップ由来)のパーツはありません。ゴーストスキャナーで色分けマップとアクセサリー一覧を引き継いでください。";
     return;
   }
   hint.textContent="";
+  renderAutomaskVisibilityChecks(maskAccs);
   renderAutomaskPreviews();
   listWrap.innerHTML=maskAccs.map(({a,i})=>buildAutomaskItemHtml(a,i)).join("");
   wireAutomaskItemEvents();
@@ -1785,6 +1815,15 @@ function setBulkTolerance(n){
 }
 $("automaskBulkTolSlider").oninput=()=>{ setBulkTolerance(parseInt($("automaskBulkTolSlider").value,10)); };
 $("automaskBulkTolNum").onchange=()=>{ setBulkTolerance(parseInt($("automaskBulkTolNum").value,10)||0); };
+// プレビュー表示項目の全選択/全解除。#automaskVisibilityRowも静的markupの
+// ボタンなので、renderAutomaskPreviews()を呼んでも壊れない。
+function setAllAutomaskVisible(v){
+  Object.keys(automaskVisible).forEach(k=>{ automaskVisible[k]=v; });
+  [].forEach.call(document.querySelectorAll(".automaskVisChk"),cb=>{ cb.checked=v; });
+  renderAutomaskPreviews();
+}
+$("automaskVisAllBtn").onclick=()=>setAllAutomaskVisible(true);
+$("automaskVisNoneBtn").onclick=()=>setAllAutomaskVisible(false);
 // 全身の色許容誤差スライダー/数値入力。#automaskBodyRowも静的markupなので、
 // reextractBodyAndRefresh()内でrenderAutomaskPreviews()を呼んでも
 // このスライダー自体は壊れない。
