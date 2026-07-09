@@ -340,6 +340,12 @@
 
   <div id="modeChoice" class="hidden" style="max-width:420px;margin:10px auto 0">
     <p style="font-size:12.5px;color:var(--mut);margin:0 0 12px;text-align:center">モードを選んでください</p>
+    <!-- ★2026-07-09: setMsg()が書き込む#msgは編集画面(#editor)の中にあり、
+         モード選択画面表示中は隠れているため、ここでの読み込み失敗
+         (例: サンプル画像のfetch失敗)がsetMsg()だけだと画面上どこにも
+         表示されず、「ボタンを押しても反応がない」ように見えるバグが
+         あった。モード選択画面用に別のメッセージ欄を用意する。 -->
+    <p id="modeMsg" class="hidden" style="font-size:12px;color:#ff8484;margin:0 0 12px;text-align:center"></p>
     <div class="modeCard mint" id="modeSampleBtn">
       <b>サンプルモードで開く</b>
       <span id="modeSampleDesc">同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。</span>
@@ -1950,6 +1956,11 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
     refreshSampleModeCard();
     setMsg("サンプルの編集内容を破棄しました。");
   };
+  function setModeMsg(t){
+    const el=$("modeMsg");
+    el.textContent=t||"";
+    el.classList.toggle("hidden",!t);
+  }
   function showModeChoice(){
     checkContinueAvailable();
     refreshSampleModeCard();
@@ -1957,9 +1968,11 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
   }
   function startSampleMode(){
     currentMode="sample";
+    setModeMsg("");
     $("modeChoice").classList.add("hidden");
-    loadSampleImages().catch(function(){
-      setMsg("サンプル画像の読込に失敗しました。「JSONから読み込み」をお試しください。");
+    loadSampleImages().catch(function(e){
+      console.warn("サンプル画像の読込に失敗しました:",e);
+      setModeMsg("サンプル画像の読込に失敗しました: "+((e&&e.message)||e)+" 「JSONから読み込み」をお試しください。");
       showModeChoice();
     });
   }
@@ -1971,6 +1984,7 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
   async function startContinueNormalMode(){
     if(!(await checkContinueAvailable())) return; // 念のための二重チェック(基本disabledでクリック不可)
     currentMode="normal";
+    setModeMsg("");
     $("modeChoice").classList.add("hidden");
     try{
       const raw=localStorage.getItem(NORMAL_SESSION_KEY);
@@ -1982,7 +1996,7 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
       applyLoadedJson(JSON.parse(raw));
     }catch(e){
       console.warn("前回の続きの復元に失敗しました:",e);
-      setMsg("前回の続きの復元に失敗しました。JSONから読み込みでやり直してください。");
+      setModeMsg("前回の続きの復元に失敗しました: "+((e&&e.message)||e)+" JSONから読み込みでやり直してください。");
       showModeChoice();
     }
   }
@@ -2012,7 +2026,7 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
       setMsg("ゴーストスキャナーからの結果を読み込みました。");
     }catch(e){
       console.warn("スキャナーからの引き継ぎに失敗しました:",e);
-      setMsg("ゴーストスキャナーからの引き継ぎに失敗しました。JSONから読み込みでやり直してください。");
+      setModeMsg("ゴーストスキャナーからの引き継ぎに失敗しました: "+((e&&e.message)||e)+" JSONから読み込みでやり直してください。");
       showModeChoice();
     }
   }
