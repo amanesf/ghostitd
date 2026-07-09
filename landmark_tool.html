@@ -245,7 +245,14 @@
         リストで個別に、またはその下の「全パーツの色許容誤差を一括変更」で
         まとめて調整でき、変更すると即座に再抽出してプレビューが更新されます
         (色分けマップがJSONに含まれている場合のみ。無い場合は抽出済みの
-        マスクをそのまま表示します)。</p>
+        マスクをそのまま表示します)。<br><br>
+        <b>側面(右)/側面(左)の使い分け:</b> 全身(体そのもの)の奥行き
+        (前後の厚み)は常に側面(右)の画像だけを使う。側面(左)は全身の
+        奥行き計算には使わない。一方、ツインテール等パーツごとに抽出される
+        アクセサリーについては、側面(右)にそのパーツが写っていれば側面(右)
+        のマスクを、写っていなければ側面(左)のマスク(=そのパーツ自身の
+        奥行き形状として使われる)を使う、というパーツ単位の優先順位になって
+        いる(側面(右)優先、無ければ側面(左))。</p>
       <div class="acitem" id="automaskBodyRow" style="margin-bottom:10px">
         <span class="nm">全身の色許容誤差(白背景との判定基準)</span>
         <input type="range" id="automaskBodyTolSlider" min="5" max="120" value="40" style="flex:1">
@@ -1759,9 +1766,20 @@ $("automaskBodyTolSlider").oninput=()=>{
     try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY+":"+sample.id); }catch(e){}
     if(savedRaw){
       try{
-        return bootstrapFromJson(JSON.parse(savedRaw)).then(function(ok){
-          if(!ok) throw new Error("saved sample session is missing embedded images");
-        });
+        const savedJson=JSON.parse(savedRaw);
+        // ★2026-07-09: colormaps必須化より前に保存されたセッションは色分け
+        // マップを持たず、それを復元すると自動マスクタブの個別スライダーが
+        // 出ない・生成が失敗する(state.colormaps[v]がnullで例外)といった
+        // 分かりにくい壊れ方をする。旧形式のセッションは復元せず、破棄して
+        // 同梱の(色分けマップ込みの)初期状態を読み込み直す。
+        if(!savedJson.colormaps || !savedJson.colormaps.front || !savedJson.colormaps.side || !savedJson.colormaps.back){
+          console.warn("保存済みサンプルセッションは色分けマップを持たない旧形式のため破棄し、初期状態を読み込みます。");
+          try{ localStorage.removeItem(SAMPLE_SESSION_KEY+":"+sample.id); }catch(_e){}
+        }else{
+          return bootstrapFromJson(savedJson).then(function(ok){
+            if(!ok) throw new Error("saved sample session is missing embedded images");
+          });
+        }
       }catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
     }
     return fetch(sample.landmarksFile).then(function(r){ if(!r.ok)throw 0; return r.json(); })

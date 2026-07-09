@@ -132,7 +132,8 @@ async function runCarvingStages(state, report){
   // キャラクター」という前提で作られているため、体のシルエットも
   // 「白でなければ体」という判定(旧white_thr方式と同じ考え方)で抽出する。
   views.forEach(function(v){
-    var cm = state.colormaps[v];
+    var cm = state.colormaps && state.colormaps[v];
+    if(!cm) throw new Error("色分けマップ("+v+")が見つかりません。front/side/backの3面とも色分けマップが必要です(ゴーストスキャナーで生成/アップロードしてから引き継いでください)。");
     alphaFull[v] = P3D.loadAlphaFromColormap(cm.ctx, cm.w, cm.h, gp.body_color_tolerance);
   });
   await tick();
