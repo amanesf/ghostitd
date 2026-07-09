@@ -1363,8 +1363,18 @@ function dataUrlToBlob(dataUrl){
   return fetch(dataUrl).then(function(r){ return r.blob(); });
 }
 async function buildLandmarksAiJson(){
+  // ★2026-07-09(UIレビュー): landmark_tool.html側が「front/side/back画像も
+  // JSONに埋め込んで単体で完結させる」形式に変わったため、こちらの引き継ぎJSON
+  // にも同じimage.{front,side,back}.dataUrlを含める。landmark_tool.htmlは
+  // 実ピクセルからanalysis(ytop/ybot/cx等)を自前で再計算するため、w/h等の
+  // メタデータはここでは付けずdataUrlのみで足りる。
   var out={
     version:2, generator:"ghost-scanner",
+    image:{
+      front:{dataUrl:state.front.dataUrl},
+      side:{dataUrl:state.side.dataUrl},
+      back:{dataUrl:state.back.dataUrl},
+    },
     points_px:state.landmarks.pointsPx || {},
   };
   if(state.accessories.list && state.accessories.list.length){
@@ -1423,21 +1433,18 @@ async function buildLandmarksAiJson(){
   }
   return out;
 }
+// ★2026-07-09(UIレビュー): 画像本体もbuildLandmarksAiJson()のJSONに
+// dataUrlとして埋め込むようになったため、以前あった「画像だけ別途Blobに
+// 変換してIndexedDBへ保存」という段取りは不要になった。JSON1つを
+// sessionStorageへ置くだけで済む(landmark_tool.html側のbootstrapFromJson()
+// が画像復元まで一括で行う)。
 $("outSendBtn").onclick=function(){
   if(!state.front.confirmed||!state.side.confirmed||!state.back.confirmed||!state.landmarks.pointsPx){
     setMsg("front/side/backの確定とランドマーク推定が必要です。",true); return;
   }
   $("outSendBtn").disabled=true;
   setMsg("ジェネレータへ引き継ぐデータを準備中...");
-  Promise.all([
-    dataUrlToBlob(state.front.dataUrl),
-    dataUrlToBlob(state.side.dataUrl),
-    dataUrlToBlob(state.back.dataUrl),
-  ]).then(function(blobs){
-    return P3D.saveScannerHandoffImages({front:blobs[0], side:blobs[1], back:blobs[2]});
-  }).then(function(){
-    return buildLandmarksAiJson();
-  }).then(function(json){
+  buildLandmarksAiJson().then(function(json){
     sessionStorage.setItem("scanner_handoff_json", JSON.stringify(json));
     setMsg("引き継ぎ準備ができました。ジェネレータへ移動します...");
     location.href="landmark_tool.html?source=scanner";

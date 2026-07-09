@@ -33,14 +33,6 @@
   h1 .eng{display:block;font-family:var(--mono);font-size:9.5px;color:var(--green);
     letter-spacing:.22em;margin:5px 0 0;opacity:.85;font-weight:400}
   .sub{font-size:11.5px;color:var(--mut);margin:6px 0 14px}
-  .slots{display:flex;gap:8px;margin-bottom:12px}
-  .slot{flex:1;height:64px;border-radius:10px;border:1px solid var(--line);
-    background:rgba(255,255,255,.04);color:var(--mut);font-size:12px;cursor:pointer;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center}
-  .slot.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.08);color:var(--mint)}
-  .slot b{font-weight:600}
-  .slot small{font-size:10px}
-  .slot input{display:none}
   #wrap{width:100%;border-radius:12px;overflow:hidden;background:#000;border:1px solid var(--line);margin-bottom:10px}
   #cvs{display:block;width:100%;touch-action:none}
   .bar{display:flex;gap:7px;margin-bottom:10px;flex-wrap:wrap}
@@ -172,16 +164,20 @@
     <button class="btn sm" id="backToIndex" style="flex:0 0 auto">← トップに戻る</button>
   </div>
   <h1>ゴーストジェネレータ<span class="eng">GHOST GENERATOR</span></h1>
-  <p class="sub">3枚絵 → 全点を自動仮配置 → ドラッグで微調整 → landmarks.json 出力</p>
+  <p class="sub">JSON(画像込み) を読み込む、またはサンプルで試す → ドラッグで微調整 → landmarks.json 出力</p>
+
+  <!-- ★2026-07-09(UIレビュー): 「JSON読み込み」は、以前は編集画面(#editor)の
+       中だけにあり、①「生成」タブの奥に埋もれて前回作業の再開に4タブ分クリック
+       が必要だった上に、②画像はJSONに含まれずimgs読み込み後でないと使えない
+       ガードもあった。画像もJSONに埋め込むようになった(buildJson参照)ため、
+       モード選択画面も含め常時見える最上位置に移し、真っさらな状態からでも
+       このボタン1つで開始できるようにした。 -->
+  <div class="bar" id="sessionBar" style="margin-bottom:8px">
+    <button class="btn sm" id="loadJson" style="flex:0 0 auto">📂 JSON読み込み</button>
+    <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
+  </div>
 
   <div id="editor" class="hidden">
-    <!-- ★2026-07-09(UIレビュー): 「JSON読み込み」(前回作業の再開)が「生成」タブの
-         中だけにあり、他4タブを通過しないと再開できなかったため、全タブ共通で
-         常に見える位置に移した。 -->
-    <div class="bar" id="sessionBar" style="margin-bottom:8px">
-      <button class="btn sm" id="loadJson" style="flex:0 0 auto">📂 JSON読み込み</button>
-      <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
-    </div>
     <div class="tabbar" id="tabbar">
       <button class="tabbtn on" data-tab="lm">マーク</button>
       <button class="tabbtn" data-tab="manualmask">手動マスク</button>
@@ -348,26 +344,19 @@
         <button type="button" class="btn sm" id="modeSampleReset" style="flex:0 0 auto;height:28px;font-size:11px">前回のサンプル編集を破棄して初期状態に戻す</button>
       </span>
     </div>
-    <div class="modeCard" id="modeNewBtn">
-      <b>新規作成</b>
-      <span>自分のキャラクター画像(正面/側面/背面)をアップロードして最初から作成します。</span>
+    <!-- ★2026-07-09(UIレビュー): front/side/backを個別にアップロードする
+         「新規作成」モードは廃止した。画像もJSONに埋め込む形式に統一した
+         ため、新規のキャラクターもゴーストスキャナー(ghost_scanner.html)側で
+         写真を読み込み→画像込みのJSONを書き出す形にする。このツール単体では
+         画像込みJSONの読み込みが唯一の入口になる(ページ最上部の
+         「📂 JSON読み込み」ボタンと同じ動作)。 -->
+    <div class="modeCard" id="modeJsonBtn">
+      <b>JSONから読み込み</b>
+      <span>ゴーストスキャナー等で書き出した、画像込みのlandmarks_ai.jsonを読み込んで開始します。</span>
     </div>
     <div class="modeCard" id="modeContinueBtn">
       <b>前回の続き</b>
       <span id="modeContinueDesc">前回保存した通常モードの画像・ランドマークを読み込んで再開します。</span>
-    </div>
-  </div>
-
-  <div id="uploadArea" class="hidden">
-    <p class="hint" id="hint">正面/側面/背面の3枚すべてを読み込むと自動で全点を仮配置し、編集画面に進みます。</p>
-
-    <div class="slots">
-      <label class="slot" id="slotFront"><b>正面 front</b><small>タップで選択</small>
-        <input type="file" accept="image/*" data-slot="front"></label>
-      <label class="slot" id="slotSide"><b>側面 side</b><small>タップで選択</small>
-        <input type="file" accept="image/*" data-slot="side"></label>
-      <label class="slot" id="slotBack"><b>背面 back</b><small>タップで選択</small>
-        <input type="file" accept="image/*" data-slot="back"></label>
     </div>
   </div>
 </div>
@@ -1097,32 +1086,54 @@ function draw(){
 }
 
 /* ---------- ファイル読み込み ---------- */
-function loadImg(file,slot){
-  const r=new FileReader();
-  r.onload=()=>{
+// ★2026-07-09(UIレビュー): 個別ファイルアップロード(旧.slots UI、data-slot
+// 属性のinput[type=file])は廃止し、front/side/back画像も埋め込んだJSON
+// (buildJson()参照)を読み込む一本の経路に統一した。dataURL文字列から
+// imgs[slot]を組み立てる版。
+function loadImgFromDataUrl(dataUrl,slot){
+  return new Promise((resolve,reject)=>{
     const el=new Image();
     el.onload=()=>{
       imgs[slot]={el,w:el.naturalWidth,h:el.naturalHeight};
-      $("slot"+slot[0].toUpperCase()+slot.slice(1)).classList.add("on");
-      $("slot"+slot[0].toUpperCase()+slot.slice(1)).querySelector("small").textContent="✓ 読込済";
       previewCache={key:null,view:null,canvas:null,w:0,h:0};
-      syncViewBtns();
-      // 正面だけで編集画面(editor)に遷移すると側面/背面を読み込む前に画面が
-      // 切り替わってしまう(「生成」には結局3枚とも必須)。3枚とも読込済みに
-      // なってから初めて自動仮配置して編集画面へ進む。
-      if(imgs.front&&imgs.side&&imgs.back)runAnalyze();
+      resolve();
     };
-    el.onerror=()=>{ setMsg("画像の読込に失敗しました("+slot+")。別のファイルをお試しください。"); };
-    el.src=r.result;
-  };
-  r.onerror=()=>{ setMsg("ファイルの読込に失敗しました("+slot+")。"); };
-  r.readAsDataURL(file);
+    el.onerror=()=>{ reject(new Error("画像の読込に失敗しました("+slot+")")); };
+    el.src=dataUrl;
+  });
+}
+// JSON(画像dataUrl込み)から、画像復元→自動仮配置→残りのJSON内容の反映まで
+// 一括で行う。旧来の「新規作成(3枚アップロード)」「ゴーストスキャナーからの
+// IndexedDB経由引き継ぎ」「サンプルモードの静的ファイル取得」という3通りの
+// 画像読み込み経路を、この1つに統一する。
+async function bootstrapFromJson(d){
+  if(!d.image || !d.image.front || !d.image.front.dataUrl){
+    setMsg("このJSONには画像データが含まれていないため読み込めません(画像を含む新しい形式のJSONを使ってください)。");
+    return false;
+  }
+  try{
+    await loadImgFromDataUrl(d.image.front.dataUrl,"front");
+    if(d.image.side && d.image.side.dataUrl) await loadImgFromDataUrl(d.image.side.dataUrl,"side");
+    if(d.image.back && d.image.back.dataUrl) await loadImgFromDataUrl(d.image.back.dataUrl,"back");
+  }catch(e){
+    setMsg("画像の復元に失敗しました: "+((e&&e.message)||e));
+    return false;
+  }
+  if(!(imgs.front&&imgs.side&&imgs.back)){
+    setMsg("front/side/backの3枚とも揃っていないJSONは読み込めません。");
+    return false;
+  }
+  const mc=$("modeChoice"); if(mc)mc.classList.add("hidden");
+  runAnalyze();
+  syncViewBtns();
+  applyLoadedJson(d);
+  return true;
 }
 function runAnalyze(){
   const{el,w,h}=imgs.front, mask=buildMask(el,w,h), A=analyze(mask,w,h);
   if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
   analysis=A;points=placeAll(A);sel=null;curView="front";
-  $("editor").classList.remove("hidden");$("hint").classList.add("hidden");
+  $("editor").classList.remove("hidden");
   syncViewBtns();
   resyncAnalysisToProfile();
   draw();
@@ -1307,12 +1318,28 @@ cvs.addEventListener("pointercancel",endPtr);
 addEventListener("resize",()=>{if(points)draw();});
 
 /* ---------- 出力 ---------- */
+// imgオブジェクト(loadImg等が{el,w,h}の形で作る)を、front/side/back画像を
+// 別途アップロード/選択せずJSON単体で完結させるためのPNG dataURLに変換する。
+function imgObjToDataUrl(imgObj){
+  const c=document.createElement("canvas");
+  c.width=imgObj.w; c.height=imgObj.h;
+  c.getContext("2d").drawImage(imgObj.el,0,0,imgObj.w,imgObj.h);
+  return c.toDataURL("image/png");
+}
 function buildJson(){
   const w=imgs.front.w,h=imgs.front.h,points_px={};
   LM.forEach(d=>{points_px[d.k]={img:"front",x:points[d.k][0],y:points[d.k][1]};});
   return{version:2,generator:"ai-landmark-tool",
-    image:{front:{w,h,ytop:analysis.ytop,ybot:analysis.ybot,cx:Math.round(analysis.cx)},
-      side:imgs.side?{w:imgs.side.w,h:imgs.side.h}:null,back:imgs.back?{w:imgs.back.w,h:imgs.back.h}:null},
+    // ★2026-07-09(UIレビュー): 従来はfront/side/back画像はJSONに含めず、
+    // 「画像は別途読み込み済みのものを使う」前提だった(通常モードの個別
+    // アップロード・ゴーストスキャナーからのIndexedDB経由引き継ぎ・サンプル
+    // モードの静的ファイル取得、と読み込み経路がバラバラだった)。マスク
+    // (accessories[].mask[view].maskDataUrl)は既にJSON埋め込み済みだったのに
+    // 画像本体だけ別管理という非対称さが分かりにくいとの指摘を受け、画像本体も
+    // dataUrlとしてJSONに埋め込み、JSON単体で完全に復元できるようにする。
+    image:{front:{w,h,ytop:analysis.ytop,ybot:analysis.ybot,cx:Math.round(analysis.cx),dataUrl:imgObjToDataUrl(imgs.front)},
+      side:imgs.side?{w:imgs.side.w,h:imgs.side.h,dataUrl:imgObjToDataUrl(imgs.side)}:null,
+      back:imgs.back?{w:imgs.back.w,h:imgs.back.h,dataUrl:imgObjToDataUrl(imgs.back)}:null},
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones};
@@ -1404,8 +1431,15 @@ function applyLoadedJson(d){
 function loadJsonFile(file){
   const r=new FileReader();
   r.onload=()=>{
-    try{ applyLoadedJson(JSON.parse(r.result)); }
-    catch(e){ setMsg("JSON読み込みに失敗しました: "+((e&&e.message)||e)); }
+    let d;
+    try{ d=JSON.parse(r.result); }
+    catch(e){ setMsg("JSON読み込みに失敗しました: "+((e&&e.message)||e)); return; }
+    // 画像未読込(=まだ編集画面に入っていない、新規のJSON読み込みでの開始)の
+    // 場合はbootstrapFromJson()でJSON内蔵の画像から復元する。既に編集中
+    // (points有り)の場合は、そのセッションの画像はそのまま使い、ランドマーク/
+    // アクセサリー等の内容だけ差し替える(従来通りのapplyLoadedJson単体呼び出し)。
+    if(points){ applyLoadedJson(d); }
+    else{ currentMode="normal"; bootstrapFromJson(d); }
   };
   r.readAsText(file);
 }
@@ -1610,9 +1644,6 @@ function syncChips(){
 }
 
 /* ---------- 配線 ---------- */
-[].forEach.call(document.querySelectorAll('input[type="file"][data-slot]'),inp=>{
-  inp.addEventListener("change",e=>{const f=e.target.files[0];if(f)loadImg(f,inp.dataset.slot);e.target.value="";});
-});
 $("reset").onclick=()=>{
   if(!analysis)return;
   if(!confirm("初期配置に戻しますか？現在のランドマークの微調整はすべて失われます。"))return;
@@ -1620,10 +1651,11 @@ $("reset").onclick=()=>{
 };
 $("export").onclick=exportJson;
 $("copy").onclick=copyJson;
-$("loadJson").onclick=()=>{
-  if(!points){setMsg("先に正面画像を読み込んでください。");return;}
-  $("jsonFile").click();
-};
+// ★2026-07-09(UIレビュー): 画像もJSONに埋め込むようになったため、「先に
+// 正面画像を読み込んでください」というガードは不要になった。points未確定
+// (=まだ編集画面に入っていない)状態でも、画像込みのJSONを直接読み込んで
+// そこから開始できる(loadJsonFile()内のbootstrapFromJson()分岐)。
+$("loadJson").onclick=()=>{ $("jsonFile").click(); };
 $("jsonFile").onchange=e=>{const f=e.target.files[0];if(f)loadJsonFile(f);e.target.value="";};
 
 /* ---------- モデル生成(3DtoolJS: ブラウザ完結でGLBを作りビューアへ遷移) ---------- */
@@ -1814,18 +1846,18 @@ renderParamsPanel();
 renderOutlinePanel();
 $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on"); };
 (function(){
-  // ★初期画面(サンプルモード/通常モードの選択)。
-  // 「サンプルモード」は同梱のimages2/front.png等+landmarks_ai_2.jsonを
-  // 自動読込する(お試し用)。「通常モード」は自分の画像を手動アップロードする
-  // (既存の.slots UIをそのまま使う、何も自動読込しない)。
-  // ただし、モデル生成→ビューア→「戻る」で来た場合(保存済みセッションが
-  // ある場合)は、モードに関わらずこの選択画面を出さず直接復元する。
+  // ★初期画面(サンプルモード/JSON読み込み/前回の続きの選択)。
+  // 「サンプルモード」は同梱の画像込みJSON(landmarks_ai_2_embedded.json)を
+  // 自動読込する(お試し用)。「JSONから読み込み」は画像込みのJSON
+  // (ゴーストスキャナー等で書き出したもの)を選んでもらう(2026-07-09、
+  // front/side/back画像を個別アップロードする「新規作成」モードは廃止し、
+  // 画像もJSONに埋め込む形式に統一した)。
   // 複数サンプルをプルダウンで選べる作りになっている(増やす場合はSAMPLESに
-  // 追記するだけでよい)。サンプル2(images2/+landmarks_ai_2.json)は髪飾り・
-  // ツインテール・マフラー・スカート等アクセサリーが多い実データ検証用で、
-  // 唯一のサンプル(旧サンプル1=多角形形式は2026-07-09に廃止)。
+  // 追記するだけでよい)。サンプル2は髪飾り・ツインテール・マフラー・
+  // スカート等アクセサリーが多い実データ検証用で、唯一のサンプル
+  // (旧サンプル1=多角形形式は2026-07-09に廃止)。
   const SAMPLES=[
-    {id:"sample2", label:"サンプル2", imagesDir:"images2/", landmarksFile:"landmarks_ai_2.json"},
+    {id:"sample2", label:"サンプル2", landmarksFile:"landmarks_ai_2_embedded.json"},
   ];
   const sampleSelectEl=$("sampleSelect");
   sampleSelectEl.innerHTML=SAMPLES.map(function(s,i){ return '<option value="'+i+'">'+s.label+'</option>'; }).join("");
@@ -1844,28 +1876,29 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
       el.src=URL.createObjectURL(blob);
     });
   }
+  // ★2026-07-09(UIレビュー): サンプルも画像込みの1つのJSONファイル
+  // (landmarksFile)から読み込む形に統一した(以前はimagesDir配下の
+  // front/side/back.pngを個別fetchし、その後で別途JSONを読んでいた。
+  // 画像読み込み経路が通常モード/スキャナー引き継ぎ/サンプルモードでバラバラ
+  // だったことの一因)。
   function loadSampleImages(){
     const sample=currentSample();
     currentSampleId=sample.id;
-    return Promise.all(["front","side","back"].map(function(slot){
-      return fetch(sample.imagesDir+slot+".png").then(function(r){
-        if(!r.ok)throw 0; return r.blob();
-      }).then(function(blob){ return loadImageBlobIntoSlot(slot,blob); });
-    })).then(function(){
-      runAnalyze();syncViewBtns();
-      // ★2026-07-07: サンプルモードも自動保存の対象になったため、前回
-      // サンプルモードで編集した内容(ランドマーク/パラメータ/アクセサリー等)
-      // があればそれを復元する。保存が無ければ従来通り同梱のlandmarks_ai.json
-      // (初期状態)を読み込む。画像自体は常にimages/*.pngの同梱アセットを使う。
-      let savedRaw=null;
-      try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY+":"+sample.id); }catch(e){}
-      if(savedRaw){
-        try{ applyLoadedJson(JSON.parse(savedRaw)); return; }
-        catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
-      }
-      return fetch(sample.landmarksFile).then(function(r){ if(!r.ok)throw 0; return r.json(); })
-        .then(function(d){ applyLoadedJson(d); }).catch(function(){});
-    });
+    // ★2026-07-07: サンプルモードも自動保存の対象になったため、前回
+    // サンプルモードで編集した内容(ランドマーク/パラメータ/アクセサリー等)
+    // があればそれを復元する(保存済みJSONにも画像は同様に埋め込まれている)。
+    // 保存が無ければ同梱のlandmarksFile(画像込み、初期状態)を読み込む。
+    let savedRaw=null;
+    try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY+":"+sample.id); }catch(e){}
+    if(savedRaw){
+      try{
+        return bootstrapFromJson(JSON.parse(savedRaw)).then(function(ok){
+          if(!ok) throw new Error("saved sample session is missing embedded images");
+        });
+      }catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
+    }
+    return fetch(sample.landmarksFile).then(function(r){ if(!r.ok)throw 0; return r.json(); })
+      .then(function(d){ return bootstrapFromJson(d); });
   }
   // 「前回の続き」が選べるかどうかを、保存済みJSON(localStorage)+画像本体
   // (IndexedDB)の両方が実際に揃っているかで判定する。片方だけ残っている
@@ -1907,14 +1940,14 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
     currentMode="sample";
     $("modeChoice").classList.add("hidden");
     loadSampleImages().catch(function(){
-      setMsg("サンプル画像の読込に失敗しました。新規作成で自分の画像をアップロードしてください。");
-      $("uploadArea").classList.remove("hidden");
+      setMsg("サンプル画像の読込に失敗しました。「JSONから読み込み」をお試しください。");
+      showModeChoice();
     });
   }
-  function startNewNormalMode(){
-    currentMode="normal";
-    $("modeChoice").classList.add("hidden");
-    $("uploadArea").classList.remove("hidden");
+  function startJsonMode(){
+    // 実体は常時表示の「📂 JSON読み込み」ボタンと同じ(#jsonFileのクリック)。
+    // モード選択画面に並べることで、他の2モードと並ぶ選択肢として発見しやすくする。
+    $("jsonFile").click();
   }
   async function startContinueNormalMode(){
     if(!(await checkContinueAvailable())) return; // 念のための二重チェック(基本disabledでクリック不可)
@@ -1930,39 +1963,37 @@ $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on")
       applyLoadedJson(JSON.parse(raw));
     }catch(e){
       console.warn("前回の続きの復元に失敗しました:",e);
-      setMsg("前回の続きの復元に失敗しました。新規作成でやり直してください。");
-      $("uploadArea").classList.remove("hidden");
+      setMsg("前回の続きの復元に失敗しました。JSONから読み込みでやり直してください。");
+      showModeChoice();
     }
   }
   $("modeSampleBtn").onclick=startSampleMode;
-  $("modeNewBtn").onclick=startNewNormalMode;
+  $("modeJsonBtn").onclick=startJsonMode;
   $("modeContinueBtn").onclick=startContinueNormalMode;
   $("backToIndex").onclick=()=>{ location.href="index.html"; };
   // ゴーストスキャナー(ghost_scanner.html)からの引き継ぎ(GHOST_SCANNER_PLAN.md
-  // 「ジェネレータへの引き継ぎ」節)。画像本体はIndexedDB専用キー
-  // (SCANNER_IMAGES_KEY、generated_model/normal_session_imagesとは別)、
-  // landmarks_ai.json相当のJSONはページ遷移一回きりの受け渡しなので
-  // sessionStorageに置く(scanner側がsetItemしてから遷移する)。読み込んだら
-  // 両方とも消費して(残っていると次回起動時に誤って再読込されるため)、以後は
-  // 通常モードとして扱う(自動保存の対象にもなる)。
+  // 「ジェネレータへの引き継ぎ」節)。
+  // ★2026-07-09(UIレビュー): 以前は画像本体をIndexedDB専用キー
+  // (SCANNER_IMAGES_KEY)経由のBlobで、JSON(点/アクセサリー等)をsessionStorage
+  // 経由で、と2系統に分けて渡していた。scanner側もimage.*.dataUrlをJSONに
+  // 埋め込むようになった(buildLandmarksAiJson参照)ため、sessionStorageの
+  // JSON1つをbootstrapFromJson()に渡すだけで完結する(通常モード/サンプル
+  // モードと同じ経路に統一)。読み込んだらsessionStorageを消費して(残って
+  // いると次回起動時に誤って再読込されるため)、以後は通常モードとして扱う
+  // (自動保存の対象にもなる)。
   async function startScannerHandoffMode(){
     currentMode="normal";
     $("modeChoice").classList.add("hidden");
     try{
       const jsonRaw=sessionStorage.getItem("scanner_handoff_json");
-      const blobs=await P3D.loadScannerHandoffImages();
-      if(!jsonRaw||!blobs||!blobs.front||!blobs.side||!blobs.back) throw new Error("スキャナーからの引き継ぎデータが見つかりません");
-      await Promise.all(["front","side","back"].map(function(slot){
-        return loadImageBlobIntoSlot(slot,blobs[slot]);
-      }));
-      runAnalyze();syncViewBtns();
-      applyLoadedJson(JSON.parse(jsonRaw));
+      if(!jsonRaw) throw new Error("スキャナーからの引き継ぎデータが見つかりません");
+      const ok=await bootstrapFromJson(JSON.parse(jsonRaw));
+      if(!ok) throw new Error("スキャナーからの引き継ぎデータに画像が含まれていません");
       sessionStorage.removeItem("scanner_handoff_json");
-      P3D.clearScannerHandoffImages().catch(function(){});
       setMsg("ゴーストスキャナーからの結果を読み込みました。");
     }catch(e){
       console.warn("スキャナーからの引き継ぎに失敗しました:",e);
-      setMsg("ゴーストスキャナーからの引き継ぎに失敗しました。新規作成でやり直してください。");
+      setMsg("ゴーストスキャナーからの引き継ぎに失敗しました。JSONから読み込みでやり直してください。");
       showModeChoice();
     }
   }

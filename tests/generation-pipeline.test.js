@@ -2,19 +2,21 @@
 // 生成パイプライン(js/pipeline.js, carving.js, skeleton.js, atlas.js,
 // accessories.js, visual_hull.js, marching_cubes.js)の回帰検知テスト。
 //
-// ★これは「golden master」テストです。同梱サンプル(images2/*.png +
-// landmarks_ai_2.json)から生成したGLBのSHA-256ハッシュを固定値と比較し、
+// ★これは「golden master」テストです。同梱サンプル(landmarks_ai_2_embedded.json、
+// front/side/back画像込み)から生成したGLBのSHA-256ハッシュを固定値と比較し、
 // 1バイトでも変わったら失敗させる。彫刻・スキニングのアルゴリズムは
 // 数式が複雑で自動テストの無いプロジェクトのため、「意図しない変更が
 // 無いこと」を機械的に検知するのが目的。
 //
 // ★2026-07-09: 多角形(手動パーツ)アクセサリー機能廃止に伴い、サンプル1
 // (images/+landmarks_ai.json、多角形形式)を削除し、唯一のサンプルである
-// サンプル2(images2/+landmarks_ai_2.json、マスク形式、アクセサリー7点内蔵)
-// を使うよう作り直した。「body-only」の生成経路も引き続き検証するため、
-// サンプル2のJSONをそのまま使う代わりに、テスト内でaccessoriesを空にした
-// 一時JSONを組み立てて「JSON読み込み」機能経由で読み込ませている(手動で
-// アクセサリーを追加するUI(旧「パーツ＋」タブ)は廃止済みのため)。
+// サンプル2(マスク形式、アクセサリー7点内蔵)を使うよう作り直した。同日中に
+// front/side/back画像もJSONへ埋め込む形式に統一し、images2/*.png+
+// landmarks_ai_2.jsonの2ファイル構成をlandmarks_ai_2_embedded.json単体に
+// まとめた。「body-only」の生成経路も引き続き検証するため、サンプル2の
+// JSONをそのまま使う代わりに、テスト内でaccessoriesを空にした一時JSONを
+// 組み立てて「JSON読み込み」機能経由で読み込ませている(手動でアクセサリーを
+// 追加するUI(旧「パーツ＋」タブ)は廃止済みのため)。
 //
 // 生成結果を意図的に変える変更(例: 彫刻アルゴリズムの改善、パラメータ
 // 既定値の変更)をした場合は、このテストが失敗するのが正しい挙動です。
@@ -45,8 +47,11 @@ async function generateAndExportGlb(server, browser, bodyOnly) {
 
   if (bodyOnly) {
     // サンプル2のJSONからaccessoriesだけを空にした一時JSONを作り、
-    // 「JSON読み込み」機能経由で読み込ませる(画像は先に読み込み済みのものを使う)。
-    const srcJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "landmarks_ai_2.json"), "utf8"));
+    // 「JSON読み込み」機能経由で読み込ませる(画像は先に読み込み済みのものを使う。
+    // このJSONにも画像dataUrlは含まれるが、既にpointsがある=編集画面に入って
+    // からの読み込みなのでapplyLoadedJson()の差し替え経路のみが働き、画像
+    // dataUrl自体は参照されない)。
+    const srcJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "landmarks_ai_2_embedded.json"), "utf8"));
     srcJson.accessories = [];
     const tmpPath = path.join(os.tmpdir(), "landmarks_ai_2_body_only_" + Date.now() + ".json");
     fs.writeFileSync(tmpPath, JSON.stringify(srcJson));

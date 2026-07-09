@@ -18,30 +18,27 @@ async function testSampleModeDropdown(server, browser) {
   await page.close();
 }
 
-async function testFrontOnlyDoesNotTransition(server, browser) {
+async function testJsonModeLoadsEditor(server, browser) {
+  // ★2026-07-09(UIレビュー): front/side/back画像を個別アップロードする
+  // 「新規作成」モードを廃止し、画像込みのJSON(landmarks_ai_2_embedded.json
+  // 相当)を読み込む一本の経路に統一した。旧テスト(testFrontOnlyDoesNotTransition、
+  // 個別スロットへの段階的アップロードを検証していた)はこの経路自体が
+  // 無くなったため、JSON読み込みで編集画面まで到達することを確認する内容に
+  // 作り直した。
   const { page, errors } = await openPage(browser, server.url + "/landmark_tool.html");
-  await page.click("#modeNewBtn b");
-  await page.waitForTimeout(300);
-
-  // ファイル入力にはローカルパスが必要なので絶対パスで指定する
-  // (サンプル1(images/)は多角形アクセサリー機能廃止に伴い2026-07-09に削除
-  // されたため、唯一のサンプルであるimages2/を使う)
-  const path = require("path");
-  const imagesDir = path.join(require("./lib/testkit").REPO_ROOT, "images2");
-  await page.setInputFiles('input[data-slot="front"]', path.join(imagesDir, "front.png"));
-  await page.waitForTimeout(500);
   let editorHidden = await page.$eval("#editor", (el) => el.classList.contains("hidden"));
-  assert.ok(editorHidden, "editor must stay hidden after loading FRONT only (side/back still missing)");
+  assert.ok(editorHidden, "editor must stay hidden before any JSON is loaded");
 
-  await page.setInputFiles('input[data-slot="side"]', path.join(imagesDir, "side.png"));
-  await page.waitForTimeout(500);
-  editorHidden = await page.$eval("#editor", (el) => el.classList.contains("hidden"));
-  assert.ok(editorHidden, "editor must stay hidden after loading FRONT+SIDE (back still missing)");
+  const path = require("path");
+  const jsonPath = path.join(require("./lib/testkit").REPO_ROOT, "landmarks_ai_2_embedded.json");
+  await page.click("#modeJsonBtn b");
+  await page.setInputFiles("#jsonFile", jsonPath);
+  await page.waitForTimeout(1500);
 
-  await page.setInputFiles('input[data-slot="back"]', path.join(imagesDir, "back.png"));
-  await page.waitForTimeout(800);
   editorHidden = await page.$eval("#editor", (el) => el.classList.contains("hidden"));
-  assert.ok(!editorHidden, "editor must show once all 3 (front/side/back) are loaded");
+  assert.ok(!editorHidden, "editor must show once an image-embedded JSON is loaded");
+  const modeChoiceHidden = await page.$eval("#modeChoice", (el) => el.classList.contains("hidden"));
+  assert.ok(modeChoiceHidden, "mode-choice screen must be hidden after successful JSON bootstrap");
 
   assert.deepStrictEqual(errors, []);
   await page.close();
@@ -96,7 +93,7 @@ async function run() {
   const browser = await chromium.launch();
   try {
     await testSampleModeDropdown(server, browser);
-    await testFrontOnlyDoesNotTransition(server, browser);
+    await testJsonModeLoadsEditor(server, browser);
     await testEditorTabsAndOverlays(server, browser);
   } finally {
     await browser.close();

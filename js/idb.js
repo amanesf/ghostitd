@@ -6,13 +6,6 @@
 "use strict";
 var P3D = global.P3D = global.P3D || {};
 var DB_NAME="3dtooljs_db", STORE="models", KEY="generated_model", NORMAL_IMAGES_KEY="normal_session_images";
-// ゴーストスキャナー(ghost_scanner.html)→ジェネレータ(landmark_tool.html)の
-// 引き継ぎ専用キー。GHOST_SCANNER_PLAN.mdの「ジェネレータへの引き継ぎ」節の通り、
-// KEY(generated_model)は「彫刻後の中間パッケージ」専用に契約変更済みで流用できず、
-// NORMAL_IMAGES_KEYは「前回の続き」機能が読み書きする専用キーのため、それらと
-// 混ざらないよう別キーに分離する(データ形式自体はNORMAL_IMAGES_KEYと同じ
-// {front,side,back}のBlob)。
-var SCANNER_IMAGES_KEY="scanner_handoff_images";
 
 function openDb(){
   return new Promise(function(resolve,reject){
@@ -123,43 +116,18 @@ async function loadNormalSessionImages(){
 P3D.saveNormalSessionImages=saveNormalSessionImages;
 P3D.loadNormalSessionImages=loadNormalSessionImages;
 
-// ゴーストスキャナー→ジェネレータの引き継ぎ用(前述の通りKEY/NORMAL_IMAGES_KEYとは
-// 別キー)。保存/読込のたびに使い切りとして扱う(読込側でclearScannerHandoffImages
-// を呼んで消費する想定。landmark_tool.html側の「?source=scanner」分岐が呼ぶ)。
-async function saveScannerHandoffImages(blobs){
-  var db = await openDb();
-  return new Promise(function(resolve,reject){
-    var tx = db.transaction(STORE,'readwrite');
-    tx.objectStore(STORE).put(blobs, SCANNER_IMAGES_KEY);
-    tx.oncomplete=function(){resolve();};
-    tx.onerror=function(){reject(tx.error);};
-  });
-}
-async function loadScannerHandoffImages(){
-  var db = await openDb();
-  return new Promise(function(resolve,reject){
-    var tx = db.transaction(STORE,'readonly');
-    var req = tx.objectStore(STORE).get(SCANNER_IMAGES_KEY);
-    req.onsuccess=function(){resolve(req.result||null);};
-    req.onerror=function(){reject(req.error);};
-  });
-}
-async function clearScannerHandoffImages(){
-  var db = await openDb();
-  return new Promise(function(resolve,reject){
-    var tx = db.transaction(STORE,'readwrite');
-    tx.objectStore(STORE).delete(SCANNER_IMAGES_KEY);
-    tx.oncomplete=function(){resolve();};
-    tx.onerror=function(){reject(tx.error);};
-  });
-}
-P3D.saveScannerHandoffImages=saveScannerHandoffImages;
-P3D.loadScannerHandoffImages=loadScannerHandoffImages;
-P3D.clearScannerHandoffImages=clearScannerHandoffImages;
+// ★2026-07-09(UIレビュー): ゴーストスキャナー→ジェネレータの引き継ぎは、
+// scanner側がimage.*.dataUrlをJSONに埋め込むようになったため、画像本体を
+// 別途Blobとしてこの専用キー(SCANNER_IMAGES_KEY)経由でIndexedDBに保存する
+// 仕組みが不要になった(旧saveScannerHandoffImages/loadScannerHandoffImages/
+// clearScannerHandoffImages、及びSCANNER_IMAGES_KEY自体を削除した)。
+// landmark_tool.html側は「?source=scanner」時にsessionStorageのJSON1つを
+// bootstrapFromJson()に渡すだけで画像復元まで完結する。
 
 // ゴーストスキャナー自身の「前回の続きから」用(GHOST_SCANNER_PLAN.md「運用面の
-// 修正6点・⑥」)。SCANNER_IMAGES_KEY(ジェネレータへの引き継ぎ、使い切り)とは
-// 別に、スキャナー内での作業継続用に画像本体(Blob)を保持する専用キー。
+// 修正6点・⑥」)。ジェネレータへの引き継ぎ(2026-07-09以降はJSON埋め込みの
+// dataUrl経由、専用のBlob転送キーは廃止済み)とは別に、スキャナー内での
+// 作業継続用に画像本体(Blob)を保持する専用キー。
 // 有料/時間のかかるAPI呼び出しの結果(元画像・front/side/back生成画像・
 // 色分けマップ画像)のみを対象にし、そこから無料で再抽出できるマスクは
 // 対象外にする(保存対象を絞ることでBlob管理の複雑さを抑える設計)。
