@@ -215,43 +215,19 @@ function fillHoles(mask, w, h){
 }
 P3D.fillHoles = fillHoles;
 
-// ---- 最大連結成分だけを残す(4連結) ----
-function largestComponent(mask, w, h){
-  var n=w*h;
-  var label=new Int32Array(n).fill(-1);
-  var bestLabel=-1, bestSize=0;
-  var stack=[];
-  for(var start=0; start<n; start++){
-    if(!mask[start] || label[start]!==-1) continue;
-    var lab = start; // ラベルIDは開始indexで代用
-    var size=0;
-    stack.push(start); label[start]=lab;
-    while(stack.length){
-      var idx=stack.pop(); size++;
-      var x=idx%w, y=(idx/w)|0;
-      var nbrs=[];
-      if(x>0)nbrs.push(idx-1); if(x<w-1)nbrs.push(idx+1);
-      if(y>0)nbrs.push(idx-w); if(y<h-1)nbrs.push(idx+w);
-      for(var k=0;k<nbrs.length;k++){
-        var ni=nbrs[k];
-        if(mask[ni] && label[ni]===-1){ label[ni]=lab; stack.push(ni); }
-      }
-    }
-    if(size>bestSize){ bestSize=size; bestLabel=lab; }
-  }
-  var out=new Uint8Array(n);
-  if(bestLabel>=0){ for(var i=0;i<n;i++) if(label[i]===bestLabel) out[i]=1; }
-  return out;
-}
-P3D.largestComponent = largestComponent;
-
 // ---- 一定面積以上の連結成分を全て残す(4連結、OR合成) ----
-// largestComponent()は最大成分1つだけを残すため、同一色に塗られた領域が
-// 画面内で複数の孤立した塊に分かれるケース(左右別々の房が同色指定、体の
-// 別パーツに隠れて視覚的に分断されている等)で小さい方の塊が失われる
-// (GHOST_SCANNER_PLAN.md「色分けマップ方式・運用面の修正6点・②」)。
-// minAreaPx未満の成分はアンチエイリアス境界のノイズとみなして除外し、
-// それ以外の成分は全てOR合成して残す。
+// ★2026-07-09: 以前あった「最大成分1つだけを残す」largestComponent()は、
+// キャラクターのシルエットが常に単一の連結領域であるという前提に依存して
+// おり、除外範囲(exclude_masks)がスカート等の連結部分を削ると胴体と脚が
+// 分断され、小さい方(脚側)が丸ごと消えるバグを引き起こしていた
+// (loadRgbaRemoveWhite参照)。同一色に塗られた領域が画面内で複数の孤立した
+// 塊に分かれるケース(左右別々の房が同色指定、体の別パーツに隠れて視覚的に
+// 分断されている等)でも同様に小さい方の塊が失われる。シルエットは最初から
+// 複数の領域に分かれうる前提でロジックを組み、minAreaPx未満の成分だけを
+// アンチエイリアス境界のノイズとみなして除外し、それ以外の成分は全て
+// OR合成して残す方式(GHOST_SCANNER_PLAN.md「色分けマップ方式・運用面の
+// 修正6点・②」で色分けマップ抽出用に導入済みだったもの)に、body本体の
+// シルエット検出も統一する。
 function significantComponentsMask(mask, w, h, minAreaPx){
   minAreaPx = (minAreaPx===undefined || minAreaPx===null) ? 16 : minAreaPx;
   var n=w*h;
@@ -302,7 +278,16 @@ function loadRgbaRemoveWhite(img, whiteThr, excludeMask){
   }
   var alpha=new Uint8Array(w*h);
   for(var i3=0;i3<alpha.length;i3++) alpha[i3] = background[i3] ? 0 : 1;
-  alpha = largestComponent(alpha, w, h);
+  // ★2026-07-09バグ修正: 以前はlargestComponent()で「最大の1つの連結成分だけ」
+  // を残していたが、これは「キャラクターのシルエットは常に1つに繋がっている」
+  // という前提に依存しており、除外範囲(exclude_masks)がスカート等の
+  // 連結部分を削ると胴体と脚が分断され、脚側が丸ごと消える不具合があった
+  // (前髪が体幹と離れて描かれる、腕がポーズで体幹から離れる等でも同種の
+  // 問題が起きうる)。最初から「シルエットは複数の領域に分かれることがある」
+  // 前提に設計し直し、ノイズ(圧縮アーティファクト等の小さすぎる領域)だけを
+  // 除去するsignificantComponentsMask()に置き換える(色分けマップからの
+  // マスク抽出で既に使っているのと同じ関数)。
+  alpha = significantComponentsMask(alpha, w, h);
   alpha = fillHoles(alpha, w, h);
   for(var i4=0;i4<alpha.length;i4++){ if(bridgedHole[i4]) alpha[i4]=0; }
   return {w:w, h:h, rgba:id.data, alpha:alpha};
