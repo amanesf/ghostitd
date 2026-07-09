@@ -172,7 +172,11 @@
        ガードもあった。画像もJSONに埋め込むようになった(buildJson参照)ため、
        モード選択画面も含め常時見える最上位置に移し、真っさらな状態からでも
        このボタン1つで開始できるようにした。 -->
-  <div class="bar" id="sessionBar" style="margin-bottom:8px">
+  <!-- ★2026-07-09: モード選択画面(#modeChoice)にも同じ動作の「JSONから
+       読み込み」カードがあり、常時表示だとモード選択中に同じ機能のボタンが
+       画面に2つ並んで紛らわしいため、モード選択中はこちらを隠す
+       (編集画面(#editor)に入ったら表示する)。 -->
+  <div class="bar hidden" id="sessionBar" style="margin-bottom:8px">
     <button class="btn sm" id="loadJson" style="flex:0 0 auto">📂 JSON読み込み</button>
     <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
   </div>
@@ -1145,6 +1149,7 @@ function runAnalyze(){
   if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
   analysis=A;points=placeAll(A);sel=null;curView="front";
   $("editor").classList.remove("hidden");
+  $("sessionBar").classList.remove("hidden");
   syncViewBtns();
   resyncAnalysisToProfile();
   draw();
