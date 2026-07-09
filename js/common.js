@@ -47,6 +47,9 @@ var DEFAULT_GEN_PARAMS = {
   // 単純な定数pxオフセットとして用意する(既定0=補正なし)。
   back_offset_x: 0, back_offset_y: 0,
   side_offset_x: 0, side_offset_y: 0,
+  // ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面)画像用のズレ補正。
+  // 意味・既定値ともside_offset_x/yと同じ(js/accessories.jsのcurSideOffsetX/Y参照)。
+  leftside_offset_x: 0, leftside_offset_y: 0,
 };
 P3D.DEFAULT_GEN_PARAMS = DEFAULT_GEN_PARAMS;
 
@@ -305,6 +308,27 @@ function loadRgbaRemoveWhite(img, whiteThr, excludeMask){
   return {w:w, h:h, rgba:id.data, alpha:alpha};
 }
 P3D.loadRgbaRemoveWhite = loadRgbaRemoveWhite;
+
+// ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面)画像は、side
+// (右向き側面)と全く同じ座標変換式(SIDE_REF起点の(px-SIDE_REF)/SCALE)を
+// 再利用できるよう、読み込み時点で水平反転して「characterが右を向いている」
+// という既存の規約に合わせる。これによりcarveRegion/sidePointsToModel等、
+// 既存の彫刻コードを一切変更せずにleftSide由来のアクセサリーを彫れる。
+function flipAlphaHorizontal(alpha, w, h){
+  var out=new Uint8Array(w*h);
+  for(var y=0;y<h;y++){
+    var row=y*w;
+    for(var x=0;x<w;x++){ out[row+(w-1-x)] = alpha[row+x]; }
+  }
+  return out;
+}
+P3D.flipAlphaHorizontal = flipAlphaHorizontal;
+// pxBbox: [x0,y0,x1,y1](画像ピクセル座標)。flipAlphaHorizontalと対になる、
+// 同じ水平反転をbboxに適用する版。
+function flipBboxHorizontal(bbox, w){
+  return [w-bbox[2], bbox[1], w-bbox[0], bbox[3]];
+}
+P3D.flipBboxHorizontal = flipBboxHorizontal;
 
 // ---- 色分けマップからのマスク抽出(GHOST_SCANNER_PLAN.md「色分けマップ」方式) ----
 // アクセサリー領域抽出を「1件ずつ座標を当てさせる」方式から、front/side/back

@@ -157,7 +157,7 @@
   <div class="tabpanel" data-tabpanel="front">
     <div class="card">
       <h2>2. 正面(front)生成</h2>
-      <p class="hint">元イラストを参照に、輪郭線なしのTポーズ正面図を生成します(毎回新規セッション)。</p>
+      <p class="hint">元イラストを参照に、輪郭線なしのTポーズ正面図を生成します(ここから新しいセッションを開始し、続くside/leftSide/backはこのセッションの続きとして生成します)。</p>
       <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="frontPromptText"></pre></details>
       <button class="btn mint" id="frontGenBtn">正面を生成</button>
       <canvas class="imgPreview" id="frontPreview" width="512" height="512"></canvas>
@@ -173,13 +173,13 @@
     </div>
   </div>
 
-  <!-- 3. 側面生成 -->
+  <!-- 3. 側面(右)生成 -->
   <div class="tabpanel" data-tabpanel="side">
     <div class="card">
-      <h2>3. 側面(side)生成</h2>
-      <p class="hint">確定したfrontを参照に、真横からの側面図を生成します(毎回新規セッション)。</p>
+      <h2>3. 側面・右(side)生成</h2>
+      <p class="hint">確定したfrontを参照に、真横(右向き)からの側面図を生成します。front生成から続く同一セッションで生成するため、左右非対称な特徴(ツインテールの左右など)の割り当てがブレにくくなります。</p>
       <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="sidePromptText"></pre></details>
-      <button class="btn mint" id="sideGenBtn">側面を生成</button>
+      <button class="btn mint" id="sideGenBtn">側面(右)を生成</button>
       <canvas class="imgPreview" id="sidePreview" width="512" height="512"></canvas>
       <div class="rowGap">
         <button class="btn sm" id="sideRetryBtn" disabled>リトライ</button>
@@ -189,7 +189,33 @@
       <button class="btn sm" id="sideUploadBtn">手動で画像をアップロード</button>
       <input type="file" id="sideUploadFile" accept="image/*"/>
       <button class="btn sm" id="sideDownloadBtn" disabled>この画像をダウンロード</button>
-      <button class="btn green" id="sideNextBtn" disabled>次へ(背面生成)</button>
+      <button class="btn green" id="sideNextBtn" disabled>次へ(側面・左生成)</button>
+    </div>
+  </div>
+
+  <!-- 3b. 側面(左)生成 -->
+  <!-- ★2026-07-09: 左右非対称キャラ(左右で違う房のツインテール等)に対応する
+       ため新設。キャラクター自体は正面から見て左右非対称でも、この側面(左)
+       画像は「左向きに撮った1枚」であり体型自体は側面(右)と同じはずなので、
+       side生成から続く同一セッションで「今度は左向きで」と依頼する形にして
+       いる(新規セッションでは体型比率が side と微妙にズレる恐れがあるため)。 -->
+  <div class="tabpanel" data-tabpanel="leftSide">
+    <div class="card">
+      <h2>3b. 側面・左(leftSide)生成</h2>
+      <p class="hint">確定したfront/sideに続く同一セッションで、真横(左向き)からの側面図を生成します。左右非対称なアクセサリー(片方だけのツインテール等)がある場合、この画像がその左側の彫刻に使われます(無い場合はこのタブをスキップしても構いません)。</p>
+      <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="leftSidePromptText"></pre></details>
+      <button class="btn mint" id="leftSideGenBtn">側面(左)を生成</button>
+      <canvas class="imgPreview" id="leftSidePreview" width="512" height="512"></canvas>
+      <div class="rowGap">
+        <button class="btn sm" id="leftSideRetryBtn" disabled>リトライ</button>
+        <button class="btn sm green" id="leftSideConfirmBtn" disabled>この画像で確定</button>
+      </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="leftSideUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="leftSideUploadFile" accept="image/*"/>
+      <button class="btn sm" id="leftSideDownloadBtn" disabled>この画像をダウンロード</button>
+      <button class="btn sm" id="leftSideSkipBtn">この面は無し(スキップ)</button>
+      <button class="btn green" id="leftSideNextBtn" disabled>次へ(背面生成)</button>
     </div>
   </div>
 
@@ -197,7 +223,7 @@
   <div class="tabpanel" data-tabpanel="back">
     <div class="card">
       <h2>4. 背面(back)生成</h2>
-      <p class="hint">確定したfrontを参照に、完全に背後(180度)からの背面図を生成します(毎回新規セッション)。</p>
+      <p class="hint">front生成から続く同一セッションで、完全に背後(180度)からの背面図を生成します。</p>
       <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="backPromptText"></pre></details>
       <button class="btn mint" id="backGenBtn">背面を生成</button>
       <canvas class="imgPreview" id="backPreview" width="512" height="512"></canvas>
@@ -262,20 +288,29 @@
     </div>
     <div class="card">
       <h2>6-2. 色分けマップ生成→領域抽出(任意)</h2>
-      <p class="hint">front/side/backそれぞれ1枚ずつ、「体=黒・背景=白・各accessory=パレット色でベタ塗り」した色分けマップ画像を生成(または手動アップロード)し、そこから色ごとにマスク(ラスタ)を機械的に抽出します(6-1の確定後に押せます)。1件ずつ座標を当てさせる旧方式より高精度・低コストです。</p>
-      <details class="promptPanel"><summary>送信プロンプト全文(front/side/back共通、画像だけを差し替えて3回送信)を表示</summary><pre id="colormapPromptText"></pre></details>
-      <button class="btn mint" id="colormapGenBtn" disabled>色分けマップを生成(front/side/back)</button>
+      <p class="hint">front/side/leftSide/backそれぞれ1枚ずつ、「体=黒・背景=白・各accessory=パレット色でベタ塗り」した色分けマップ画像を生成(または手動アップロード)し、そこから色ごとにマスク(ラスタ)を機械的に抽出します(6-1の確定後に押せます)。1件ずつ座標を当てさせる旧方式より高精度・低コストです。leftSideは左右非対称なアクセサリーが無ければ省略できます。</p>
+      <!-- ★2026-07-09: 以前はfront/side/back共通の1つのプロンプトを使い回して
+           いたが、面ごとに個別確認・個別コピーしたいとの要望を受け、面ごとに
+           別々のプロンプトパネル(=個別コピーボタン付き)に分割した。 -->
+      <details class="promptPanel"><summary>送信プロンプト全文(front)を表示</summary><pre id="colormapPromptTextFront"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(side・右)を表示</summary><pre id="colormapPromptTextSide"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(leftSide・左)を表示</summary><pre id="colormapPromptTextLeftSide"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(back)を表示</summary><pre id="colormapPromptTextBack"></pre></details>
+      <button class="btn mint" id="colormapGenBtn" disabled>色分けマップを生成(front/side/leftSide/back)</button>
       <p class="hint" id="colormapProgress"></p>
       <div class="rowGap">
         <button class="btn sm" id="colormapUploadFrontBtn" disabled>front手動アップロード</button>
         <button class="btn sm" id="colormapUploadSideBtn" disabled>side手動アップロード</button>
+        <button class="btn sm" id="colormapUploadLeftSideBtn" disabled>leftSide手動アップロード</button>
         <button class="btn sm" id="colormapUploadBackBtn" disabled>back手動アップロード</button>
       </div>
       <input type="file" id="colormapUploadFrontFile" accept="image/*"/>
       <input type="file" id="colormapUploadSideFile" accept="image/*"/>
+      <input type="file" id="colormapUploadLeftSideFile" accept="image/*"/>
       <input type="file" id="colormapUploadBackFile" accept="image/*"/>
       <canvas class="imgPreview" id="colormapFrontPreview" width="512" height="512"></canvas>
       <canvas class="imgPreview" id="colormapSidePreview" width="512" height="512"></canvas>
+      <canvas class="imgPreview" id="colormapLeftSidePreview" width="512" height="512"></canvas>
       <canvas class="imgPreview" id="colormapBackPreview" width="512" height="512"></canvas>
       <button class="btn green" id="maskExtractBtn" disabled>領域を抽出</button>
       <div id="maskList"></div>
@@ -301,15 +336,26 @@
 "use strict";
 
 /* ==================== 状態管理(1箇所にまとめる、GHOST_SCANNER_PLAN.md方針) ==================== */
-var TAB_ORDER=["upload","front","side","back","lm","params","out"];
-var TAB_LABEL={upload:"1.画像投入",front:"2.正面",side:"3.側面",back:"4.背面",lm:"5.ランドマーク",params:"6.アクセサリー",out:"7.出力"};
+// ★2026-07-09(左右非対称キャラ対応): 「左側面(leftSide)」を新設し、
+// side(右側面)の直後・backの前に挿入する。front→side→leftSide→backを
+// 同一Geminiセッション(genHistory)で繋げて生成することで、左右の資産
+// (ツインテール等)の割り当てが生成ごとにブレるのを防ぐ(下記genHistory参照)。
+var TAB_ORDER=["upload","front","side","leftSide","back","lm","params","out"];
+var TAB_LABEL={upload:"1.画像投入",front:"2.正面",side:"3.側面(右)",leftSide:"3b.側面(左)",back:"4.背面",lm:"5.ランドマーク",params:"6.アクセサリー",out:"7.出力"};
 var state={
   curTab:"upload",
   unlockedUpTo:0, // TAB_ORDERのindex。ここまでは行き来自由
   sourceImg:null, sourceDataUrl:null, // リサイズ済み1024x1024
   front:{dataUrl:null, confirmed:false},
   side:{dataUrl:null, confirmed:false},
+  leftSide:{dataUrl:null, confirmed:false},
   back:{dataUrl:null, confirmed:false},
+  // front/side/leftSide/back生成を通して同一Geminiセッションを維持する会話履歴
+  // (GHOST_SCANNER_PLAN.md「左右非対称キャラ対応」節)。新規セッションを
+  // 都度張り直すと、キャラクターの左右非対称な特徴(例: 左右で違う房のツインテール)
+  // の割り当てがビューごとにブレる(左右反転して生成される等)ことが実地で
+  // 確認されたため、front生成から続く1つの会話としてside/leftSide/backを生成する。
+  genHistory:[],
   landmarks:{pointsPx:null, imageWH:null, history:[], confirmed:false},
   accessories:{list:null, history:[], confirmed:false},
   // タブ5で「反映」した位置ズレ補正(平行移動+倍率)の累積値。ランドマーク
@@ -548,12 +594,17 @@ function genConditionsBody(viewLabel, angleLabel, facingClause, armClause){
       "   一貫していること(横向きの顔・体で、正面成分を含まない)"
   ];
   if(armClause){
+    // ★2026-07-09: 「腕は描かないで」だけでは、腕(肌)は消えても袖(服の生地)
+    // だけが宙に浮いた状態で残ってしまう実例が確認されたため、袖・手袋・
+    // 腕時計等「腕を覆う/腕に装着するもの全て」も明示的に対象へ含める。
     conditions.push(
       "**腕は描画しない**: 入力画像はTポーズで腕を真横に伸ばしていますが、\n"+
       "   "+viewLabel+"でその腕をそのまま描くと横棒のように突き出て不自然になるため、\n"+
-      "   肩から下の腕・肘・手首・手は描かないでください(胴体の輪郭に隠れている\n"+
-      "   ものとして扱う)。腕以外(胴体・脚・頭部・髪・首回りの装飾)は通常通り\n"+
-      "   描いてください"
+      "   肩から下の腕・肘・手首・手を描かないでください(胴体の輪郭に隠れている\n"+
+      "   ものとして扱う)。**その腕を覆う袖・手袋・腕時計・リストバンド等、腕に\n"+
+      "   装着/密着しているもの一式も、腕本体と一緒に描かないでください**\n"+
+      "   (肩の付け根で切れた袖だけが宙に浮いて残る、といった状態を避けるため)。\n"+
+      "   腕関連以外(胴体・脚・頭部・髪・首回りの装飾)は通常通り描いてください"
     );
   }
   conditions.push(
@@ -578,6 +629,17 @@ numbered+"\n\n"+
 function promptSide(){
   return genConditionsBody("側面図", "真横(90度)",
     "必ず**画面に向かって右向き**(キャラクターの顔・つま先が画面の右側を向いている状態)にしてください。",
+    true);
+}
+// ★2026-07-09(左右非対称キャラ対応): side(右向き)と全く同じ生成条件で、
+// 向きだけを左向きに変えたもの。同一セッション(genHistory)で直前にside
+// (右向き)を生成済みという前提のプロンプトなので、体型比率・デザイン等の
+// 指示文はside/backと共通のgenConditionsBody任せにしつつ、会話の続きである
+// ことを明示して「同じキャラクターを反対側から見た絵」であることを強調する。
+function promptLeftSide(){
+  return genConditionsBody("側面図", "真横(90度)",
+    "必ず**画面に向かって左向き**(キャラクターの顔・つま先が画面の左側を向いている状態)にしてください。"+
+    "直前に生成した右向きの側面図と同一キャラクター・同一体型比率で、左右を反転しただけの向きです。",
     true);
 }
 function promptBack(){
@@ -811,6 +873,7 @@ var PROMPT_F =
 // resize情報で実寸へ逆変換する(calibrateRegionsInPlace呼び出し元を参照)。
 $("frontPromptText").textContent=PROMPT_A;
 $("sidePromptText").textContent=promptSide();
+$("leftSidePromptText").textContent=promptLeftSide();
 $("backPromptText").textContent=promptBack();
 $("lmPromptText").textContent=PROMPT_D;
 $("accPromptText").textContent=PROMPT_F;
@@ -819,7 +882,12 @@ attachPromptCopyButtons();
 /* ==================== タブ2〜4共通: front/side/back生成(常に新規セッション) ==================== */
 // GHOST_SCANNER_PLAN.md: front/side/back生成は毎回新規セッション(会話履歴を持ち越さない)。
 // 単一責務: 「生成する」「確定する」「次へ進む」をそれぞれ別関数に分ける。
-function makeGenTab(name, promptText, refDataUrlFn, nextTabName){
+// startsSession: true(front)なら生成前にstate.genHistoryをリセットし、新しい
+// セッションを開始する。false(side/leftSide/back)ならstate.genHistoryを
+// そのまま引き継ぎ、成功したら更新する(GHOST_SCANNER_PLAN.md「左右非対称
+// キャラ対応」節: front→side→leftSide→backを同一会話にすることで、左右の
+// 資産の割り当てがビューごとにブレるのを防ぐ)。
+function makeGenTab(name, promptText, refDataUrlFn, nextTabName, startsSession){
   var genBtn=$(name+"GenBtn"), retryBtn=$(name+"RetryBtn"), confirmBtn=$(name+"ConfirmBtn"),
       nextBtn=$(name+"NextBtn"), preview=$(name+"Preview"),
       uploadBtn=$(name+"UploadBtn"), uploadFile=$(name+"UploadFile"), downloadBtn=$(name+"DownloadBtn");
@@ -852,11 +920,13 @@ function makeGenTab(name, promptText, refDataUrlFn, nextTabName){
   function doGenerate(){
     var ref=refDataUrlFn();
     if(!ref){ setMsg("参照画像がありません。前のタブを確認してください。",true); return; }
+    if(startsSession) state.genHistory=[];
     genBtn.disabled=true; retryBtn.disabled=true;
     setMsg((TAB_LABEL[name]||name)+"を生成中...(数十秒かかる場合があります)");
-    P3D.scannerGenerateImage(promptText, ref).then(function(dataUrl){
-      state[name].dataUrl=dataUrl; state[name].confirmed=false;
-      return showImageOnCanvas(preview, dataUrl);
+    P3D.scannerGenerateImageInSession(promptText, ref, state.genHistory).then(function(res){
+      state[name].dataUrl=res.dataUrl; state[name].confirmed=false;
+      state.genHistory=res.history;
+      return showImageOnCanvas(preview, res.dataUrl);
     }).then(function(){
       genBtn.disabled=false; retryBtn.disabled=false; confirmBtn.disabled=false;
       if(downloadBtn) downloadBtn.disabled=false;
@@ -878,9 +948,17 @@ function makeGenTab(name, promptText, refDataUrlFn, nextTabName){
     unlockNext(name); switchTab(nextTabName);
   };
 }
-makeGenTab("front", PROMPT_A, function(){ return state.sourceDataUrl; }, "side");
-makeGenTab("side", promptSide(), function(){ return state.front.dataUrl; }, "back");
-makeGenTab("back", promptBack(), function(){ return state.front.dataUrl; }, "lm");
+makeGenTab("front", PROMPT_A, function(){ return state.sourceDataUrl; }, "side", true);
+makeGenTab("side", promptSide(), function(){ return state.front.dataUrl; }, "leftSide", false);
+makeGenTab("leftSide", promptLeftSide(), function(){ return state.front.dataUrl; }, "back", false);
+makeGenTab("back", promptBack(), function(){ return state.front.dataUrl; }, "lm", false);
+// leftSideは左右非対称なアクセサリーが無いキャラでは不要なため、スキップ
+// できるボタンを用意する(スキップしてもside/backのセッション継続には
+// 影響しない。単にstate.leftSide.dataUrlが空のまま次に進むだけ)。
+$("leftSideSkipBtn").onclick=function(){
+  unlockNext("leftSide"); switchTab("back");
+  setMsg("側面(左)をスキップしました。左右非対称なアクセサリーがある場合は、後からこのタブに戻って生成できます。");
+};
 
 /* ==================== タブ5: ランドマーク(会話継続、チャットで反復修正) ==================== */
 function appendChatLine(logEl, role, text){
@@ -1174,9 +1252,9 @@ $("accConfirmListBtn").onclick=function(){
 // 色分けマップ・抽出済みマスクはaccessory一覧(特に色割当)に依存しているため、
 // 解除時にまとめてリセットする(古い一覧のまま抽出したマスクが残る不整合を防ぐ)。
 function resetColormapAndMaskState(){
-  state.colormaps = { front:null, side:null, back:null };
+  state.colormaps = { front:null, side:null, leftSide:null, back:null };
   (state.accessories.list||[]).forEach(function(a){ delete a.mask; });
-  ["Front","Side","Back"].forEach(function(v){
+  ["Front","Side","LeftSide","Back"].forEach(function(v){
     var c=$("colormap"+v+"Preview");
     if(c) c.getContext("2d").clearRect(0,0,c.width,c.height);
   });
@@ -1203,22 +1281,26 @@ $("accUnconfirmBtn").onclick=function(){
 // で色ごとにマスク(ラスタ)を機械的に抽出する。抽出結果は多角形(regions)とは
 // 別のacc.mask={front,side,back}(各{maskDataUrl,bbox}|undefined)に格納する
 // (データモデルは統合せず並存、既存のregions手動編集ロジックは無改修)。
-var VIEW_LABEL_JP = {front:"正面(front)", side:"側面(side)", back:"背面(back)"};
-state.colormaps = { front:null, side:null, back:null };
-// ★2026-07-08: プロンプト文面はfront/side/backで指示内容が変わらないため
-// (判断基準・塗り分けルールは共通)、view非依存の共通テキスト1つに統合した
-// (P3D.scannerBuildColormapPrompt自体がview引数を取らなくなった)。
-// 以前は「front専用に見える」という表示バグの修正としてfront/side/back
-// 3面分を並べて表示していたが、実際に文面が完全に共通になったため、
-// 1つだけ表示しfront/side/back共通である旨を明記する形に戻す。
+var VIEW_LABEL_JP = {front:"正面(front)", side:"側面・右(side)", leftSide:"側面・左(leftSide)", back:"背面(back)"};
+var COLORMAP_VIEWS = ["front","side","leftSide","back"];
+state.colormaps = { front:null, side:null, leftSide:null, back:null };
+// ★2026-07-09: 面ごとに個別確認・個別コピーしたいとの要望を受け、
+// P3D.scannerBuildColormapPrompt(list, view)で面ごとのプロンプトを個別に
+// 組み立てて表示するようにした(判断基準・塗り分けルール自体は共通のまま、
+// 冒頭の「この画像はどの面か」の説明文だけが面ごとに変わる)。
 function refreshColormapPromptText(){
   var list = state.accessories.list||[];
-  $("colormapPromptText").textContent = P3D.scannerBuildColormapPrompt(list);
+  COLORMAP_VIEWS.forEach(function(v){
+    var elId = "colormapPromptText"+v.charAt(0).toUpperCase()+v.slice(1);
+    var el=$(elId);
+    if(el) el.textContent = P3D.scannerBuildColormapPrompt(list, v);
+  });
 }
 function refreshColormapButtons(){
   var ready = !!(state.accessories.list && state.accessories.list.length && state.front.confirmed);
   $("colormapGenBtn").disabled = !ready;
-  ["Front","Side","Back"].forEach(function(v){ $("colormapUpload"+v+"Btn").disabled = !state.front.confirmed; });
+  ["Front","Side","LeftSide","Back"].forEach(function(v){ $("colormapUpload"+v+"Btn").disabled = !state.front.confirmed; });
+  // leftSideは左右非対称なアクセサリーが無ければ省略できるため必須にしない。
   $("maskExtractBtn").disabled = !(state.colormaps.front && state.colormaps.side && state.colormaps.back);
 }
 async function showColormapPreview(view, dataUrl){
@@ -1228,20 +1310,22 @@ async function generateColormaps(){
   var list = state.accessories.list;
   if(!list || !list.length){ setMsg("先にアクセサリー一覧を確定してください。",true); return; }
   $("colormapGenBtn").disabled=true;
-  // プロンプト文面はfront/side/back共通のため1回だけ組み立て、画像だけを
-  // view別に3回(新規セッション)渡す(GHOST_SCANNER_PLAN.md「アクセサリー
-  // 一覧・色分けマッププロンプトの見直し」節)。
-  var prompt = P3D.scannerBuildColormapPrompt(list);
-  var views=["front","side","back"];
+  // ★2026-07-09: front/side/leftSide/backを同一セッション(history)で順に
+  // 生成する(front/side/back生成のセッション継続と同じ理由。塗り分ける
+  // アクセサリーの左右割り当てが面ごとにブレるのを防ぐ)。
+  var history=[];
+  var views=COLORMAP_VIEWS;
   for(var i=0;i<views.length;i++){
     var v=views[i];
-    var ref = state[v].dataUrl;
-    if(!ref){ $("colormapProgress").textContent=v+"の画像がありません(スキップ)。"; continue; }
-    $("colormapProgress").textContent="("+(i+1)+"/3) "+VIEW_LABEL_JP[v]+"の色分けマップを生成中...";
+    var ref = state[v] && state[v].dataUrl;
+    if(!ref){ $("colormapProgress").textContent=VIEW_LABEL_JP[v]+"の画像がありません(スキップ)。"; continue; }
+    var prompt = P3D.scannerBuildColormapPrompt(list, v);
+    $("colormapProgress").textContent="("+(i+1)+"/"+views.length+") "+VIEW_LABEL_JP[v]+"の色分けマップを生成中...";
     try{
-      var dataUrl = await P3D.scannerGenerateImage(prompt, ref);
-      state.colormaps[v]=dataUrl;
-      await showColormapPreview(v, dataUrl);
+      var res = await P3D.scannerGenerateImageInSession(prompt, ref, history);
+      state.colormaps[v]=res.dataUrl;
+      history=res.history;
+      await showColormapPreview(v, res.dataUrl);
     }catch(e){
       setMsg("「"+VIEW_LABEL_JP[v]+"」の色分けマップ生成に失敗しました: "+e.message,true);
     }
@@ -1267,7 +1351,7 @@ function wireColormapUpload(view){
     file.value="";
   };
 }
-["front","side","back"].forEach(wireColormapUpload);
+COLORMAP_VIEWS.forEach(wireColormapUpload);
 
 function renderMaskList(list){
   var el=$("maskList"); el.innerHTML="";
@@ -1275,7 +1359,7 @@ function renderMaskList(list){
     var d=document.createElement("div");
     d.className="accItem";
     d.style.borderColor=a.color||"var(--line)";
-    var views=["front","side","back"].filter(function(v){ return a.mask && a.mask[v]; });
+    var views=COLORMAP_VIEWS.filter(function(v){ return a.mask && a.mask[v]; });
     d.innerHTML="<b style='color:"+(a.color||"#fff")+"'>"+a.name+"</b>"+
       "マスク取得済みの面="+(views.length?views.join(","):"(なし)");
     el.appendChild(d);
@@ -1288,10 +1372,10 @@ function renderMaskList(list){
 // 重ね描きパターン(alpha 0.55)を踏襲する。
 async function renderMaskPreview(list){
   var wrap=$("maskPreviewList"); wrap.innerHTML="";
-  var views=["front","side","back"];
+  var views=COLORMAP_VIEWS;
   for(var i=0;i<views.length;i++){
     var v=views[i];
-    var url=state[v].dataUrl;
+    var url=state[v] && state[v].dataUrl;
     if(!url) continue;
     var img=await P3D.scannerLoadImage(url);
     var w=img.naturalWidth, h=img.naturalHeight;
@@ -1319,7 +1403,7 @@ async function extractMasks(){
   var list = state.accessories.list;
   if(!list || !list.length){ setMsg("先にアクセサリー一覧を確定してください。",true); return; }
   $("maskExtractBtn").disabled=true;
-  var views=["front","side","back"];
+  var views=COLORMAP_VIEWS;
   for(var i=0;i<views.length;i++){
     var v=views[i];
     var dataUrl = state.colormaps[v];
@@ -1377,6 +1461,9 @@ async function buildLandmarksAiJson(){
     },
     points_px:state.landmarks.pointsPx || {},
   };
+  // leftSideは左右非対称なアクセサリー(mask.leftSide)がある場合だけ意味を
+  // 持つ任意の面なので、実際に生成/アップロードされている時だけ含める。
+  if(state.leftSide && state.leftSide.dataUrl) out.image.leftSide={dataUrl:state.leftSide.dataUrl};
   if(state.accessories.list && state.accessories.list.length){
     // exclude_from_body_silhouetteは内部処理用の一時フィールドなので、
     // landmarks_ai.json側のaccessoriesからは除く(GHOST_SCANNER_PLAN.md指示通り)。
@@ -1413,8 +1500,11 @@ async function buildLandmarksAiJson(){
     for(var ai=0; ai<state.accessories.list.length; ai++){
       var accM = state.accessories.list[ai];
       if(!accM.mask) continue;
-      for(var vi=0; vi<3; vi++){
-        var vv=["front","side","back"][vi];
+      // leftSideも含めた4面分。exclude_masks(体シルエット除外)自体は
+      // front/side/backの3面のみが対象(下記ループ)のためviewImgsには
+      // leftSideを追加しないが、mask._imgのプリロード自体は4面共通で行う。
+      for(var vi=0; vi<COLORMAP_VIEWS.length; vi++){
+        var vv=COLORMAP_VIEWS[vi];
         var mm = accM.mask[vv];
         if(mm && mm.maskDataUrl && !mm._img){
           mm._img = await P3D.scannerLoadImage(mm.maskDataUrl);
@@ -1465,7 +1555,8 @@ var SESSION_JSON_KEY = "3dtoolJS_scanner_session_v1";
 function buildSessionJson(){
   return {
     curTab: state.curTab, unlockedUpTo: state.unlockedUpTo,
-    front:{confirmed:state.front.confirmed}, side:{confirmed:state.side.confirmed}, back:{confirmed:state.back.confirmed},
+    front:{confirmed:state.front.confirmed}, side:{confirmed:state.side.confirmed},
+    leftSide:{confirmed:state.leftSide.confirmed}, back:{confirmed:state.back.confirmed},
     landmarks:{pointsPx:state.landmarks.pointsPx, confirmed:state.landmarks.confirmed},
     accessories:{
       list:(state.accessories.list||[]).map(function(a){
@@ -1487,9 +1578,11 @@ async function saveSessionImages(){
     ["source", state.sourceDataUrl],
     ["front", state.front.dataUrl],
     ["side", state.side.dataUrl],
+    ["leftSide", state.leftSide && state.leftSide.dataUrl],
     ["back", state.back.dataUrl],
     ["colormapFront", state.colormaps && state.colormaps.front],
     ["colormapSide", state.colormaps && state.colormaps.side],
+    ["colormapLeftSide", state.colormaps && state.colormaps.leftSide],
     ["colormapBack", state.colormaps && state.colormaps.back],
   ];
   for(var i=0;i<pairs.length;i++){
@@ -1557,7 +1650,7 @@ function restoreAccessoriesUI(){
   }
 }
 async function restoreColormapsUI(){
-  var views=["front","side","back"];
+  var views=COLORMAP_VIEWS;
   for(var i=0;i<views.length;i++){
     var v=views[i];
     if(state.colormaps[v]) await showColormapPreview(v, state.colormaps[v]);
@@ -1574,8 +1667,8 @@ async function restoreScannerSession(){
     await showImageOnCanvas($("uploadPreview"), state.sourceDataUrl);
     $("uploadNextBtn").disabled=false; $("uploadDownloadBtn").disabled=false;
   }
-  for(var i=0;i<["front","side","back"].length;i++){
-    var name=["front","side","back"][i];
+  for(var i=0;i<["front","side","leftSide","back"].length;i++){
+    var name=["front","side","leftSide","back"][i];
     if(images[name]){
       state[name].dataUrl = await blobToDataUrl(images[name]);
       state[name].confirmed = json[name] ? json[name].confirmed : false;
@@ -1595,6 +1688,7 @@ async function restoreScannerSession(){
   if(json.calibration) state.calibration=json.calibration;
   if(images.colormapFront) state.colormaps.front=await blobToDataUrl(images.colormapFront);
   if(images.colormapSide) state.colormaps.side=await blobToDataUrl(images.colormapSide);
+  if(images.colormapLeftSide) state.colormaps.leftSide=await blobToDataUrl(images.colormapLeftSide);
   if(images.colormapBack) state.colormaps.back=await blobToDataUrl(images.colormapBack);
   await restoreColormapsUI();
   state.unlockedUpTo = json.unlockedUpTo||0;

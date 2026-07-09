@@ -208,6 +208,27 @@ async function generateImage(promptText, refImageDataUrl, apiKey){
 }
 P3D.scannerGenerateImage = generateImage;
 
+// ★2026-07-09(左右非対称キャラ対応): front→side→leftSide→backを同一
+// セッション(会話継続)で生成するための版。callTextTurn(テキスト/JSON推定)と
+// 同じ「呼び出し元がhistoryを保持し、都度渡す」方針をそのまま画像生成にも
+// 適用する。新規セッションを都度張り直すと、キャラクターの左右非対称な
+// 特徴(例: 左だけ・右だけに付いた房のツインテール)の割り当てがビューごとに
+// ブレる(生成のたびに左右が入れ替わる等)ことが実地で確認されたため。
+// 応答の画像そのものをmodelターンとしてhistoryに積むことで、次のターンで
+// Geminiが「直前に自分が生成した画像」を参照できるようにする(refImageDataUrl
+// も併せて明示的に添付し続けるのは、会話内画像参照だけに頼るより安定させるため)。
+async function generateImageInSession(promptText, refImageDataUrl, history, apiKey){
+  var parts = [ { text: promptText }, dataUrlToInlinePart(refImageDataUrl) ];
+  var json = await callGemini(getImageModel(), history||[], parts, { apiKey: apiKey, responseModalities: ["IMAGE"] });
+  var dataUrl = extractImageDataUrl(json);
+  var newHistory = (history||[]).concat([
+    { role: "user", parts: parts },
+    { role: "model", parts: [ dataUrlToInlinePart(dataUrl) ] }
+  ]);
+  return { dataUrl: dataUrl, history: newHistory, raw: json };
+}
+P3D.scannerGenerateImageInSession = generateImageInSession;
+
 // テキスト/JSON推定(ランドマーク・パラメータ・アクセサリー)の1ターン。
 // 会話継続に対応するため、呼び出し元がhistoryを保持し、都度渡す(このツール自体は
 // 会話状態を持たない=状態管理はUI層に一元化するというGHOST_SCANNER_PLAN.mdの方針)。
@@ -227,22 +248,33 @@ P3D.scannerCallTextTurn = callTextTurn;
 
 // ---- 色分けマップ生成プロンプト(GHOST_SCANNER_PLAN.md「色分けマップ」方式) ----
 // accessory一覧(名前・パレット色・判定理由)から動的にテーブルを組み立てる。
-// front/side/backそれぞれ1回、計3回のAPI呼び出しを行うが、指示内容自体は
-// front/side/backのどれであっても同一の判断基準・同一の塗り分けルールを
-// 適用するだけなので、プロンプト文面はview非依存の共通テキスト1つにする
-// (呼び出し元がこのテキストを3回使い回す。以前はviewLabelで文面を書き換えて
-// いたが、実質的な指示内容はviewに依存しないため分ける意味が薄かった)。
+// front/side/leftSide/backそれぞれ1回のAPI呼び出しを行う。
+// ★2026-07-09: 以前は判断基準・塗り分けルール自体がviewに依存しないという
+// 理由でview非依存の共通テキスト1つを使い回していたが、(1)ユーザーから
+// 「面ごとに別々に確認・コピーしたい」との要望があったこと、(2)view非依存の
+// 文面のままだと「添付画像はfront/side/backのいずれか」という曖昧な書き方に
+// なり、実際にどの面を処理しているのかがGeminiにも読み手にも伝わりにくかった
+// こと、の2点から、view引数を受け取って冒頭の説明文をその面向けに書き換える
+// ようにした(判断基準・塗り分けルール自体の内容は変えていない)。
 // accessories: [{name,color,reason}, ...](タブ6-1で確定済みの一覧、colorは"#rrggbb"、
 // reasonはPROMPT_Fで「なぜaccessoryと判断したか+体のどこを指すか」を具体的に
 // 書かせたもの。この会話(色分けマップ生成)はPROMPT_F検出時の会話履歴を
 // 引き継がない新規セッションなので、reasonと下記「参考」節でPROMPT_F相当の
 // 判断基準を都度渡し直すことで、検出時と同じ考え方で境界を塗らせる)。
-function buildColormapPrompt(accessories){
+// view: "front"|"side"|"leftSide"|"back"(省略可、既定は旧来通りの曖昧な表現)
+var COLORMAP_VIEW_LABEL = {front:"正面(front)", side:"側面・右(side)", leftSide:"側面・左(leftSide)", back:"背面(back)"};
+function buildColormapPrompt(accessories, view){
   var rows = (accessories||[]).map(function(a){
     var reason = a.reason ? "(判定理由: " + a.reason + ")" : "";
     return "- " + a.name + reason + " → " + (a.color || "#000000");
   }).join("\n");
-  return "これは、事前に別の作業でこの画像と同一キャラクターのfront/side/back\n"+
+  var viewDesc = view && COLORMAP_VIEW_LABEL[view]
+    ? "添付画像は、あるキャラクターのTポーズ立ち絵の**"+COLORMAP_VIEW_LABEL[view]+"**です。"
+    : "添付画像は、あるキャラクターのTポーズ立ち絵です(front/side/backのいずれか。";
+  var viewDescTail = view && COLORMAP_VIEW_LABEL[view]
+    ? "この画像を、以下の指示に\n"
+    : "どの面でも判断基準・塗り分けルールは共通です)。この画像を、以下の指示に\n";
+  return "これは、事前に別の作業でこの画像と同一キャラクターのfront/side/leftSide/back\n"+
 "立ち絵から検出したアクセサリー一覧を、この画像上で色分けマップとして\n"+
 "塗り分ける作業です(この会話には検出時の判断過程は引き継がれていないため、\n"+
 "以下の参考情報・各アクセサリーの判定理由を手がかりに判断してください)。\n\n"+
@@ -256,8 +288,7 @@ function buildColormapPrompt(accessories){
 "  基準に前後に機械的に分割しており、頭頂そのものは前髪側に含まれます。\n"+
 "  ツインテール・お団子・三つ編み・アホ毛等、頭部から独立して垂れ下がる房は\n"+
 "  この前後分割とは別に、房ごとに個別のaccessoryとして扱っています\n\n"+
-"添付画像は、あるキャラクターのTポーズ立ち絵です(front/side/backのいずれか。\n"+
-"どの面でも判断基準・塗り分けルールは共通です)。この画像を、以下の指示に\n"+
+viewDesc+viewDescTail+
 "従って**色分けマップ**(ベタ塗りの領域分割図)に編集してください。線画・\n"+
 "グラデーション・影は一切残さず、指定した色の平坦な塗りつぶしだけで\n"+
 "構成してください。\n\n"+
@@ -272,8 +303,9 @@ function buildColormapPrompt(accessories){
 "- あるアクセサリーが体や他のアクセサリーの前後に重なって一部隠れている\n"+
 "  場合も、実際に見えている部分だけをそのアクセサリーの色で塗ってください\n"+
 "  (隠れて見えない部分は無理に推測して塗らない)\n"+
-"- この画像に写っていないアクセサリーは無視してください(一覧はfront/side/back\n"+
-"  共通ですが、面によっては一部のアクセサリーが写っていないことがあります)\n"+
+"- この画像に写っていないアクセサリーは無視してください(一覧はfront/side/\n"+
+"  leftSide/back共通ですが、面によっては一部のアクセサリーが写っていない\n"+
+"  ことがあります)\n"+
 "- キャラクターの輪郭・ポーズ・構図(位置・大きさ)は元画像から変更しない\n"+
 "  でください(色分けマップとして領域抽出に使うため、位置がずれると\n"+
 "  マスクが元画像とずれてしまいます)\n\n"+

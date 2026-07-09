@@ -388,7 +388,11 @@ const BONE_GROUPS=[
   {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
 ];
 
-let imgs={front:null,side:null,back:null};
+// ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面、色分けマップの
+// ことが多い)は任意。front/side/backと違い、マーク付け(ランドマーク)や
+// 除外範囲編集の対象画像としては扱わない(js/accessories.jsが左右非対称な
+// アクセサリーの彫刻にだけ使う)。
+let imgs={front:null,side:null,back:null,leftSide:null};
 let curView="front";
 function curImg(){return imgs[curView];}
 let accessories=[];
@@ -423,6 +427,7 @@ const DEFAULT_GEN_PARAMS={
   kb_per_face:200,
   back_offset_x:0, back_offset_y:0,
   side_offset_x:0, side_offset_y:0,
+  leftside_offset_x:0, leftside_offset_y:0,
   rigid_soft_width:0,
 };
 // group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
@@ -478,6 +483,10 @@ const PARAM_META=[
   desc:"側面写真の奥行き(前後)方向の基準ズレを補正する。正の値で奥行きの参照位置を右へ、負の値で左へずらす。"},
  {group:"背面/側面ズレ補正", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
   desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"背面/側面ズレ補正", key:"leftside_offset_x", label:"側面(左)画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"左右非対称キャラ用のleftSide(左向き側面)画像のズレ補正。意味・使い方はside_offset_xと同じ(mask.leftSideを持つアクセサリーだけに影響する)。"},
+ {group:"背面/側面ズレ補正", key:"leftside_offset_y", label:"側面(左)画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
 ];
 // ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): body_smooth_iters/
 // acc_smooth_iters/rigid_soft_width/kb_per_face(Tier1)、body_decimate/
@@ -1115,6 +1124,8 @@ async function bootstrapFromJson(d){
     await loadImgFromDataUrl(d.image.front.dataUrl,"front");
     if(d.image.side && d.image.side.dataUrl) await loadImgFromDataUrl(d.image.side.dataUrl,"side");
     if(d.image.back && d.image.back.dataUrl) await loadImgFromDataUrl(d.image.back.dataUrl,"back");
+    // leftSideは左右非対称キャラ用の任意の面(無くても読み込みは成立する)。
+    if(d.image.leftSide && d.image.leftSide.dataUrl) await loadImgFromDataUrl(d.image.leftSide.dataUrl,"leftSide");
   }catch(e){
     setMsg("画像の復元に失敗しました: "+((e&&e.message)||e));
     return false;
@@ -1339,7 +1350,10 @@ function buildJson(){
     // dataUrlとしてJSONに埋め込み、JSON単体で完全に復元できるようにする。
     image:{front:{w,h,ytop:analysis.ytop,ybot:analysis.ybot,cx:Math.round(analysis.cx),dataUrl:imgObjToDataUrl(imgs.front)},
       side:imgs.side?{w:imgs.side.w,h:imgs.side.h,dataUrl:imgObjToDataUrl(imgs.side)}:null,
-      back:imgs.back?{w:imgs.back.w,h:imgs.back.h,dataUrl:imgObjToDataUrl(imgs.back)}:null},
+      back:imgs.back?{w:imgs.back.w,h:imgs.back.h,dataUrl:imgObjToDataUrl(imgs.back)}:null,
+      // ★2026-07-09(左右非対称キャラ対応): leftSideは任意(mask.leftSideを
+      // 持つアクセサリーが無ければ不要)。
+      leftSide:imgs.leftSide?{w:imgs.leftSide.w,h:imgs.leftSide.h,dataUrl:imgObjToDataUrl(imgs.leftSide)}:null},
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones};
@@ -1500,7 +1514,7 @@ function syncViewBtns(){
     b.disabled=!imgs[b.dataset.view];
   });
 }
-const VIEWJP={front:"正面",side:"側面",back:"背面"};
+const VIEWJP={front:"正面",side:"側面(右)",leftSide:"側面(左)",back:"背面"};
 // 「自動マスク」タブ: front/side/backの画像に、色分けマップ由来のマスク
 // (acc.mask[view].maskDataUrl、白RGB+アルファ=前景のラスタ)を重ね描きした
 // プレビューと、抽出済みパーツ一覧を同時表示する(GHOST_SCANNER_PLAN.md
@@ -1511,7 +1525,7 @@ let automaskRendered=false;
 // 自動マスクタブ側で直接編集できるようにする(BONE_GROUPS/BONE_JPを使った
 // 簡易フォーム)。
 function buildAutomaskItemHtml(a, idx){
-  const views=["front","side","back"].filter(v=>a.mask[v]);
+  const views=["front","side","leftSide","back"].filter(v=>a.mask[v]);
   const bonesHtml=BONE_GROUPS.map(grp=>{
     const rowHtml=grp.bones.map(b=>{
       const checked=(a.bones||[]).includes(b)?"checked":"";
@@ -1574,7 +1588,7 @@ function renderAutomaskTab(){
     return;
   }
   hint.textContent="";
-  ["front","side","back"].forEach(v=>{
+  ["front","side","leftSide","back"].forEach(v=>{
     const im=imgs[v];
     if(!im)return;
     const c=document.createElement("canvas");

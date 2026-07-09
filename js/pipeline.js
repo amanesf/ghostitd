@@ -164,7 +164,25 @@ async function runCarvingStages(state, report){
   var prof = P3D.stageProfile(alphaFull.front, sizes.front.w, sizes.front.h, alphaFull.side, sizes.side.w, sizes.side.h);
   var core = P3D.stageCore(alphaFull.side, sizes.side.w, sizes.side.h, prof.SYTOP, prof.SYBOT);
   var SCALE = prof.YBOT-prof.YTOP;
-  console.log("  profile: CX",prof.CX,"YTOP",prof.YTOP,"YBOT",prof.YBOT,"SIDE_REF",core.SIDE_REF);
+  console.log("  profile: CX",prof.CX,"YTOP",prof.YTOP,"YBOT",prof.YBOT,"SIDE_REF",core.SIDE_REF,"SYTOP",prof.SYTOP,"SYBOT",prof.SYBOT);
+
+  // ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面。色分けマップの
+  // ことが多く、通常写真である必要はない。白背景+非白=シルエットとして
+  // 扱えれば十分)がある場合、sideと同じキャリブレーション手順を、水平反転
+  // したアルファに対して行う(P3D.flipAlphaHorizontal参照。反転することで
+  // side用の各種変換式(SIDE_REF起点)をそのまま再利用できるようにするため)。
+  // 体本体(stageVisualHull)はside(右)のみを使い、leftSideは片方だけに
+  // ある非対称アクセサリー(例: 左だけのツインテール)の彫刻にのみ使う。
+  var leftSide = null;
+  if(state.imgs.leftSide){
+    var lImg = state.imgs.leftSide.el, lW = state.imgs.leftSide.w, lH = state.imgs.leftSide.h;
+    var lLoaded = P3D.loadRgbaRemoveWhite(lImg, gp.white_thr, null);
+    var lAlphaFlipped = P3D.flipAlphaHorizontal(lLoaded.alpha, lW, lH);
+    var lBounds = P3D.boolBounds(lAlphaFlipped, lW, lH);
+    var lCore = P3D.stageCore(lAlphaFlipped, lW, lH, lBounds[0], lBounds[1]);
+    leftSide = { w:lW, h:lH, SYTOP:lBounds[0], SYBOT:lBounds[1], SIDE_REF:lCore.SIDE_REF };
+    console.log("  profile(leftSide): SYTOP",lBounds[0],"SYBOT",lBounds[1],"SIDE_REF",lCore.SIDE_REF);
+  }
   await tick();
 
   report("skeleton(骨格ピボット計算)");
@@ -226,6 +244,17 @@ async function runCarvingStages(state, report){
       if(ms && ms.maskDataUrl && !ms.alpha){
         maskLoads.push(P3D.loadMaskAlphaAsync(ms.maskDataUrl, sizes.side.w, sizes.side.h).then(function(alpha){ ms.alpha=alpha; }));
       }
+      // ★2026-07-09(左右非対称キャラ対応): mask.leftSideも、leftSide本体の
+      // キャリブレーション(上記leftSide変数)と同じ水平反転を適用してから
+      // alpha/bboxを格納する(反転後の座標系はside用の変換式とそのまま
+      // 揃うため、accessories.js側はside/leftSideを区別なく同じ式で扱える)。
+      var mls=a.mask.leftSide;
+      if(leftSide && mls && mls.maskDataUrl && !mls.alpha){
+        maskLoads.push(P3D.loadMaskAlphaAsync(mls.maskDataUrl, leftSide.w, leftSide.h).then(function(alpha){
+          mls.alpha=P3D.flipAlphaHorizontal(alpha, leftSide.w, leftSide.h);
+          if(mls.bbox) mls.bbox=P3D.flipBboxHorizontal(mls.bbox, leftSide.w);
+        }));
+      }
     });
     if(maskLoads.length) await Promise.all(maskLoads);
     acc = P3D.stageAccessories({
@@ -240,6 +269,11 @@ async function runCarvingStages(state, report){
       // 分けて渡す。
       faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
       SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
+      // ★2026-07-09(左右非対称キャラ対応): mask.leftSideを持つアクセサリーの
+      // 彫刻に使う、leftSide側のキャリブレーション一式(無ければnull=非対応)。
+      laW: leftSide?leftSide.w:0, laH: leftSide?leftSide.h:0,
+      LEFT_SYTOP: leftSide?leftSide.SYTOP:0, LEFT_SYBOT: leftSide?leftSide.SYBOT:0,
+      LEFT_SIDE_REF: leftSide?leftSide.SIDE_REF:0,
       // ★2026-07-09: frontCont/backCont/sideCont(元写真の白背景しきい値による
       // サブピクセル補正用データ)はstageAccessories側で使わなくなった
       // (js/accessories.jsのcarveRegion呼び出し部のコメント参照)ため渡さない。

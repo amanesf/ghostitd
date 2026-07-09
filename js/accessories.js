@@ -103,11 +103,16 @@ P3D.pixelBboxToModelBbox = pixelBboxToModelBbox;
 
 /**
  * opts: {
- *   accs: [{name,mode,bones,mask:{front:{maskDataUrl,bbox,alpha},back:{...},side:{...}}}, ...]
+ *   accs: [{name,mode,bones,mask:{front:{...},back:{...},side:{...},leftSide:{...}}}, ...]
+ *     (mask[view] = {maskDataUrl,bbox,alpha}。leftSideは左右非対称キャラ用の
+ *     任意フィールドで、mask.sideの代わりに優先して使われる)
  *   frontRgba,backRgba,sideRgba: Uint8ClampedArray(*4) 元画像(front.png等)そのまま
  *   faW,faH: front/backの画像サイズ(carving.jsの前提通りback/frontは同サイズ)
  *   saW,saH: side画像のサイズ(front/backとは別サイズでよい)
  *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション
+ *   laW,laH,LEFT_SYTOP,LEFT_SYBOT,LEFT_SIDE_REF: leftSide画像のキャリブレーション
+ *     (pipeline.js側で水平反転済み。laW===0またはlaW未指定ならleftSide非対応、
+ *     mask.leftSideを持つアクセサリーがあってもmask.sideにフォールバックする)
  *   pivots: skeleton pivots(soft skinning用)
  *   gp: gen_params
  * }
@@ -125,6 +130,12 @@ function stageAccessories(opts){
   var SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
   var backOffsetX=gp.back_offset_x||0, backOffsetY=gp.back_offset_y||0;
   var sideOffsetX=gp.side_offset_x||0, sideOffsetY=gp.side_offset_y||0;
+  // ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面。pipeline.js側で
+  // sideと同じ座標変換式を再利用できるよう既に水平反転済み)のキャリブレーション。
+  // laW/laH===0はleftSide画像が渡されていない(非対応/従来通り)ことを示す。
+  var laW=opts.laW||0, laH=opts.laH||0;
+  var LEFT_SYTOP=opts.LEFT_SYTOP, LEFT_SYBOT=opts.LEFT_SYBOT, LEFT_SIDE_REF=opts.LEFT_SIDE_REF;
+  var leftSideOffsetX=gp.leftside_offset_x||0, leftSideOffsetY=gp.leftside_offset_y||0;
   var accs = opts.accs || [];
   if(!accs.length) return null;
 
@@ -152,8 +163,21 @@ function stageAccessories(opts){
       console.log("  accessories: skip", name, "(front/back範囲なし)");
       return;
     }
-    if(mask.side && mask.side.bbox){
-      var bbm3=P3D.pixelBboxToModelBbox(mask.side.bbox, function(pts){ return sidePointsToModel(pts, SIDE_REF, SCALE, SYTOP, SYBOT); });
+    // ★2026-07-09(左右非対称キャラ対応): mask.leftSideがあればそちらを優先する
+    // (左右で違う房のツインテールのように、片側だけに存在するアクセサリーは
+    // 通常mask.sideを持たずmask.leftSideだけを持つ)。両方持つ場合(通常は
+    // 起こらないが)もleftSideを優先する。
+    var useLeftSide = !!(laW && mask.leftSide && mask.leftSide.bbox);
+    var sideMask = useLeftSide ? mask.leftSide : mask.side;
+    var curSAW = useLeftSide ? laW : saW;
+    var curSAH = useLeftSide ? laH : saH;
+    var curSYTOP = useLeftSide ? LEFT_SYTOP : SYTOP;
+    var curSYBOT = useLeftSide ? LEFT_SYBOT : SYBOT;
+    var curSIDE_REF = useLeftSide ? LEFT_SIDE_REF : SIDE_REF;
+    var curSideOffsetX = useLeftSide ? leftSideOffsetX : sideOffsetX;
+    var curSideOffsetY = useLeftSide ? leftSideOffsetY : sideOffsetY;
+    if(sideMask && sideMask.bbox){
+      var bbm3=P3D.pixelBboxToModelBbox(sideMask.bbox, function(pts){ return sidePointsToModel(pts, curSIDE_REF, SCALE, curSYTOP, curSYBOT); });
       mzMin=bbm3[0];mzMax=bbm3[1];
     }else{
       var hw=(mxMax-mxMin)/2; mzMin=-hw*0.6; mzMax=hw*0.6;
@@ -176,16 +200,16 @@ function stageAccessories(opts){
     var faAcc = (mask.front && mask.front.alpha) ? mask.front.alpha : new Uint8Array(faW*faH);
     var baAcc = (mask.back && mask.back.alpha) ? mask.back.alpha : new Uint8Array(faW*faH);
     var saAcc;
-    if(mask.side && mask.side.alpha){
-      saAcc = mask.side.alpha;
+    if(sideMask && sideMask.alpha){
+      saAcc = sideMask.alpha;
     }else{
-      var sx0=SIDE_REF+mzMin*SCALE+sideOffsetX, sx1=SIDE_REF+mzMax*SCALE+sideOffsetX;
-      var sy0=SYTOP+(1.0-myMax)*(SYBOT-SYTOP)+sideOffsetY, sy1=SYTOP+(1.0-myMin)*(SYBOT-SYTOP)+sideOffsetY;
-      saAcc = rectAlpha(saW, saH, sx0, sy0, sx1, sy1);
+      var sx0=curSIDE_REF+mzMin*SCALE+curSideOffsetX, sx1=curSIDE_REF+mzMax*SCALE+curSideOffsetX;
+      var sy0=curSYTOP+(1.0-myMax)*(curSYBOT-curSYTOP)+curSideOffsetY, sy1=curSYTOP+(1.0-myMin)*(curSYBOT-curSYTOP)+curSideOffsetY;
+      saAcc = rectAlpha(curSAW, curSAH, sx0, sy0, sx1, sy1);
     }
 
     var result = P3D.carveRegion({
-      fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:saW, saH:saH,
+      fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:curSAW, saH:curSAH,
       // ★2026-07-09バグ修正: opts.frontCont/backCont/sideContは元写真(front.png等)
       // そのものの明度(min(R,G,B))で、体本体の白背景しきい値(white_thr)による
       // 境界サブピクセル補正専用のデータ。マスク形式のアクセサリーはパレット色
@@ -196,8 +220,8 @@ function stageAccessories(opts){
       // 破綻したメッシュになっていた(ユーザー指摘により発覚)。マスク形式の
       // アクセサリーではこの補正自体が無意味なので常にnullにする。
       faCont: null, baCont: null, saCont: null,
-      SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:SYTOP, SYBOT:SYBOT, SIDE_REF:SIDE_REF,
-      backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:sideOffsetX, sideOffsetY:sideOffsetY,
+      SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:curSYTOP, SYBOT:curSYBOT, SIDE_REF:curSIDE_REF,
+      backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:curSideOffsetX, sideOffsetY:curSideOffsetY,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
       vox: gp.acc_vox,
       // アクセサリーは頭/胴体/脚のような部位分けが無いため、部位別指数は
