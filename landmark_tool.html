@@ -228,6 +228,11 @@
       <div class="bar" style="margin-top:14px">
         <button class="btn danger" id="reset">初期配置に戻す</button>
       </div>
+      <!-- ★2026-07-10(UIレビュー): アクセサリーの取り付けボーン設定は、
+           色許容誤差(色分けマップ由来の抽出処理)とは関心事が別なので、
+           自動マスクタブから切り離してこちら(マーク/骨格まわりのタブ)へ
+           移した(自動マスクタブには色許容誤差スライダーのみ残す)。 -->
+      <div id="automaskBoneList" style="margin-top:14px"></div>
     </div>
 
     <!-- 自動マスク(GHOST_SCANNER_PLAN.md「色分けマップ」方式):
@@ -1327,6 +1332,7 @@ function syncTabs(){
     p.classList.toggle("on",p.dataset.tabpanel===curTab);
   });
   if(curTab==="automask") renderAutomaskTab();
+  if(curTab==="lm") renderAccessoryBoneList();
   $("imgArea").classList.toggle("hidden",!IMG_TABS.includes(curTab));
 }
 [].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{
@@ -1355,15 +1361,11 @@ let automaskRendered=false;
 // マスク由来accessoryの名前・取付ボーンは、点編集を伴わないため、
 // 自動マスクタブ側で直接編集できるようにする(BONE_GROUPS/BONE_JPを使った
 // 簡易フォーム)。
+// ★2026-07-10(UIレビュー): 「取り付け方式/取り付けボーン」は自動マスクタブから
+// マークタブ(#automaskBoneList)へ移した。自動マスクタブには色分けマップ由来の
+// 色許容誤差(colorTolerance)のみを残す(関心事が別のため)。
 function buildAutomaskItemHtml(a, idx){
   const views=["front","side","leftSide","back"].filter(v=>a.mask[v]);
-  const bonesHtml=BONE_GROUPS.map(grp=>{
-    const rowHtml=grp.bones.map(b=>{
-      const checked=(a.bones||[]).includes(b)?"checked":"";
-      return '<label><input type="checkbox" class="automaskBoneChk" data-i="'+idx+'" value="'+b+'" '+checked+'> '+(BONE_JP[b]||b)+'</label>';
-    }).join("");
-    return '<div class="subhead">'+grp.label+'</div><div class="bonesRow">'+rowHtml+'</div>';
-  }).join("");
   // ★2026-07-09: 色分けマップ(colormaps)を引き継いでいる場合だけ、パーツ単位の
   // 色許容誤差(colorTolerance)スライダーを出す。無い(旧形式JSON/サンプル)場合は
   // 既に抽出済みのマスクをそのまま使うしかない(再抽出できないため)。
@@ -1378,13 +1380,6 @@ function buildAutomaskItemHtml(a, idx){
     '<span class="tag">自動マスク / 面: '+views.join(",")+'</span>'+
     '<label>名前<input type="text" class="automaskNameEdit" data-i="'+idx+'" value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)"></label>'+
     tolHtml+
-    '<label>取り付け方式</label>'+
-    '<div class="row">'+
-    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="rigid"?" mint":"")+'" data-i="'+idx+'" data-mode="rigid">rigid(1ボーン固定)</button>'+
-    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="soft"?" mint":"")+'" data-i="'+idx+'" data-mode="soft">soft(複数ボーン追従)</button>'+
-    '</div>'+
-    '<label>取り付けボーン('+(a.mode==="rigid"?"1つ選択":"複数選択可")+')'+
-    '<div class="bonesGroups">'+bonesHtml+'</div></label>'+
     '</div>';
 }
 function wireAutomaskItemEvents(){
@@ -1396,6 +1391,7 @@ function wireAutomaskItemEvents(){
       if(oldKey!==newKey && seamAngles[oldKey]!==undefined){
         seamAngles[newKey]=seamAngles[oldKey];delete seamAngles[oldKey];
       }
+      renderAccessoryBoneList(); // 名前変更をマークタブ側の一覧にも反映
     };
   });
   // 個別の色許容誤差スライダー/数値入力。ドラッグ中にlistWrap全体を
@@ -1417,12 +1413,37 @@ function wireAutomaskItemEvents(){
   [].forEach.call(document.querySelectorAll(".automaskTolNum"),num=>{
     num.onchange=()=>{ setAccessoryTolerance(+num.dataset.i, parseInt(num.value,10)||0); };
   });
+}
+// ★2026-07-10(UIレビュー): アクセサリーの取り付けボーン設定一覧
+// (マークタブ#automaskBoneList)。色許容誤差(自動マスクタブ)とは独立に、
+// accessories配列があればいつでも表示できる(マスク未抽出でも名前/ボーンは
+// 編集できる)。
+function buildAccessoryBoneItemHtml(a, idx){
+  const bonesHtml=BONE_GROUPS.map(grp=>{
+    const rowHtml=grp.bones.map(b=>{
+      const checked=(a.bones||[]).includes(b)?"checked":"";
+      return '<label><input type="checkbox" class="automaskBoneChk" data-i="'+idx+'" value="'+b+'" '+checked+'> '+(BONE_JP[b]||b)+'</label>';
+    }).join("");
+    return '<div class="subhead">'+grp.label+'</div><div class="bonesRow">'+rowHtml+'</div>';
+  }).join("");
+  return '<div class="acform" style="margin-bottom:8px">'+
+    '<span class="tag">'+(a.name||"(無名)")+'</span>'+
+    '<label>取り付け方式</label>'+
+    '<div class="row">'+
+    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="rigid"?" mint":"")+'" data-i="'+idx+'" data-mode="rigid">rigid(1ボーン固定)</button>'+
+    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="soft"?" mint":"")+'" data-i="'+idx+'" data-mode="soft">soft(複数ボーン追従)</button>'+
+    '</div>'+
+    '<label>取り付けボーン('+(a.mode==="rigid"?"1つ選択":"複数選択可")+')'+
+    '<div class="bonesGroups">'+bonesHtml+'</div></label>'+
+    '</div>';
+}
+function wireAccessoryBoneEvents(){
   [].forEach.call(document.querySelectorAll(".automaskModeBtn"),btn=>{
     btn.onclick=()=>{
       const i=+btn.dataset.i, a=accessories[i];
       a.mode=btn.dataset.mode;
       if(a.mode==="rigid"&&a.bones.length>1)a.bones=a.bones.slice(0,1);
-      renderAutomaskTab();
+      renderAccessoryBoneList();
     };
   });
   [].forEach.call(document.querySelectorAll(".automaskBoneChk"),cb=>{
@@ -1430,13 +1451,25 @@ function wireAutomaskItemEvents(){
       const i=+cb.dataset.i, a=accessories[i];
       if(a.mode==="rigid"){
         a.bones=cb.checked?[cb.value]:[];
-        renderAutomaskTab();
+        renderAccessoryBoneList();
       }else{
         if(cb.checked){if(a.bones.indexOf(cb.value)<0)a.bones.push(cb.value);}
         else{a.bones=a.bones.filter(x=>x!==cb.value);}
       }
     };
   });
+}
+function renderAccessoryBoneList(){
+  const el=$("automaskBoneList"); if(!el)return;
+  const maskAccs=[];
+  accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
+  if(!maskAccs.length){
+    el.innerHTML='<p class="hint" style="font-size:11px;color:var(--mut)">自動マスク(色分けマップ由来)のパーツはありません。</p>';
+    return;
+  }
+  el.innerHTML='<div class="subhead">アクセサリーの取り付けボーン</div>'+
+    maskAccs.map(({a,i})=>buildAccessoryBoneItemHtml(a,i)).join("");
+  wireAccessoryBoneEvents();
 }
 // マスク画像(白RGB+アルファ=前景)を、そのaccessoryの実際の色(a.color)で
 // 塗り直したcanvasを作る。★2026-07-09(UIレビュー): 以前は白いマスクを
@@ -1454,6 +1487,20 @@ function tintMaskCanvas(maskImg,w,h,color){
 // 自動マスクタブ上部の色分けマップ+マスク重ね描きプレビュー(automaskColormaps)
 // だけを再描画する(色許容誤差スライダーのドラッグ中に呼ばれるため、
 // リスト側(automaskList、スライダー自体を含む)は再構築しない)。
+// 全身のシルエット(alpha配列)を、accessoryのmaskDataUrlと同じ「白RGB+
+// アルファ」形式のcanvasに変換する(tintMaskCanvasにそのまま渡せるように)。
+function alphaToMaskCanvas(alpha,w,h){
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const cx=c.getContext("2d");
+  const id=cx.createImageData(w,h);
+  for(let i=0;i<alpha.length;i++){
+    const v=alpha[i]?255:0;
+    id.data[i*4]=255; id.data[i*4+1]=255; id.data[i*4+2]=255; id.data[i*4+3]=v;
+  }
+  cx.putImageData(id,0,0);
+  return c;
+}
+const AUTOMASK_BODY_TINT="#3388ff";
 function renderAutomaskPreviews(){
   const colWrap=$("automaskColormaps");
   if(!colWrap)return;
@@ -1467,6 +1514,16 @@ function renderAutomaskPreviews(){
     c.width=im.w; c.height=im.h;
     const cx=c.getContext("2d");
     cx.drawImage(im.el,0,0,im.w,im.h);
+    // ★2026-07-10(UIレビュー): 全身の色許容誤差を動かしても背景が白いだけで
+    // 変化が見えないとの指摘を受け、抽出された全身のシルエットも(アクセサリー
+    // と同様に)色付きで重ね描きするようにした(青、アクセサリーより薄め)。
+    const cm=colormaps[v];
+    if(cm){
+      const bodyAlpha=P3D.loadAlphaFromColormap(cm.ctx,cm.w,cm.h,genParams.body_color_tolerance);
+      const bodyMaskCanvas=alphaToMaskCanvas(bodyAlpha,cm.w,cm.h);
+      const bodyTinted=tintMaskCanvas(bodyMaskCanvas,im.w,im.h,AUTOMASK_BODY_TINT);
+      cx.save(); cx.globalAlpha=0.35; cx.drawImage(bodyTinted,0,0,im.w,im.h); cx.restore();
+    }
     maskAccs.forEach(({a})=>{
       const m=a.mask[v];
       if(!m||!m.maskDataUrl)return;
@@ -1503,6 +1560,7 @@ function renderAutomaskTab(){
   const maskAccs=[];
   accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
   listWrap.innerHTML="";
+  renderAccessoryBoneList();
   if(bulkRow) bulkRow.classList.toggle("hidden", !hasColormaps() || !accessories.length);
   if(bodyRow){
     bodyRow.classList.toggle("hidden", !hasColormaps());
