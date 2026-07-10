@@ -21,8 +21,11 @@ var P3D = global.P3D = global.P3D || {};
 // 頂点クラスタリングにフォールバックする)。
 var DEFAULT_GEN_PARAMS = {
   body_vox: 0.003, acc_vox: 0.003,
-  body_decimate: true, body_target_verts: 3000,
-  acc_decimate: true, acc_target_verts: 1000,
+  // ★2026-07-10: 既定の間引き後頂点数(3000/1000)だと、特に顔まわり・
+  // アクセサリーの折り目等で三角面のカクつき(ローポリ感)が目立つとの指摘
+  // により、body/accともに10000へ引き上げた(ユーザー指摘)。
+  body_decimate: true, body_target_verts: 10000,
+  acc_decimate: true, acc_target_verts: 10000,
   // ★2026-07-06: 断面スーパー楕円の指数はこれまで全身共通(psq_hull)の1個
   // だったが、部位ごとに理想的な丸み/角ばりが異なる(頭は卵型に近く丸め、
   // 腕は円筒に近いほど自然、手は厚み一定の板に近いため角を立たせたい等)
@@ -30,7 +33,9 @@ var DEFAULT_GEN_PARAMS = {
   // パラメータを共有する(見た目上、体の対称性を壊す理由がないため)。
   // 各既定値は現行の2.2(楕円と矩形の中間よりやや矩形寄り)を基準に、
   // 部位の実際の断面形状に合わせて調整したオススメ値。
-  psq_head: 2.0, psq_torso: 2.2, psq_legs: 2.2, psq_arms: 2.0, psq_hands: 3.0, psq_acc: 2.2,
+  // ★2026-07-10: psq_headは2.0→5に変更(ユーザー指摘)。値が大きいほど
+  // 断面は卵型より四角形に近づく(このファイル内のPARAM_META該当desc参照)。
+  psq_head: 5, psq_torso: 2.2, psq_legs: 2.2, psq_arms: 2.0, psq_hands: 3.0, psq_acc: 2.2,
   track_gap: 6, track_win: 1,
   body_smooth_iters: 0, acc_smooth_iters: 0,
   // ★2026-07-10: landmark_tool.htmlは以前このオブジェクトを丸ごとコピーした
