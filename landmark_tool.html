@@ -439,10 +439,13 @@ const DEFAULT_GEN_PARAMS=P3D.DEFAULT_GEN_PARAMS;
 // group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
 // (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
 const PARAM_META=[
- {group:"解像度/軽量化", key:"body_vox", label:"全身のボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
-  desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。大きくすると速く軽くなるが丸みが粗くなる。"},
- {group:"解像度/軽量化", key:"acc_vox", label:"アクセサリーのボクセル解像度", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
-  desc:"ヘッドホン・猫耳・スカート等、個別に彫り出すアクセサリー用の解像度。意味はbody_voxと同じ。"},
+ // ★2026-07-10: 体+全アクセサリーを1つの共有ボクセルグリッドで統合彫刻する
+ // 方式に変更したため(js/pipeline.jsのrunCarvingStages参照)、グリッド解像度は
+ // body_voxのみで決まるようになった。acc_vox(旧・アクセサリー単体の解像度)は
+ // 統合彫刻では使われなくなったためUIから削除した(データ自体はDEFAULT_GEN_PARAMS
+ // に残すが、編集しても効果が無いUIを表示し続けるとユーザーを混乱させるため)。
+ {group:"解像度/軽量化", key:"body_vox", label:"ボクセル解像度(体+アクセサリー共通)", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
+  desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。大きくすると速く軽くなるが丸みが粗くなる。体+全アクセサリーを1つの共有グリッドで彫るため、この1値が両方に効く。"},
  {group:"断面の丸み具合", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく(専門的には「スーパー楕円指数」と呼ぶ形状パラメータ)。"},
  {group:"断面の丸み具合", key:"psq_torso", label:"胴体の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
@@ -455,8 +458,6 @@ const PARAM_META=[
   desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
  {group:"断面の丸み具合", key:"psq_acc", label:"アクセサリーの断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"髪・帽子・スカート等、個別に彫り出すアクセサリーの断面形状。意味はpsq_torsoと同じ。"},
- {group:"ノイズ・ガタつき対策", key:"track_gap", label:"輪郭検出のつながりやすさ(ギャップ)", type:"number", min:0, max:30, step:1, unit:"行",
-  desc:"大きくすると装飾線や指の隙間で測定が一瞬途切れても同じ塊として繋がりやすくなる(繋げすぎると別部位まで誤って繋がるリスクもある)。小さくすると途切れやすく、彫り込みが縦に凸凹しやすくなる。"},
  {group:"ノイズ・ガタつき対策", key:"track_win", label:"横方向のノイズ平滑化幅", type:"number", min:1, max:31, step:2, unit:"行",
   desc:"幅方向(front/back)のセグメント測定に適用する。大きくすると測定ノイズは減るが細かい起伏も均されて鈍る。小さくすると細部の形状は残るがノイズによる凸凹が出やすい。※奥行き(side計測)には適用されない(顎先のような数行の突出が消えるため)。"},
  {group:"腕の彫刻", key:"arm_circle", label:"腕をボーンに沿った円筒形にする", type:"checkbox",
@@ -509,7 +510,7 @@ let paramGroupOpen={};
 const PREVIEW_GROUPS={
   "エッジ処理":{view:"front",keys:["alpha_dilate"]},
   "背面/側面ズレ補正":{view:"back",keys:["back_offset_x","back_offset_y","side_offset_x","side_offset_y"]},
-  "ノイズ・ガタつき対策":{view:"front",keys:["track_gap","track_win"]},
+  "ノイズ・ガタつき対策":{view:"front",keys:["track_win"]},
 };
 let previewActiveGroup=null; // 現在プレビュー中のPARAM_METAグループ名(展開中のグループ)
 // プレビュー画像のキャッシュ(同一view+パラメータで毎フレーム再計算しない

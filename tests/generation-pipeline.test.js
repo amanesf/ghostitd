@@ -50,9 +50,17 @@ const EXPECTED_BODY_ONLY = {
 // アクセサリー」の和集合に修正したことでwith-accessory側のテクスチャ焼き込み
 // 結果が変わるため、ハッシュを更新した(body-onlyはアクセサリーが無いため
 // 影響を受けず不変)。
+// ★2026-07-10(彫刻方式の刷新): 体+全アクセサリーを別々のグリッドで独立に
+// 彫っていた方式を、1つの共有グリッドへ蓄積してから1回だけmarching cubes
+// する統合彫刻方式に置き換えた(パーツ間の隙間の解消が目的、js/pipeline.js
+// のrunCarvingStages参照)。あわせて前髪等のtrack判定を行→行の距離ベース
+// 貪欲マッチングから連結成分ラベリングに置き換えた(房の交差による誤結合の
+// 解消が目的、js/carving.js参照)。with-accessory側はアクセサリー(前髪等)
+// を含むため彫刻結果が変わり、ハッシュを更新した(body-onlyはアクセサリーが
+// 無く、統合しても体単体と同じ結果になるため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 865844,
-  sha256: "bf2b9ef04cbd372934512f85d17ee986f4a048491a7e9a2b496f6138ec250c9a",
+  byteLength: 882148,
+  sha256: "a274c0c8b7b78f8f35eec1a54bd6be666a1e2b5d7f2197b2d237b82a2acde37d",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

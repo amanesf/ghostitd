@@ -20,7 +20,13 @@ var P3D = global.P3D = global.P3D || {};
 // carving.jsのSIMPLIFY_SAFE_LIMITを超えるとquadric decimationの代わりに
 // 頂点クラスタリングにフォールバックする)。
 var DEFAULT_GEN_PARAMS = {
-  body_vox: 0.003, acc_vox: 0.003,
+  body_vox: 0.003,
+  // ★2026-07-10: 体+全アクセサリーを1つの共有ボクセルグリッドで統合彫刻する
+  // 方式に変更したため(js/pipeline.jsのrunCarvingStages/js/carving.jsの
+  // carveUnifiedRegions参照)、実際のグリッド解像度はbody_voxのみで決まる。
+  // acc_voxは旧・独立彫刻方式の名残で現在は未使用(js/accessories.jsの
+  // 後方互換用stageAccessoriesだけが参照する)。生成器UIからも削除済み。
+  acc_vox: 0.003,
   // ★2026-07-10: 既定の間引き後頂点数(3000/1000)だと、特に顔まわり・
   // アクセサリーの折り目等で三角面のカクつき(ローポリ感)が目立つとの指摘
   // により、body/accともに10000へ引き上げた(ユーザー指摘)。
@@ -36,7 +42,9 @@ var DEFAULT_GEN_PARAMS = {
   // ★2026-07-10: psq_headは2.0→5に変更(ユーザー指摘)。値が大きいほど
   // 断面は卵型より四角形に近づく(このファイル内のPARAM_META該当desc参照)。
   psq_head: 5, psq_torso: 2.2, psq_legs: 2.2, psq_arms: 2.0, psq_hands: 3.0, psq_acc: 2.2,
-  track_gap: 6, track_win: 1,
+  // ★2026-07-10: track_gap(track追跡の行許容ギャップ)は、js/carving.jsの
+  // track判定を連結成分ラベリングに置き換えたことで不要になったため廃止した。
+  track_win: 1,
   body_smooth_iters: 0, acc_smooth_iters: 0,
   // ★2026-07-10: landmark_tool.htmlは以前このオブジェクトを丸ごとコピーした
   // 独自定義を持っており(「値を一致させる」というコメントで手動同期の前提に

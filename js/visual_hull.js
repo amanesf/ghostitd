@@ -5,20 +5,18 @@
 var P3D = global.P3D = global.P3D || {};
 
 /**
- * opts: {
- *   frontAlpha,backAlpha,sideAlpha: Uint8Array(front/back/side_cut相当。除外マスク適用済み)
- *   faW,faH,saW,saH: 画像サイズ
- *   frontCont,backCont,sideCont: Float32Array|null (常にnull。色分けマップ由来の
- *     マスクは既にくっきりした2値のためサブピクセル補正は行わない)
- *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション
- *   pivots: skeleton.computePivots()の戻り値.pivots(+extraPivotsをmergeしたもの)
- *   gp: gen_params(パラメータタブの現在値)
- * }
- * 戻り値: {V,N,F,J,W} (Float32Array/Uint32Array/Uint16Array)
+ * ★2026-07-10(体+アクセサリー統合彫刻対応): 体のcarveRegion opts(mxBounds等の
+ * 外接範囲込み)を組み立てるだけの関数。以前はstageVisualHull内で組み立てて
+ * そのままcarveRegionを呼んでいたが、体+全アクセサリーを1つの共有グリッドで
+ * 統合彫刻する新方式(js/pipeline.jsのrunCarvingStages参照)のため、
+ * 「optsを組み立てる」と「実際に彫る」を分離した。
+ * opts: stageVisualHullと同じ引数。
+ * 戻り値: {mxBounds,myBounds,mzBounds,carveOpts}
+ *   (carveOptsはP3D.carveRegion/carveUnifiedRegionsにそのまま渡せる形。
+ *   grid/accumulateは呼び出し側=carveUnifiedRegionsが付加する)
  */
-function stageVisualHull(opts){
+function buildBodyCarveOpts(opts){
   var gp = opts.gp;
-  var BODY_VOX = gp.body_vox;
   var mxBounds=[-0.62,0.62], myBounds=[-0.02,1.05], mzBounds=[-0.22,0.22];
 
   var armLines=[];
@@ -47,12 +45,7 @@ function stageVisualHull(opts){
     });
   }
 
-  // ★フェーズ1(中間データ契約): marching cubes直後(平滑化前)の生メッシュを
-  // rawV/rawFとしてキャッシュできるよう、carveRegion自体にはsmoothIters:0を
-  // 渡し、平滑化はここで別途P3D.laplacianSmoothに分離する。
-  // (carveRegionにsmoothIters>0を直接渡した場合と数式的に同一の結果になる。
-  // 平滑化は与えられたV/F/itersのみに依存する純粋な処理のため)
-  var result = P3D.carveRegion({
+  var carveOpts = {
     fa: opts.frontAlpha, ba: opts.backAlpha, sa: opts.sideAlpha,
     faW: opts.faW, faH: opts.faH, saW: opts.saW, saH: opts.saH,
     // ★2026-07-09: 全身のシルエットが色分けマップ由来(既にくっきりした2値)に
@@ -63,12 +56,12 @@ function stageVisualHull(opts){
     backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
     sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
     mxBounds: mxBounds, myBounds: myBounds, mzBounds: mzBounds,
-    vox: BODY_VOX,
+    vox: gp.body_vox,
     psqHead: gp.psq_head, psqTorso: gp.psq_torso, psqLegs: gp.psq_legs,
     psqArms: gp.psq_arms, psqHands: gp.psq_hands,
     neckY: opts.pivots.neck ? opts.pivots.neck[1] : null,
     hipsY: opts.pivots.hips ? opts.pivots.hips[1] : null,
-    trackGap: gp.track_gap, trackWin: gp.track_win,
+    trackWin: gp.track_win,
     smoothIters: 0,
     armLines: armLines, armMaxHw: gp.arm_max_hw,
     handLines: handLines.length ? handLines : null,
@@ -80,7 +73,30 @@ function stageVisualHull(opts){
     // (最大成分比5%未満を削除)では消さないよう、極小ノイズだけを除去する
     // 値まで下げる。
     minFragFrac: 0.001,
-  });
+  };
+  return {mxBounds:mxBounds, myBounds:myBounds, mzBounds:mzBounds, carveOpts:carveOpts};
+}
+P3D.buildBodyCarveOpts = buildBodyCarveOpts;
+
+/**
+ * opts: {
+ *   frontAlpha,backAlpha,sideAlpha: Uint8Array(front/back/side_cut相当。除外マスク適用済み)
+ *   faW,faH,saW,saH: 画像サイズ
+ *   frontCont,backCont,sideCont: Float32Array|null (常にnull。色分けマップ由来の
+ *     マスクは既にくっきりした2値のためサブピクセル補正は行わない)
+ *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション
+ *   pivots: skeleton.computePivots()の戻り値.pivots(+extraPivotsをmergeしたもの)
+ *   gp: gen_params(パラメータタブの現在値)
+ * }
+ * 戻り値: {V,N,F,J,W} (Float32Array/Uint32Array/Uint16Array)
+ * ★2026-07-10: 体+アクセサリーの統合彫刻(js/pipeline.jsのrunCarvingStages)
+ * からはもう呼ばれない(buildBodyCarveOptsだけを使う)。単体で体だけを
+ * 素朴に彫りたい場合のために後方互換として残す。
+ */
+function stageVisualHull(opts){
+  var gp = opts.gp;
+  var built = buildBodyCarveOpts(opts);
+  var result = P3D.carveRegion(built.carveOpts);
   if(!result) throw new Error("visual_hull: carving produced an empty mesh");
   var rawV=result.V, rawF=result.F;
   console.log("  visual_hull: raw verts(彫刻直後)", rawV.length/3, "faces", rawF.length/3);

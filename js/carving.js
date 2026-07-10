@@ -56,8 +56,11 @@ function unionIntervals(a, b){
 }
 
 // V:Float32Array(N*3), F:Uint32Array(M*3) -> 最大連結成分に対しminFrac未満の
-// 断片を除去(union-find)
-function dropSmallFragments(V, F, minFrac){
+// 断片を除去(union-find)。extraVertArrays: {name: TypedArray(N個、頂点ごとに
+// 1個の値)}を渡すと、Vと同じ頂点remapを適用した結果をextra.<name>として
+// 返す(★2026-07-10: marching_cubesのvertOwnerのような頂点並行配列を、
+// 頂点の生き残り/並び替えに追従させるため)。
+function dropSmallFragments(V, F, minFrac, extraVertArrays){
   minFrac = (minFrac===undefined)?0.05:minFrac;
   var n=V.length/3;
   var parent=new Int32Array(n); for(var i=0;i<n;i++)parent[i]=i;
@@ -75,7 +78,19 @@ function dropSmallFragments(V, F, minFrac){
   var keepVert=new Uint8Array(n);
   var allKept=true;
   for(var v2=0;v2<n;v2++){ var r2=find(v2); if(keepRoots.has(r2)){keepVert[v2]=1;} else allKept=false; }
-  if(allKept) return {V:V,F:F};
+  function remapExtra(remapArr, cnt2){
+    if(!extraVertArrays) return undefined;
+    var out={};
+    Object.keys(extraVertArrays).forEach(function(name){
+      var src=extraVertArrays[name];
+      var Ctor=src.constructor;
+      var dst=new Ctor(cnt2);
+      for(var i=0;i<n;i++){ if(remapArr[i]>=0) dst[remapArr[i]]=src[i]; }
+      out[name]=dst;
+    });
+    return out;
+  }
+  if(allKept) return {V:V,F:F,extra:extraVertArrays};
   var remap=new Int32Array(n).fill(-1);
   var cnt=0;
   for(var v3=0;v3<n;v3++){ if(keepVert[v3]){ remap[v3]=cnt++; } }
@@ -86,7 +101,7 @@ function dropSmallFragments(V, F, minFrac){
     var a=F[f2*3],b=F[f2*3+1],c=F[f2*3+2];
     if(keepVert[a]&&keepVert[b]&&keepVert[c]){ faceOut.push(remap[a],remap[b],remap[c]); }
   }
-  return {V:V2, F:Uint32Array.from(faceOut)};
+  return {V:V2, F:Uint32Array.from(faceOut), extra:remapExtra(remap, cnt)};
 }
 P3D.dropSmallFragments = dropSmallFragments;
 
@@ -362,6 +377,69 @@ P3D.computeNormalsFixWinding = computeNormalsFixWinding;
 // (旧findArmCrossings: 行ごとの骨線分X交点方式は削除。腕の太さの測定は
 // carveRegion内のbuildBoneProfiles(列ごとのy方向走査)に置き換えた。)
 
+// ★2026-07-10(ユーザー指摘「前髪がぐちゃぐちゃ」対応): front画像とback画像
+// (mirroring済み)を1枚の前景ラスタに合成する。carveRegion内の行ごとの
+// unionIntervals(fr,br)と数式的に同じ変換(back画像のpx座標→front座標系)を
+// 画素単位・全行に対して行う。既存のfy/byBack(行ごとの整数pxオフセット)は
+// vox解像度でサンプリングされた一部の行にしか定義されないため、ここでは
+// carveRegion内のfy/byBack導出元の式(YBOT-my*SCALE(+backOffsetY))を
+// 逆算し、任意のfront行fyに対応するback行を直接 fy+backOffsetY として
+// 導出する(この2つは同じ点をfront/back双方の基準で表しているだけなので、
+// 定数オフセットの関係になる)。
+function buildCombinedFrontRaster(fa, ba, faW, faH, backOffsetX, backOffsetY){
+  var out = new Uint8Array(faW*faH);
+  var boY = Math.round(backOffsetY||0), boX = Math.round(backOffsetX||0);
+  for(var fy=0; fy<faH; fy++){
+    var by = fy + boY;
+    var byOk = (by>=0 && by<faH);
+    var rowOff = fy*faW, byOff = by*faW;
+    for(var fx=0; fx<faW; fx++){
+      var v = fa[rowOff+fx];
+      if(!v && byOk){
+        var bx = faW - fx + boX;
+        if(bx>=0 && bx<faW) v = ba[byOff+bx];
+      }
+      out[rowOff+fx] = v?1:0;
+    }
+  }
+  return out;
+}
+
+// 2値ラスタ(W*H)の8連結成分ラベリング(Union-Find)。戻り値はInt32Array(W*H)
+// で、背景=-1、前景は各連結成分の代表pixel indexをラベルIDとして持つ。
+// ★2026-07-10: 従来のbuildWidthTracksは行→行の距離ベース貪欲マッチングで
+// track(房)を追跡していたため、房が画像上で交差/接近すると別の房のtrackを
+// 誤って繋いでしまい、ねじれた/破綻した形状になっていた(特に前髪で顕著)。
+// 実際にピクセルが繋がっている範囲だけを同一の塊とみなす連結成分ラベリング
+// は、しきい値・推定に依存しない厳密な位相判定であり、この誤結合を構造的に
+// 排除する。
+function labelConnectedComponents(mask, W, H){
+  var n = W*H;
+  var parent = new Int32Array(n);
+  for(var i=0;i<n;i++) parent[i]=i;
+  function find(x){ while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; }
+  function union(a,b){ var ra=find(a),rb=find(b); if(ra!==rb) parent[ra]=rb; }
+  for(var y=0;y<H;y++){
+    var rowOff=y*W;
+    for(var x=0;x<W;x++){
+      var idx=rowOff+x;
+      if(!mask[idx]) continue;
+      if(x>0 && mask[idx-1]) union(idx, idx-1);
+      if(y>0){
+        var upOff=idx-W;
+        if(mask[upOff]) union(idx, upOff);
+        if(x>0 && mask[upOff-1]) union(idx, upOff-1);
+        if(x<W-1 && mask[upOff+1]) union(idx, upOff+1);
+      }
+    }
+  }
+  var labels=new Int32Array(n).fill(-1);
+  for(var i2=0;i2<n;i2++){ if(mask[i2]) labels[i2]=find(i2); }
+  return labels;
+}
+P3D.buildCombinedFrontRaster = buildCombinedFrontRaster;
+P3D.labelConnectedComponents = labelConnectedComponents;
+
 // linspace(min,max,n)相当(n>=2前提、Python np.linspaceと同じ: 端点を含みn-1等分)
 function linspace(a,b,n){
   var out=new Float64Array(n);
@@ -372,6 +450,25 @@ function linspace(a,b,n){
 }
 P3D.linspace = linspace;
 
+// ★2026-07-10(体+アクセサリー統合彫刻対応): 体とアクセサリーを別々の
+// ボクセルグリッドで独立に彫っていたことが、隙間(パーツ間の接合不整合)の
+// 主因の一つだった(体色以外の画素は最初から体シルエットに含めない設計の
+// ため、体とアクセサリーの境界は「たまたま同じ輪郭線から彫られていれば
+// 大体合う」程度の保証しかなかった)。体+全アクセサリーの外接範囲を1つの
+// 共有グリッド(buildGrid)にまとめ、carveRegion側はこのグリッドへ蓄積彫刻
+// する(carveUnifiedRegions参照)ことで、彫刻段階そのものでは接合不整合が
+// 原理的に起きなくなる。
+function buildGrid(mxBounds, myBounds, mzBounds, vox){
+  var mxMin=mxBounds[0],mxMax=mxBounds[1], myMin=myBounds[0],myMax=myBounds[1], mzMin=mzBounds[0],mzMax=mzBounds[1];
+  var nx=Math.max(Math.round((mxMax-mxMin)/vox),4);
+  var ny=Math.max(Math.round((myMax-myMin)/vox),4);
+  var nz=Math.max(Math.round((mzMax-mzMin)/vox),4);
+  var mx=linspace(mxMin,mxMax,nx), my=linspace(myMin,myMax,ny), mz=linspace(mzMin,mzMax,nz);
+  return {mx:mx,my:my,mz:mz,nx:nx,ny:ny,nz:nz,
+    mxMin:mxMin,mxMax:mxMax,myMin:myMin,myMax:myMax,mzMin:mzMin,mzMax:mzMax};
+}
+P3D.buildGrid = buildGrid;
+
 /**
  * carve_region()のJS移植。
  * opts: {
@@ -381,7 +478,7 @@ P3D.linspace = linspace;
  *   faCont,baCont,saCont: 連続値配列(Float32Array、サブピクセル補正用、無ければnull)
  *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション値
  *   mxBounds,myBounds,mzBounds: [min,max]
- *   vox, trackGap, trackWin, smoothIters
+ *   vox, trackWin, smoothIters
  *   psqHead,psqTorso,psqLegs,psqArms,psqHands: 部位別の断面スーパー楕円指数
  *     (neckY/hipsYで行(myv)がどの部位相当かを判定してpsqHead/psqTorso/psqLegs
  *     を使い分ける。neckY/hipsY省略時は常にpsqTorsoを使う=アクセサリー等の
@@ -403,7 +500,10 @@ function carveRegion(opts){
   var faCont=opts.faCont, baCont=opts.baCont, saCont=opts.saCont;
   var SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT, SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
   var mxB=opts.mxBounds, myB=opts.myBounds, mzB=opts.mzBounds;
-  var vox=opts.vox, trackGap=opts.trackGap, trackWin=opts.trackWin;
+  // ★2026-07-10: trackGap(track追跡時の行の許容ギャップ)は、track判定を
+  // 連結成分ラベリングに置き換えたことで不要になった(位相的に繋がっている
+  // かどうかで判定するため、行数ベースの許容ギャップという概念自体が無い)。
+  var vox=opts.vox, trackWin=opts.trackWin;
   var psqHead=opts.psqHead, psqTorso=opts.psqTorso, psqLegs=opts.psqLegs;
   var psqArms=opts.psqArms, psqHands=opts.psqHands;
   var neckY=opts.neckY, hipsY=opts.hipsY;
@@ -425,11 +525,22 @@ function carveRegion(opts){
   var backOffsetX=opts.backOffsetX||0, backOffsetY=opts.backOffsetY||0;
   var sideOffsetX=opts.sideOffsetX||0, sideOffsetY=opts.sideOffsetY||0;
 
-  var mxMin=mxB[0],mxMax=mxB[1], myMin=myB[0],myMax=myB[1], mzMin=mzB[0],mzMax=mzB[1];
-  var nx=Math.max(Math.round((mxMax-mxMin)/vox),4);
-  var ny=Math.max(Math.round((myMax-myMin)/vox),4);
-  var nz=Math.max(Math.round((mzMax-mzMin)/vox),4);
-  var mx=linspace(mxMin,mxMax,nx), my=linspace(myMin,myMax,ny), mz=linspace(mzMin,mzMax,nz);
+  // ★2026-07-10(体+アクセサリー統合彫刻対応): opts.gridで共有グリッド
+  // (buildGrid参照)が渡された場合はそれをそのまま使い、この呼び出し
+  // (1パーツ分)専用のグリッドを新たに割り付けない。未指定時(単体呼び出し、
+  // 後方互換用)は従来通りmxBounds/myBounds/mzBounds/voxから自前で作る。
+  var grid = opts.grid;
+  var mxMin,mxMax,myMin,myMax,mzMin,mzMax,nx,ny,nz,mx,my,mz;
+  if(grid){
+    mxMin=grid.mxMin;mxMax=grid.mxMax;myMin=grid.myMin;myMax=grid.myMax;mzMin=grid.mzMin;mzMax=grid.mzMax;
+    nx=grid.nx;ny=grid.ny;nz=grid.nz;mx=grid.mx;my=grid.my;mz=grid.mz;
+  }else{
+    mxMin=mxB[0];mxMax=mxB[1];myMin=myB[0];myMax=myB[1];mzMin=mzB[0];mzMax=mzB[1];
+    nx=Math.max(Math.round((mxMax-mxMin)/vox),4);
+    ny=Math.max(Math.round((myMax-myMin)/vox),4);
+    nz=Math.max(Math.round((mzMax-mzMin)/vox),4);
+    mx=linspace(mxMin,mxMax,nx); my=linspace(myMin,myMax,ny); mz=linspace(mzMin,mzMax,nz);
+  }
 
   function rowOf1d(arr, w, y){ return arr.subarray(y*w, y*w+w); }
 
@@ -440,15 +551,27 @@ function carveRegion(opts){
     var v_=1.0-my[iy0];
     spy[iy0]=Math.min(Math.max(Math.round(SYTOP+v_*(SYBOT-SYTOP)+sideOffsetY),0),saH-1);
   }
-  var mxLim=[[mx[0],mx[nx-1]]];
-  var mzLim=[[mz[0],mz[nz-1]]];
+  // ★2026-07-10: mxLim/mzLimは「このパーツ自身の範囲」でなければならない
+  // (共有グリッド使用時はmx[0]/mx[nx-1]がグリッド全体の外接範囲になってしまい、
+  // このパーツの範囲より広くなる)。常にこの呼び出しのmxBounds/mzBoundsを使う。
+  var mxLim=[[mxB[0],mxB[1]]];
+  var mzLim=[[mzB[0],mzB[1]]];
 
-  // ---- 1) 行ごとの幅セグメント(front/back)、行トラッキング+中央値フィルタ ----
+  // ---- 1) 行ごとの幅セグメント(front/back)、連結成分ベースのtrack判定+
+  //         中央値フィルタ ----
   // carveRegionのローカル変数(fa/ba/fy/byBack/CX/SCALE/mxLim等)を
   // クロージャでそのまま参照する内部関数として切り出す(引数の受け渡しミスに
   // よる数値ズレを避けるため、あえてトップレベル関数への外出しはしない)。
+  // ★2026-07-10(ユーザー指摘「前髪がぐちゃぐちゃ」対応): 以前は行→行の
+  // 距離ベース貪欲マッチングでtrack(房)を追跡しており、房が画像上で交差/
+  // 接近すると別の房のtrackを誤って繋いでしまっていた。front∪back合成
+  // ラスタの連結成分ラベリング(labelConnectedComponents、画像全体に対する
+  // 厳密な位相判定)でtrackを決めることで、この誤結合を構造的に排除する。
+  var trackLabels = labelConnectedComponents(
+    buildCombinedFrontRaster(fa, ba, faW, faH, backOffsetX, backOffsetY), faW, faH);
   function buildWidthTracks(){
-    var tracks=[]; // {rows:[],cx:[],hw:[],lastIy,lastCx}
+    var tracksByLabel=new Map(); // label -> {rows:[],cx:[],hw:[]}
+    var fallbackSeq=0;
     for(var iy=0; iy<ny; iy++){
       var faRow=rowOf1d(fa, faW, fy[iy]), baRow=rowOf1d(ba, faW, byBack[iy]);
       var frPx = faCont ? Common.findRunsSubpixel(faRow, rowOf1d(faCont,faW,fy[iy]), whiteThr) : Common.findRuns(faRow);
@@ -466,37 +589,32 @@ function carveRegion(opts){
         var r0=runsVal[i][0], r1=runsVal[i][1];
         if(r1-r0>=vox) segs.push([(r0+r1)/2.0, Math.max((r1-r0)/2.0, EPS)]);
       }
+      var rowPx = fy[iy], rowOff=rowPx*faW;
       for(var s=0;s<segs.length;s++){
         var cx=segs[s][0], hw=segs[s][1];
-        var best=-1, bestd=Infinity;
-        for(var ti=0;ti<tracks.length;ti++){
-          var tr=tracks[ti];
-          if(iy-tr.lastIy>trackGap) continue;
-          var d=Math.abs(cx-tr.lastCx);
-          var lastHw=tr.hw[tr.hw.length-1];
-          var thresh=Math.min(Math.max(hw,lastHw)*1.2, 0.025);
-          var ratio=hw/lastHw;
-          if(d<thresh && ratio>=0.4 && ratio<=2.5 && d<bestd){ best=ti; bestd=d; }
+        var px = Math.max(0, Math.min(faW-1, Math.round(cx*SCALE+CX)));
+        var label = trackLabels[rowOff+px];
+        // ラベル未設定(ラスタ化誤差でこの1点だけ背景側に落ちた等)は近傍±2px
+        // まで探して救済する。それでも見つからなければ独立扱い(一意ラベル)。
+        for(var d=1; d<=2 && label<0; d++){
+          if(px-d>=0 && trackLabels[rowOff+px-d]>=0) label=trackLabels[rowOff+px-d];
+          else if(px+d<faW && trackLabels[rowOff+px+d]>=0) label=trackLabels[rowOff+px+d];
         }
-        if(best===-1){
-          tracks.push({rows:[iy],cx:[cx],hw:[hw],lastIy:iy,lastCx:cx});
-        }else{
-          var tr2=tracks[best];
-          tr2.rows.push(iy); tr2.cx.push(cx); tr2.hw.push(hw);
-          tr2.lastIy=iy; tr2.lastCx=cx;
-        }
+        if(label<0) label = -1-(fallbackSeq++);
+        var tr = tracksByLabel.get(label);
+        if(!tr){ tr={rows:[],cx:[],hw:[]}; tracksByLabel.set(label,tr); }
+        tr.rows.push(iy); tr.cx.push(cx); tr.hw.push(hw);
       }
     }
     var smoothByRow=new Map(); // iy -> [[cx,hw],...]
-    for(var t=0;t<tracks.length;t++){
-      var tr3=tracks[t];
+    tracksByLabel.forEach(function(tr3){
       var scx=medianFilter(tr3.cx, trackWin), shw=medianFilter(tr3.hw, trackWin);
       for(var i2=0;i2<tr3.rows.length;i2++){
         var iyk=tr3.rows[i2];
         if(!smoothByRow.has(iyk)) smoothByRow.set(iyk, []);
         smoothByRow.get(iyk).push([scx[i2], shw[i2]]);
       }
-    }
+    });
     return smoothByRow;
   }
   var smoothByRow = buildWidthTracks();
@@ -619,8 +737,17 @@ function carveRegion(opts){
 
   // ---- 3) 疑似SDFフィールドを彫る(ローカルbbox最適化) ----
   var strideY=nx*nz, strideX=nz;
+  // ★2026-07-10(体+アクセサリー統合彫刻対応): opts.accumulateが渡された
+  // 場合は新規fieldを割り付けず、呼び出し元(carveUnifiedRegions)が全パーツ
+  // 共有で持つfield/ownerFieldへ直接max-combineで書き込む。ownerFieldには
+  // 「そのセルを現在勝っている(field値が最大の)パーツのID」を書き込む。
+  var accumulate = opts.accumulate;
+  var sharedField = accumulate ? accumulate.field : null;
+  var sharedOwnerField = accumulate ? accumulate.ownerField : null;
+  var ownerId = accumulate ? accumulate.ownerId : 0;
   function carveSdfField(){
-  var field=new Float32Array(ny*nx*nz).fill(-1.0);
+  var field = sharedField || new Float32Array(ny*nx*nz).fill(-1.0);
+  var ownerField = sharedOwnerField;
   // このbboxの外側は必ずval<=-1相当なので無視できる(psqが小さいほどbboxを
   // 広めに取る必要があるため、使用しうる指数のうち最小値で安全側に倒す)
   var psqMin = Math.min(psqHead,psqTorso,psqLegs,psqArms,psqHands);
@@ -717,7 +844,7 @@ function carveRegion(opts){
           }
           var val=1.0-(exVal+ez);
           var idx=base+iz;
-          if(val>field[idx]) field[idx]=val;
+          if(val>field[idx]){ field[idx]=val; if(ownerField) ownerField[idx]=ownerId; }
         }
       }
     }
@@ -725,6 +852,11 @@ function carveRegion(opts){
   return field;
   }
   var field = carveSdfField();
+
+  // ★2026-07-10: 共有fieldへ蓄積するだけの呼び出し(体+アクセサリー統合彫刻の
+  // 1パーツ分)は、marching cubes/断片除去/平滑化を行わずここで終える
+  // (呼び出し元が全パーツ蓄積後に1回だけ行う)。
+  if(accumulate) return {accumulated:true};
 
   var anyPositive=false, cntPos=0;
   for(var i5=0;i5<field.length;i5++){ if(field[i5]>0){ cntPos++; if(cntPos>=8){anyPositive=true;break;} } }
@@ -752,5 +884,106 @@ function carveRegion(opts){
   return {V:V, F:F}; // 法線計算・decimationは呼び出し側(visual_hull.js/accessories.js)で行う
 }
 P3D.carveRegion = carveRegion;
+
+/**
+ * ★2026-07-10(体+アクセサリー統合彫刻、ユーザー指摘「パーツ間の隙間」対応):
+ * 体+全アクセサリーを1つの共有ボクセルグリッドへ蓄積彫刻し、1回だけ
+ * marching cubesを実行して継ぎ目の無い1枚のメッシュを作る。従来は体と
+ * 各アクセサリーを別々のグリッド・別々のmarching cubes呼び出しで独立に
+ * 彫っており、境界は「たまたま同じ輪郭線から彫られていれば大体合う」程度
+ * の保証しかなかった(体色以外の画素は最初から体シルエットに含めない設計
+ * のため)。1つのfieldへのmax-combineにすることで、彫刻段階そのものでは
+ * パーツ間の接合不整合が原理的に起きなくなる。
+ *
+ * regions: [{ownerId:number, opts:{...carveRegionのopts。grid/accumulateは
+ *   ここで自動設定するので渡さなくてよい}}, ...]
+ *   ownerId=0は体、1以上は呼び出し側が決めるアクセサリーindex(+1)の想定
+ *   (呼び出し側で対応表を持つこと)。
+ * sharedGrid: buildGrid()の戻り値(体+全アクセサリーの外接範囲で作ったもの)
+ * minFragFrac: dropSmallFragmentsの閾値(未指定時0.05)
+ * 戻り値: {V,F,owner} (owner: Int32Array、頂点ごとのownerId) または
+ *   null(彫れなかった場合)
+ */
+function carveUnifiedRegions(regions, sharedGrid, minFragFrac){
+  var nx=sharedGrid.nx, ny=sharedGrid.ny, nz=sharedGrid.nz;
+  var field = new Float32Array(ny*nx*nz).fill(-1.0);
+  var ownerField = new Int32Array(ny*nx*nz).fill(-1);
+  regions.forEach(function(r){
+    var opts = Object.assign({}, r.opts, {
+      grid: sharedGrid,
+      accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId},
+    });
+    carveRegion(opts);
+  });
+
+  var anyPositive=false, cntPos=0;
+  for(var i=0;i<field.length;i++){ if(field[i]>0){ cntPos++; if(cntPos>=8){anyPositive=true;break;} } }
+  if(!anyPositive) return null;
+
+  var mc = P3D.marchingCubes(field, ny, nx, nz, 0.0, ownerField);
+  if(!mc.verts.length) return null;
+  var nvtx=mc.verts.length/3;
+  var mxMin=sharedGrid.mxMin,mxMax=sharedGrid.mxMax,myMin=sharedGrid.myMin,myMax=sharedGrid.myMax,mzMin=sharedGrid.mzMin,mzMax=sharedGrid.mzMax;
+  var V=new Float32Array(nvtx*3);
+  for(var vi=0; vi<nvtx; vi++){
+    var iyF=mc.verts[vi*3], ixF=mc.verts[vi*3+1], izF=mc.verts[vi*3+2];
+    V[vi*3]   = ixF/(nx-1)*(mxMax-mxMin)+mxMin;
+    V[vi*3+1] = iyF/(ny-1)*(myMax-myMin)+myMin;
+    V[vi*3+2] = izF/(nz-1)*(mzMax-mzMin)+mzMin;
+  }
+  var F=mc.faces;
+  var dropped=dropSmallFragments(V,F,minFragFrac,{owner:mc.vertOwner});
+  return {V:dropped.V, F:dropped.F, owner:dropped.extra.owner};
+}
+P3D.carveUnifiedRegions = carveUnifiedRegions;
+
+/**
+ * ★2026-07-10: carveUnifiedRegions()の出力(1枚の継ぎ目なしメッシュ+頂点
+ * ごとのownerId)を、ownerIdごとの独立したサブメッシュ(V,F)に分割する。
+ * 3頂点のownerが割れている面(パーツの境界を跨ぐ面)は、多数決(2/3以上を
+ * 占めるowner。3頂点とも別なら頂点0のownerにタイブレーク)で「どちらか
+ * 片方のパーツに完全に」割り当てる(面を欠落させない=分割後も両パーツの
+ * 表面を合わせると隙間なく元の1枚のメッシュを復元できる)。境界の頂点は
+ * 両方のサブメッシュに同じ座標のまま重複して現れる形になるため、平滑化
+ * 回数0・間引きで境界頂点が消えない限り、2つのサブメッシュの境界は
+ * ぴったり閉じたまま保たれる。
+ * ownerIds: 分割したいownerIdの配列(この順で戻り値配列に対応する)
+ * 戻り値: [{V,F}, ...] (ownerIdsと同じ長さ、該当頂点が無ければV,Fとも空)
+ */
+function splitMeshByOwner(V, F, owner, ownerIds){
+  var nf=F.length/3;
+  var faceOwner=new Int32Array(nf);
+  for(var f=0;f<nf;f++){
+    var a=F[f*3],b=F[f*3+1],c=F[f*3+2];
+    var oa=owner[a],ob=owner[b],oc=owner[c];
+    var o;
+    if(oa===ob||oa===oc) o=oa;
+    else if(ob===oc) o=ob;
+    else o=oa; // 3頂点とも別ownerの稀なケースはタイブレークでaを採用
+    faceOwner[f]=o;
+  }
+  return ownerIds.map(function(targetId){
+    var usedVert=new Set();
+    for(var f2=0;f2<nf;f2++){
+      if(faceOwner[f2]!==targetId) continue;
+      usedVert.add(F[f2*3]); usedVert.add(F[f2*3+1]); usedVert.add(F[f2*3+2]);
+    }
+    if(!usedVert.size) return {V:new Float32Array(0), F:new Uint32Array(0)};
+    var remap=new Map(); var cnt=0;
+    var Vout=new Float32Array(usedVert.size*3);
+    usedVert.forEach(function(vi){
+      remap.set(vi,cnt);
+      Vout[cnt*3]=V[vi*3];Vout[cnt*3+1]=V[vi*3+1];Vout[cnt*3+2]=V[vi*3+2];
+      cnt++;
+    });
+    var Fout=[];
+    for(var f3=0;f3<nf;f3++){
+      if(faceOwner[f3]!==targetId) continue;
+      Fout.push(remap.get(F[f3*3]), remap.get(F[f3*3+1]), remap.get(F[f3*3+2]));
+    }
+    return {V:Vout, F:Uint32Array.from(Fout)};
+  });
+}
+P3D.splitMeshByOwner = splitMeshByOwner;
 
 })(window);

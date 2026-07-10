@@ -247,18 +247,28 @@ async function runCarvingStages(state, report){
   // マスク形式アクセサリーに同じ補正を適用すると境界が不規則に暴れ、破綻した
   // メッシュになる不具合が見つかり、faCont等を常にnullにした時と同じ理由)。
   // 体本体も同様にfrontCont/backCont/sideContは常にnullにする。
-  report("visual_hull(全身のvisual hull carving)");
-  var body = P3D.stageVisualHull({
+  //
+  // ★2026-07-10(ユーザー指摘「パーツ間の隙間」「前髪がぐちゃぐちゃ」対応):
+  // 体とアクセサリーを別々のグリッドで独立に彫刻し、独立にmarching cubesする
+  // 従来方式は、体色以外の画素を最初から体シルエットに含めない設計と相まって、
+  // 「境界がたまたま同じ輪郭線から彫られていれば大体合う」程度の保証しか
+  // 無かった(隙間の主因)。ここから体+全アクセサリーのcarveRegion optsを
+  // (実際に彫らずに)組み立てて外接範囲を求め、1つの共有グリッドへ
+  // P3D.carveUnifiedRegions()でmax-combine蓄積し、1回だけmarching cubesする。
+  // 生成される全頂点はどのパーツが実際に表面を作ったか(owner)を彫刻に
+  // 使った座標系そのものから厳密に持つ(js/marching_cubes.js参照。色サンプリング
+  // 等の曖昧な事後推定は一切使わない)ため、体とアクセサリーの境界は
+  // 構造的に閉じたまま(隙間が原理的に発生しない)彫り上がる。
+  report("visual_hull+accessories(統合carving)");
+  var bodyBuilt = P3D.buildBodyCarveOpts({
     frontAlpha:frontAlpha, backAlpha:backAlpha, sideAlpha:sideAlpha,
     faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
     frontCont:null, backCont:null, sideCont:null,
     SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
     pivots:pivots, gp:gp,
   });
-  await tick();
 
-  report("accessories(アクセサリーのcarving)");
-  var acc = null;
+  var accBuilt = [];
   if(state.accessories && state.accessories.length){
     // ★2026-07-08バグ修正: 色分けマップ由来(mask形式)のアクセサリーは、以前は
     // bboxだけ取り出してその中を「白背景でないか」で塗り直しており、bbox内に
@@ -294,12 +304,12 @@ async function runCarvingStages(state, report){
       }
     });
     if(maskLoads.length) await Promise.all(maskLoads);
-    acc = P3D.stageAccessories({
+    accBuilt = P3D.buildAccessoryCarveOptsList({
       accs: state.accessories,
       frontRgba: rgbaFull.front, backRgba: rgbaFull.back, sideRgba: rgbaFull.side,
       // ★2026-07-08バグ修正(GHOST_SCANNER_PLAN.md「運用面の修正6点・③」):
       // carveRegion/carving.jsはfront/backが同サイズ前提・sideは別サイズという
-      // 設計(stageVisualHullのfaW/faH+saW/saHと同じ)。以前はW,H(front基準)
+      // 設計(buildBodyCarveOptsのfaW/faH+saW/saHと同じ)。以前はW,H(front基準)
       // 1組をside側にも使い回しており、front/side画像のピクセル寸法が
       // 食い違うスキャナー経由の素材でside側のアクセサリー切り出し位置・
       // スケールがズレていた。faW/faH(front+back用)とsaW/saH(side用)を
@@ -311,14 +321,35 @@ async function runCarvingStages(state, report){
       laW: leftSide?leftSide.w:0, laH: leftSide?leftSide.h:0,
       LEFT_SYTOP: leftSide?leftSide.SYTOP:0, LEFT_SYBOT: leftSide?leftSide.SYBOT:0,
       LEFT_SIDE_REF: leftSide?leftSide.SIDE_REF:0,
-      // ★2026-07-09: frontCont/backCont/sideCont(元写真の白背景しきい値による
-      // サブピクセル補正用データ)はstageAccessories側で使わなくなった
-      // (js/accessories.jsのcarveRegion呼び出し部のコメント参照)ため渡さない。
       pivots:pivots, gp:gp,
     });
   }else{
     console.log("  accessories: 定義なし、スキップ");
   }
+
+  var allMxBounds=[bodyBuilt.mxBounds].concat(accBuilt.map(function(a){return a.mxBounds;}));
+  var allMyBounds=[bodyBuilt.myBounds].concat(accBuilt.map(function(a){return a.myBounds;}));
+  var allMzBounds=[bodyBuilt.mzBounds].concat(accBuilt.map(function(a){return a.mzBounds;}));
+  var unionBounds=[
+    [Math.min.apply(null, allMxBounds.map(function(b){return b[0];})), Math.max.apply(null, allMxBounds.map(function(b){return b[1];}))],
+    [Math.min.apply(null, allMyBounds.map(function(b){return b[0];})), Math.max.apply(null, allMyBounds.map(function(b){return b[1];}))],
+    [Math.min.apply(null, allMzBounds.map(function(b){return b[0];})), Math.max.apply(null, allMzBounds.map(function(b){return b[1];}))],
+  ];
+  var sharedGrid = P3D.buildGrid(unionBounds[0], unionBounds[1], unionBounds[2], gp.body_vox);
+  var regions = [{ownerId:0, opts:bodyBuilt.carveOpts}].concat(
+    accBuilt.map(function(a,i){ return {ownerId:i+1, opts:a.carveOpts}; }));
+  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001);
+  if(!unified) throw new Error("visual_hull+accessories: carving produced an empty mesh");
+  var split = P3D.splitMeshByOwner(unified.V, unified.F, unified.owner,
+    [0].concat(accBuilt.map(function(a,i){ return i+1; })));
+  console.log("  carveUnifiedRegions: total verts", unified.V.length/3, "faces", unified.F.length/3);
+
+  var body = {rawV: split[0].V, rawF: split[0].F};
+  var acc = accBuilt.length ? {
+    rawParts: accBuilt.map(function(a,i){
+      return {name:a.name, mode:a.mode, bones:a.bones, rawV:split[i+1].V, rawF:split[i+1].F};
+    }),
+  } : null;
   await tick();
 
   return {sizes:sizes, prof:prof, core:core, SCALE:SCALE, pivots:pivots, bledCanvas:bledCanvas, body:body, acc:acc};

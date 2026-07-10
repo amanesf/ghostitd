@@ -81,6 +81,101 @@ P3D.pixelBboxToModelBbox = pixelBboxToModelBbox;
  * }
  * 戻り値: {V,N,F,J,W,NF} または null(アクセサリー無し/生成失敗時)
  */
+/**
+ * ★2026-07-10(体+アクセサリー統合彫刻対応): 各アクセサリーのcarveRegion opts
+ * (mxBounds等の外接範囲込み)を組み立てるだけの関数。以前はstageAccessories
+ * 内で組み立ててそのままcarveRegionを呼んでいたが、体+全アクセサリーを
+ * 1つの共有グリッドで統合彫刻する新方式(js/pipeline.jsのrunCarvingStages
+ * 参照)のため、「optsを組み立てる」と「実際に彫る」を分離した。
+ * opts: stageAccessoriesと同じ引数。
+ * 戻り値: [{name,mode,bones,mxBounds,myBounds,mzBounds,carveOpts}, ...]
+ *   (front/back範囲が無く彫れないアクセサリーはスキップされ配列に含まれない)
+ */
+function buildAccessoryCarveOptsList(opts){
+  var gp = opts.gp;
+  var faW=opts.faW, faH=opts.faH, saW=opts.saW, saH=opts.saH;
+  var SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT;
+  var SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
+  var backOffsetX=gp.back_offset_x||0, backOffsetY=gp.back_offset_y||0;
+  var sideOffsetX=gp.side_offset_x||0, sideOffsetY=gp.side_offset_y||0;
+  var laW=opts.laW||0, laH=opts.laH||0;
+  var LEFT_SYTOP=opts.LEFT_SYTOP, LEFT_SYBOT=opts.LEFT_SYBOT, LEFT_SIDE_REF=opts.LEFT_SIDE_REF;
+  var leftSideOffsetX=gp.leftside_offset_x||0, leftSideOffsetY=gp.leftside_offset_y||0;
+  var accs = opts.accs || [];
+  var out=[];
+
+  accs.forEach(function(acc){
+    var name = acc.name || 'accessory';
+    var mode = acc.mode || 'rigid';
+    var bones = acc.bones || [];
+    var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : gp.psq_acc;
+    var mask = acc.mask || {};
+    var mxMin,mxMax,myMin,myMax,mzMin,mzMax;
+    var usedBackOnly=false;
+    if(mask.front && mask.front.bbox){
+      var bbm=P3D.pixelBboxToModelBbox(mask.front.bbox, function(pts){ return frontPointsToModel(pts, CX, SCALE, YBOT); });
+      mxMin=bbm[0];mxMax=bbm[1];myMin=bbm[2];myMax=bbm[3];
+    }else if(mask.back && mask.back.bbox){
+      var bbm2=P3D.pixelBboxToModelBbox(mask.back.bbox, function(pts){ return backPointsToModel(pts, CX, SCALE, YBOT, faW, backOffsetX, backOffsetY); });
+      mxMin=bbm2[0];mxMax=bbm2[1];myMin=bbm2[2];myMax=bbm2[3];
+      usedBackOnly=true;
+    }else{
+      console.log("  accessories: skip", name, "(front/back範囲なし)");
+      return;
+    }
+    var useLeftSide = !!(laW && mask.leftSide && mask.leftSide.bbox);
+    var sideMask = useLeftSide ? mask.leftSide : mask.side;
+    var curSAW = useLeftSide ? laW : saW;
+    var curSAH = useLeftSide ? laH : saH;
+    var curSYTOP = useLeftSide ? LEFT_SYTOP : SYTOP;
+    var curSYBOT = useLeftSide ? LEFT_SYBOT : SYBOT;
+    var curSIDE_REF = useLeftSide ? LEFT_SIDE_REF : SIDE_REF;
+    var curSideOffsetX = useLeftSide ? leftSideOffsetX : sideOffsetX;
+    var curSideOffsetY = useLeftSide ? leftSideOffsetY : sideOffsetY;
+    if(sideMask && sideMask.bbox){
+      var bbm3=P3D.pixelBboxToModelBbox(sideMask.bbox, function(pts){ return sidePointsToModel(pts, curSIDE_REF, SCALE, curSYTOP, curSYBOT); });
+      mzMin=bbm3[0];mzMax=bbm3[1];
+    }else{
+      var hw=(mxMax-mxMin)/2; mzMin=-hw*0.6; mzMax=hw*0.6;
+    }
+
+    var faAcc = (mask.front && mask.front.alpha) ? mask.front.alpha : new Uint8Array(faW*faH);
+    var baAcc = (mask.back && mask.back.alpha) ? mask.back.alpha : new Uint8Array(faW*faH);
+    var saAcc;
+    if(sideMask && sideMask.alpha){
+      saAcc = sideMask.alpha;
+    }else{
+      var sx0=curSIDE_REF+mzMin*SCALE+curSideOffsetX, sx1=curSIDE_REF+mzMax*SCALE+curSideOffsetX;
+      var sy0=curSYTOP+(1.0-myMax)*(curSYBOT-curSYTOP)+curSideOffsetY, sy1=curSYTOP+(1.0-myMin)*(curSYBOT-curSYTOP)+curSideOffsetY;
+      saAcc = rectAlpha(curSAW, curSAH, sx0, sy0, sx1, sy1);
+    }
+
+    var carveOpts = {
+      fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:curSAW, saH:curSAH,
+      faCont: null, baCont: null, saCont: null,
+      SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:curSYTOP, SYBOT:curSYBOT, SIDE_REF:curSIDE_REF,
+      backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:curSideOffsetX, sideOffsetY:curSideOffsetY,
+      mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
+      // ★2026-07-10(体+アクセサリー統合彫刻対応): 共有グリッド(body_voxで
+      // 作る)へ統合するため、voxもgp.body_voxで揃える(グリッドの実際の
+      // セルサイズと閾値判定(最小セグメント幅等)の基準を一致させるため。
+      // acc_voxは独立彫刻時代の名残で、統合彫刻では使わない)。
+      vox: gp.body_vox,
+      psqHead: accPsq, psqTorso: accPsq, psqLegs: accPsq,
+      psqArms: accPsq, psqHands: accPsq,
+      trackWin: gp.track_win,
+      smoothIters: 0,
+    };
+    out.push({name:name, mode:mode, bones:bones.slice(), usedBackOnly:usedBackOnly,
+      mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax], carveOpts:carveOpts});
+  });
+  return out;
+}
+P3D.buildAccessoryCarveOptsList = buildAccessoryCarveOptsList;
+
+// ★2026-07-10: 体+アクセサリーの統合彫刻(js/pipeline.jsのrunCarvingStages)
+// からはもう呼ばれない(buildAccessoryCarveOptsListだけを使う)。単体で
+// アクセサリーだけを素朴に彫りたい場合のために後方互換として残す。
 function stageAccessories(opts){
   var gp = opts.gp;
   // ★2026-07-08バグ修正(GHOST_SCANNER_PLAN.md「運用面の修正6点・③」): 以前は
@@ -196,7 +291,7 @@ function stageAccessories(opts){
       // null)があればそちらを優先する。
       psqHead: accPsq, psqTorso: accPsq, psqLegs: accPsq,
       psqArms: accPsq, psqHands: accPsq,
-      trackGap: gp.track_gap, trackWin: gp.track_win,
+      trackWin: gp.track_win,
       // ★フェーズ1: bodyと同様、平滑化前の生メッシュをキャッシュするため
       // carveRegion自体には常にsmoothIters:0を渡し、平滑化はfinishAccessoryMesh
       // 側で別途適用する。

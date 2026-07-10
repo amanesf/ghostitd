@@ -110,11 +110,19 @@ var triTable = [
 
 // field: Float32Array, レイアウトはindex = iy*(nx*nz)+ix*nz+iz (Python版のfield[iy,ix,iz]と同じ)
 // nx,ny,nz: 各軸のサイズ, isolevel: 等値面レベル(既定0.0)
-// 戻り値: {verts: Float32Array(N*3, [iy,ix,iz]のindex空間), faces: Uint32Array(M*3)}
-function marchingCubes(field, ny, nx, nz, isolevel){
+// ownerField: Int32Array(同じレイアウト、省略可)。★2026-07-10(体+アクセサリー
+//   統合彫刻対応): 複数パーツ(体/各アクセサリー)を1つの共有fieldへ
+//   max-combineする際、どの格子点をどのパーツが書き込んだかを並行して記録した
+//   ものを渡すと、生成される各頂点についても「iso値を跨ぐ2点のうち内側
+//   (値が大きい方、=そのエッジでは実際にそのパーツが表面を作った側)の
+//   owner」を厳密にその頂点のownerとして返す(色サンプリング等の曖昧な
+//   事後推定を一切使わない、彫刻に使った座標系そのものからの判定)。
+// 戻り値: {verts: Float32Array(N*3, [iy,ix,iz]のindex空間), faces: Uint32Array(M*3),
+//   vertOwner: Int32Array(N) | undefined(ownerField未指定時)}
+function marchingCubes(field, ny, nx, nz, isolevel, ownerField){
   isolevel = (isolevel===undefined) ? 0.0 : isolevel;
   var strideY = nx*nz, strideX = nz;
-  var verts=[], faces=[];
+  var verts=[], faces=[], vertOwner=ownerField?[]:null;
   // エッジごとに生成済み頂点indexをキャッシュ(同じエッジを共有する隣接セルで
   // 頂点を再利用し、頂点数を減らす)。key = セル(iy,ix,iz)+edge番号。
   // 汎用的にMap<string,int>でキャッシュする(コード量優先、速度は後で必要なら最適化)。
@@ -180,6 +188,12 @@ function marchingCubes(field, ny, nx, nz, isolevel){
             var pos=vertexInterp(c0,val0,c1,val1);
             existing=verts.length/3;
             verts.push(pos[0],pos[1],pos[2]);
+            if(vertOwner){
+              // isolevelを跨ぐ2点のうち内側(値が大きい方=実際に表面を
+              // 形作ったパーツ)のownerをこの頂点のownerとして採用する。
+              var innerC = (val0>=val1) ? c0 : c1;
+              vertOwner.push(ownerField[vid(innerC[0],innerC[1],innerC[2])]);
+            }
             cache.set(key, existing);
           }
           edgeVertIdx[e]=existing;
@@ -194,6 +208,7 @@ function marchingCubes(field, ny, nx, nz, isolevel){
   return {
     verts: Float32Array.from(verts),
     faces: Uint32Array.from(faces),
+    vertOwner: vertOwner ? Int32Array.from(vertOwner) : undefined,
   };
 }
 P3D.marchingCubes = marchingCubes;
