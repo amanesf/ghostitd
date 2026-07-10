@@ -1675,7 +1675,11 @@ $("generateBtn").onclick=async()=>{
     const state={
       imgs, points, analysis, deriveFromPoints,
       accessories: accessories.map(a=>{
-        const out={name:a.name,mode:a.mode,bones:a.bones,
+        // ★2026-07-10: colorは元々マスク抽出(自動マスクタブ)にしか使わず
+        // 生成用stateには含めていなかったが、js/pipeline.jsの境界ギャップ埋め
+        // (P3D.fillColorGaps)が「このアクセサリーの登録色」を必要とするため
+        // ここでも渡すようにした(無いとギャップ埋めが常にスキップされ無効化する)。
+        const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
           psq:(a.psq!==undefined&&a.psq!==null)?a.psq:null};
         // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
         // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の

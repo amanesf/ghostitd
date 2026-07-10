@@ -58,9 +58,16 @@ const EXPECTED_BODY_ONLY = {
 // 解消が目的、js/carving.js参照)。with-accessory側はアクセサリー(前髪等)
 // を含むため彫刻結果が変わり、ハッシュを更新した(body-onlyはアクセサリーが
 // 無く、統合しても体単体と同じ結果になるため不変)。
+// ★2026-07-10(境界ギャップ埋め): 統合彫刻を入れてもなお隙間が残るとの
+// ユーザー指摘を受け再調査した結果、色分けマップの体色/アクセサリー色の
+// 境界に数px〜十数px幅の陰影があり、どちらの色許容誤差判定にも入らない
+// 実データの穴(彫刻の入力自体に隙間)になっていたことが判明した
+// (js/common.jsのP3D.fillColorGaps参照)。2つの確定領域に挟まれた未確定
+// 画素だけを最近傍色で埋める修正によりwith-accessory側の彫刻結果が変わり、
+// ハッシュを更新した(body-onlyはアクセサリーが無く対象外のため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 882148,
-  sha256: "a274c0c8b7b78f8f35eec1a54bd6be666a1e2b5d7f2197b2d237b82a2acde37d",
+  byteLength: 825044,
+  sha256: "a6594642f1df306f4674b169dedc382b3a15404878ddd7b1b08bcbafcb9cb7a4",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

@@ -352,6 +352,118 @@ function loadAlphaFromColormap(ctx, w, h, toleranceOpt){
 }
 P3D.loadAlphaFromColormap = loadAlphaFromColormap;
 
+// ---- 色分けマップの境界ギャップ埋め ----
+// ★2026-07-10(ユーザー指摘「隙間は仕組みの問題では」への対応): 体・各
+// アクセサリーは、それぞれ独立に「その色との距離がtolerance以内か」で
+// 判定される(colorRegionRawMask)。境界には単純な1〜2pxのアンチエイリアス
+// だけでなく、AI生成の色分けマップにありがちな数px〜十数px幅の陰影
+// (グラデーション)が乗っていることがあり、この幅の画素は体色からも
+// 隣接アクセサリー色からもtolerance外になって「どちらの判定にも入らない」
+// 実データの穴になる(実測: スカートと体の境目で約11px幅、1024px画像中)。
+// 3D彫刻はこの穴をそのまま「何も無い」として彫るため、パーツ境界に本物の
+// 隙間が空く。彫刻方式(統合彫刻)をいくら変えても、入力データ自体に穴が
+// あれば埋まらない。
+//
+// 対策: 「未確定画素の連なりが、両端とも既に確定した領域に接している(=2つの
+// 既知パーツに挟まれている)」場合だけを本物の境界ギャップとみなして埋める。
+// 埋める際は、そのpx自身の実際の色が最も近い候補色の領域に割り当てる。
+// ★重要: 最初の実装は「確定領域から未確定画素へ四方に拡張する」単純な
+// 多始点BFSだったが、これだと体/アクセサリーの外側の本物の背景との境目
+// (片側にしか確定領域が無い)まで拡張距離の上限いっぱいまで食い込み、
+// キャラクター全体が輪郭に沿って一回り膨らむ深刻な副作用があった
+// (実測: front画像で確定画素が15%→28%まで増加、境界だけでなく外周全体が
+// 膨張していた)。両端(上下 or 左右)とも確定領域に接している連なりだけを
+// 埋める「橋渡し」判定にすることで、片側が本物の背景(確定領域が無い)である
+// 外周は絶対に対象にならないようにした(背景を候補色に含める必要も無くなった)。
+//
+// regions: [{targetRgb:[r,g,b], alpha:Uint8Array(w*h)}, ...] (体・各アクセサリー)
+// colormapCtx,w,h: 色分けマップのcanvas context・サイズ
+// maxGapPx: 橋渡しとみなす未確定連なりの最大幅/高さ(既定30)
+// 副作用: 各regionのalphaを直接書き換える(埋めた分を1に立てる)。戻り値なし。
+function fillColorGaps(regions, colormapCtx, w, h, maxGapPx){
+  maxGapPx = (maxGapPx===undefined) ? 30 : maxGapPx;
+  var data = colormapCtx.getImageData(0,0,w,h).data;
+  var n = w*h;
+  var owner = new Int32Array(n).fill(-1);
+  for(var r=0;r<regions.length;r++){
+    var a = regions[r].alpha;
+    for(var p=0;p<n;p++){ if(a[p]) owner[p]=r; }
+  }
+  function nearestRegion(p){
+    var px=data[p*4], py=data[p*4+1], pz=data[p*4+2];
+    var bestR=-1, bestD=Infinity;
+    for(var r2=0;r2<regions.length;r2++){
+      var tc=regions[r2].targetRgb;
+      var dr=px-tc[0], dg=py-tc[1], db=pz-tc[2];
+      var dd=dr*dr+dg*dg+db*db;
+      if(dd<bestD){ bestD=dd; bestR=r2; }
+    }
+    return bestR;
+  }
+  function fillRun(pixels){
+    for(var i=0;i<pixels.length;i++){
+      var p=pixels[i];
+      if(owner[p]>=0) continue; // 別方向のスキャンで既に埋まっていることがある
+      var r=nearestRegion(p);
+      owner[p]=r; regions[r].alpha[p]=1;
+    }
+  }
+  // 横方向の橋渡し: 各行を左から右へ走査し、未確定の連なりの両端が確定画素
+  // (行内、または画像端でない)なら橋渡しとみなして埋める。
+  for(var y=0;y<h;y++){
+    var rowOff=y*w, x=0;
+    while(x<w){
+      if(owner[rowOff+x]>=0){ x++; continue; }
+      var start=x;
+      while(x<w && owner[rowOff+x]<0) x++;
+      var end=x; // 未確定連なりは[start,end)
+      var leftOk = start>0 && owner[rowOff+start-1]>=0;
+      var rightOk = end<w && owner[rowOff+end]>=0;
+      if(leftOk && rightOk && (end-start)<=maxGapPx){
+        var pixels=[]; for(var xx=start;xx<end;xx++) pixels.push(rowOff+xx);
+        fillRun(pixels);
+      }
+    }
+  }
+  // 縦方向の橋渡し: 横方向スキャンで拾えない(境界が縦向きの)ギャップ用に、
+  // 各列を上から下へ走査して同様の判定を行う。
+  for(var x2=0;x2<w;x2++){
+    var y2=0;
+    while(y2<h){
+      if(owner[y2*w+x2]>=0){ y2++; continue; }
+      var start2=y2;
+      while(y2<h && owner[y2*w+x2]<0) y2++;
+      var end2=y2;
+      var topOk = start2>0 && owner[(start2-1)*w+x2]>=0;
+      var botOk = end2<h && owner[end2*w+x2]>=0;
+      if(topOk && botOk && (end2-start2)<=maxGapPx){
+        var pixels2=[]; for(var yy=start2;yy<end2;yy++) pixels2.push(yy*w+x2);
+        fillRun(pixels2);
+      }
+    }
+  }
+}
+P3D.fillColorGaps = fillColorGaps;
+
+// alpha(Uint8Array(w*h)、1=前景)からピクセルbbox([x0,y0,x1,y1]、x1/y1は
+// 排他的な右下)を求める。前景画素が無ければnull。
+function bboxFromAlpha(alpha, w, h){
+  var x0=w,x1=-1,y0=h,y1=-1,any=false;
+  for(var y=0;y<h;y++){
+    var rowOff=y*w;
+    for(var x=0;x<w;x++){
+      if(alpha[rowOff+x]){
+        any=true;
+        if(x<x0)x0=x; if(x>x1)x1=x;
+        if(y<y0)y0=y; if(y>y1)y1=y;
+      }
+    }
+  }
+  if(!any) return null;
+  return [x0,y0,x1+1,y1+1];
+}
+P3D.bboxFromAlpha = bboxFromAlpha;
+
 // マスクdataURL(白RGB+アルファ=前景)からUint8Array(w*h, 1=前景)を復元する
 // (3D彫刻側/範囲計算側で真偽画素配列として扱いたい箇所向けのヘルパー)。
 function maskDataUrlToAlpha(ctx, w, h, maskDataUrl){

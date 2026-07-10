@@ -137,6 +137,50 @@ async function runCarvingStages(state, report){
   });
   await tick();
 
+  // ★2026-07-10(ユーザー指摘「隙間は仕組みの問題では」への対応): 体・各
+  // アクセサリーは、それぞれ独立に「その色との距離がtolerance以内か」で
+  // 判定される。境界には数px〜十数px幅の陰影(グラデーション)が乗っている
+  // ことがあり、その幅の画素はどちらの判定にも入らない実データの穴になる
+  // (実測: スカートと体の境目で約11px幅)。彫刻はこの穴をそのまま「何も無い」
+  // として扱うため、パーツ境界に本物の隙間が空く。統合彫刻(体+アクセサリーを
+  // 1つのフィールドで彫る仕組み)を変えても、入力データ自体の穴は埋まらない。
+  // ここで体・全アクセサリーを候補として、2つの確定領域に挟まれた未確定画素
+  // だけを「そのpx自身の実際の色が一番近い候補」に割り当てる(P3D.fillColorGaps。
+  // 片側が本物の背景の外周は対象にならない、詳細は同関数のコメント参照)。
+  // これによりmask.bboxも変わりうるため、アクセサリーのbboxも実データから
+  // 引き直す。
+  if(state.accessories && state.accessories.length){
+    var earlyMaskLoads=[];
+    state.accessories.forEach(function(a){
+      if(!a.mask) return;
+      ["front","back","side"].forEach(function(v){
+        var m=a.mask[v];
+        if(!m || !m.maskDataUrl || m.alpha) return;
+        var sz = (v==='side') ? sizes.side : sizes.front;
+        earlyMaskLoads.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, sz.w, sz.h).then(function(alpha){ m.alpha=alpha; }));
+      });
+    });
+    if(earlyMaskLoads.length) await Promise.all(earlyMaskLoads);
+    views.forEach(function(v){
+      var cm = state.colormaps[v];
+      var regions = [{targetRgb:[0,0,0], alpha:alphaFull[v]}];
+      var accForView = [];
+      state.accessories.forEach(function(a){
+        var m = a.mask && a.mask[v];
+        if(!m || !m.alpha || !a.color) return;
+        regions.push({targetRgb: P3D.hexToRgb(a.color), alpha:m.alpha});
+        accForView.push({a:a, m:m});
+      });
+      if(!accForView.length) return; // このviewにアクセサリーが無ければ体単独なので隙間は生じない
+      P3D.fillColorGaps(regions, cm.ctx, cm.w, cm.h);
+      accForView.forEach(function(o){
+        var newBbox = P3D.bboxFromAlpha(o.m.alpha, cm.w, cm.h);
+        if(newBbox) o.m.bbox = newBbox;
+      });
+    });
+  }
+  await tick();
+
   // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)は「体(alphaFull、色分け
   // マップの黒だけ)」を前景とみなし、それ以外(スカート/マフラー/髪等の
   // アクセサリー領域は体とは別の色で塗られているため体シルエットから見れば
@@ -152,17 +196,6 @@ async function runCarvingStages(state, report){
   var bleedFgAlpha={};
   views.forEach(function(v){ bleedFgAlpha[v]=Uint8Array.from(alphaFull[v]); });
   if(state.accessories && state.accessories.length){
-    var earlyMaskLoads=[];
-    state.accessories.forEach(function(a){
-      if(!a.mask) return;
-      ["front","back","side"].forEach(function(v){
-        var m=a.mask[v];
-        if(!m || !m.maskDataUrl || m.alpha) return;
-        var sz = (v==='side') ? sizes.side : sizes.front;
-        earlyMaskLoads.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, sz.w, sz.h).then(function(alpha){ m.alpha=alpha; }));
-      });
-    });
-    if(earlyMaskLoads.length) await Promise.all(earlyMaskLoads);
     state.accessories.forEach(function(a){
       if(!a.mask) return;
       ["front","back","side"].forEach(function(v){
@@ -295,6 +328,11 @@ async function runCarvingStages(state, report){
       // キャリブレーション(上記leftSide変数)と同じ水平反転を適用してから
       // alpha/bboxを格納する(反転後の座標系はside用の変換式とそのまま
       // 揃うため、accessories.js側はside/leftSideを区別なく同じ式で扱える)。
+      // ★2026-07-10: front/back/sideには境界ギャップ埋め(P3D.fillColorGaps、
+      // 上のearlyMaskLoads直後を参照)を適用したが、leftSideは反転座標系な上
+      // 個別accessoryごとに非同期で読み込まれるため未対応(既知の残課題。
+      // leftSideを使う非対称アクセサリーが体/他アクセサリーと隣接する境界には
+      // 同様のギャップが残りうる)。
       var mls=a.mask.leftSide;
       if(leftSide && mls && mls.maskDataUrl && !mls.alpha){
         maskLoads.push(P3D.loadMaskAlphaAsync(mls.maskDataUrl, leftSide.w, leftSide.h).then(function(alpha){
