@@ -260,6 +260,46 @@ function laplacianSmooth(V, F, iters, alpha, beta){
 }
 P3D.laplacianSmooth = laplacianSmooth;
 
+// ★2026-07-10(ユーザー指摘「体に隙間が空く」対応): HC-Laplacianは通常の
+// Laplacian平滑化より縮小を抑える設計だが、完全にはゼロにならない(反復回数
+// が多いほど輪郭が内側に丸まって縮む)。体本体とアクセサリーは別々の
+// タイミング・別々の反復回数(body_smooth_iters/acc_smooth_iters)・別々の
+// ボクセル解像度(body_vox/acc_vox)で彫刻・平滑化されるため、この残留縮小率が
+// 双方で食い違うと、本来は同じ元絵のシルエットに沿って接していたはずの面同士
+// (体とアクセサリーの境界)に隙間が空く。彫刻直後の生メッシュ(平滑化前)と
+// 平滑化後のメッシュの軸ごとのバウンディングボックスを比較し、平滑化後の
+// メッシュを軸ごとに原点(中心)基準でリスケールして平滑化前と同じ外寸に
+// 戻すことで、「境界のガタつき(角ばり)」だけを削り、輪郭が丸まることによる
+// 実質的なサイズの縮小(=隙間の原因)は打ち消す。
+function restoreExtentAfterSmooth(Vsmoothed, Voriginal){
+  var n = Vsmoothed.length/3;
+  var lo0=[Infinity,Infinity,Infinity], hi0=[-Infinity,-Infinity,-Infinity];
+  var lo1=[Infinity,Infinity,Infinity], hi1=[-Infinity,-Infinity,-Infinity];
+  for(var i=0;i<n;i++){
+    for(var a=0;a<3;a++){
+      var o=Voriginal[i*3+a], s=Vsmoothed[i*3+a];
+      if(o<lo0[a])lo0[a]=o; if(o>hi0[a])hi0[a]=o;
+      if(s<lo1[a])lo1[a]=s; if(s>hi1[a])hi1[a]=s;
+    }
+  }
+  var out=new Float32Array(Vsmoothed.length);
+  for(var a2=0;a2<3;a2++){
+    var span0=hi0[a2]-lo0[a2], span1=hi1[a2]-lo1[a2];
+    // span1がほぼ0(退化したメッシュ)ならスケール補正をかけない(1.0=そのまま)。
+    var scale=(span1>1e-9)?(span0/span1):1.0;
+    var c1=(lo1[a2]+hi1[a2])/2, c0=(lo0[a2]+hi0[a2])/2;
+    for(var i2=0;i2<n;i2++){
+      out[i2*3+a2] = (Vsmoothed[i2*3+a2]-c1)*scale + c0;
+    }
+  }
+  return out;
+}
+function laplacianSmoothPreserveExtent(V, F, iters, alpha, beta){
+  var Vs = laplacianSmooth(V, F, iters, alpha, beta);
+  return restoreExtentAfterSmooth(Vs, V);
+}
+P3D.laplacianSmoothPreserveExtent = laplacianSmoothPreserveExtent;
+
 // 面法線から頂点法線を再計算し、符号付き体積で外向きか判定して巻きを補正する。
 // ★2026-07-10: 全身シルエットの黒(体色)一致判定により、体が複数の独立した
 // 閉曲面(頭部/胴体/脚等)に分かれることがある(js/pipeline.js/js/common.js

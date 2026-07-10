@@ -404,7 +404,7 @@ function decimateStage(inter, gp){
 
 function meshFinishStage(decimated, gp, pivots){
   var V=decimated.bodyV, F=decimated.bodyF;
-  if(gp.body_smooth_iters>0) V=P3D.laplacianSmooth(V,F,gp.body_smooth_iters);
+  if(gp.body_smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.body_smooth_iters);
   var fw=P3D.computeNormalsFixWinding(V,F);
   var bodyV=V, bodyF=fw.F, bodyN=fw.N;
   var bodySkin=P3D.nearestBoneSegmentSkin(bodyV, pivots, P3D.BONES, 4, gp.rigid_soft_width);
@@ -414,7 +414,7 @@ function meshFinishStage(decimated, gp, pivots){
     var allV=[],allN=[],allF=[],allJ=[],allW=[],allAccName=[]; var voff=0;
     decimated.accParts.forEach(function(p){
       var V2=p.V, F2=p.F;
-      if(gp.acc_smooth_iters>0) V2=P3D.laplacianSmooth(V2,F2,gp.acc_smooth_iters);
+      if(gp.acc_smooth_iters>0) V2=P3D.laplacianSmoothPreserveExtent(V2,F2,gp.acc_smooth_iters);
       var fw2=P3D.computeNormalsFixWinding(V2,F2);
       V2=V2; var F2b=fw2.F, Nv=fw2.N;
       var skin;

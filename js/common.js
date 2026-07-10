@@ -618,6 +618,19 @@ function placeAllLandmarks(A){
 P3D.analyzeSilhouette=analyzeSilhouette;
 P3D.placeAllLandmarks=placeAllLandmarks;
 
+// ★2026-07-10: landmark_tool.html(ジェネレータ)の作業セッション自動保存
+// (localStorage)キーをcharacter_3d.html(ビューア)とも共有する。ビューアで
+// 「モデル生成」経由の中間パッケージをライブ編集した内容(gen_params/
+// seam_angles等)は、従来ジェネレータ側のセッションへ書き戻されず、
+// 「戻る」で行き来すると消えてしまっていた(ユーザー指摘)。同じキー名を
+// 両ファイルで直接文字列リテラルとして重複定義すると将来的な食い違いの元に
+// なるため、ここで一箇所にまとめる。
+P3D.NORMAL_SESSION_KEY="3dtoolJS_normal_session_v1";
+P3D.SAMPLE_SESSION_KEY="3dtoolJS_sample_session_v1";
+P3D.sessionStorageKey=function(mode, sampleId){
+  return mode==="sample" ? (P3D.SAMPLE_SESSION_KEY+":"+sampleId) : P3D.NORMAL_SESSION_KEY;
+};
+
 document.addEventListener('pointerdown', function(e){
   var el = e.target;
   if(!el || el.tagName!=='INPUT' || el.type!=='range') return;

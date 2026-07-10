@@ -104,7 +104,7 @@ P3D.stageVisualHull = stageVisualHull;
 // だけ呼び直せば、平滑化/間引きパラメータを即時反映できる(フェーズ2で使用)。
 function finishBodyMesh(rawV, rawF, gp){
   var V=rawV, F=rawF;
-  if(gp.body_smooth_iters>0) V=P3D.laplacianSmooth(V,F,gp.body_smooth_iters);
+  if(gp.body_smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.body_smooth_iters);
   if(gp.body_decimate){
     var dec=P3D.decimateMesh(V,F,gp.body_target_verts);
     V=dec.V; F=dec.F;

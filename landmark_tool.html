@@ -290,6 +290,9 @@
     <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
          (seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの編集UI)は
          character_3d.html(ビューア)側に完全移管したため削除した。
+         2026-07-10に側面画像利用(seamAngles/seamNoSide)分だけ一度
+         このタブへ復活させたが、ビューア側(Task1「継ぎ目」パネル)に
+         既に同一機能があり単純な重複だったため再度削除した(ユーザー指摘)。
          seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの各変数自体と
          buildJson()での出力は変更していない(既定値のままintermediate
          パッケージへ渡り、ビューアの初期値として使われる)。 -->
@@ -305,18 +308,6 @@
       <div class="row" style="margin-top:8px">
         <button class="btn" id="paramsResetAll">全て既定値に戻す</button>
       </div>
-
-      <h2 style="margin-top:22px">側面画像のテクスチャ利用
-        <button type="button" class="qbtn" data-help="help-seamside">?</button></h2>
-      <p class="helpText hidden" id="help-seamside">
-        正面/背面テクスチャの継ぎ目付近で、側面(右)画像もテクスチャとして
-        使うかどうかの設定です。<b>あくまでテクスチャの話であり、体の奥行き
-        (前後の厚み)には影響しません</b>(奥行きは常に自動マスクタブの
-        色分けマップから決まります)。全身は部位グループ別、アクセサリーは
-        個別に設定でき、既定は全て「使わない」(正面/背面画像だけで塗る)です。
-        「使う」にした部位は、指定した角度より側面寄りを向いた面にだけ
-        側面画像が使われます。</p>
-      <div id="seamSidePanel"></div>
     </div>
 
     <div class="tabpanel acpanel" data-tabpanel="gen">
@@ -678,116 +669,11 @@ function renderParamsPanel(){
   el.innerHTML=buildParamsPanelHtml();
   wireParamsPanelEvents(el);
 }
-/* ---------- 側面画像のテクスチャ利用(seamAngles/seamNoSide、全身は部位
-   グループ別・アクセサリーは個別)。BONE_GROUPS/BONE_JPは自動マスクタブの
-   取り付けボーン一覧と共用する(全体grep済み、他の意味では使われていない)。
-   既定は「使わない」(normalizeSeamSideDefaults参照)。 ---------- */
-let seamSideGroupOpen={}, seamSideBulkOpen=true;
-function allSeamSideKeys(){
-  return BONES.concat(accessories.map(a=>"acc:"+(a.name||"")));
-}
-function seamSideRowHtml(label,key){
-  const useSide=!seamNoSide[key];
-  const deg=(seamAngles[key]!==undefined)?seamAngles[key]:SEAM_SIDE_DEFAULT_DEG;
-  const dis=useSide?"":"disabled";
-  return '<div class="acitem"><span class="nm">'+label+'</span>'+
-    '<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px;flex:0 0 auto;white-space:nowrap">'+
-    '<input type="checkbox" class="seamSideUse" data-key="'+key+'" '+(useSide?"checked":"")+'> 側面を使う</label>'+
-    '<input type="range" class="seamSideRange" data-key="'+key+'" min="1" max="89" step="1" value="'+deg+'" '+dis+' style="flex:1;min-width:40px">'+
-    '<input type="number" class="seamSideDeg" data-key="'+key+'" min="1" max="89" step="1" value="'+deg+'" '+dis+' style="width:44px">°'+
-    '</div>';
-}
-function buildSeamSideGroupsHtml(){
-  const boneGroupsHtml=BONE_GROUPS.map(grp=>{
-    const rows=grp.bones.map(b=>seamSideRowHtml(BONE_JP[b]||b,b)).join("");
-    const isOpen=!!seamSideGroupOpen[grp.label];
-    return '<details class="accgroup" data-seamsidegroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
-      '<summary><span>全身: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
-      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
-  }).join("");
-  let accHtml="";
-  if(accessories.length){
-    const rows=accessories.map(a=>seamSideRowHtml(a.name||"(無名)","acc:"+(a.name||""))).join("");
-    const isOpen=!!seamSideGroupOpen["アクセサリー"];
-    accHtml='<details class="accgroup" data-seamsidegroup="アクセサリー"'+(isOpen?" open":"")+'>'+
-      '<summary><span>アクセサリー個別</span><span class="accCount">'+accessories.length+'項目</span></summary>'+
-      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
-  }
-  return boneGroupsHtml+accHtml;
-}
-function buildSeamSideBulkHtml(){
-  return '<details class="accgroup" data-seamsidegroup="一括設定"'+(seamSideBulkOpen?" open":"")+'>'+
-    '<summary><span>一括設定</span><span class="accCount">2項目</span></summary>'+
-    '<div class="accbody">'+
-    '<div class="acitem" style="margin-bottom:8px">'+
-    '<span class="nm">全身+アクセサリーの角度を一括変更</span>'+
-    '<input type="number" id="seamSideBulkDeg" min="1" max="89" step="1" value="'+SEAM_SIDE_DEFAULT_DEG+'" style="width:56px">°'+
-    '<button type="button" class="btn sm mint" id="seamSideBulkDegApply">適用</button>'+
-    '</div>'+
-    '<div class="acitem" style="flex-wrap:wrap;row-gap:6px">'+
-    '<span class="nm" style="flex:1 1 100%">側面画像を使う(一括)</span>'+
-    '<button type="button" class="btn sm mint" id="seamSideBulkOn" style="flex:1 1 auto">全パーツON</button>'+
-    '<button type="button" class="btn sm" id="seamSideBulkOff" style="flex:1 1 auto">全パーツOFF(既定)</button>'+
-    '</div></div></details>';
-}
-function wireSeamSidePanelEvents(el){
-  [].forEach.call(el.querySelectorAll("details[data-seamsidegroup]"),d=>{
-    d.addEventListener("toggle",()=>{
-      const g=d.dataset.seamsidegroup;
-      if(g==="一括設定")seamSideBulkOpen=d.open; else seamSideGroupOpen[g]=d.open;
-    });
-  });
-  const bulkDegBtn=$("seamSideBulkDegApply");
-  if(bulkDegBtn)bulkDegBtn.onclick=()=>{
-    const v=parseInt($("seamSideBulkDeg").value,10);
-    if(!isFinite(v)||v<1||v>89){ setMsg("角度は1〜89の範囲で入力してください。"); return; }
-    allSeamSideKeys().forEach(k=>{ seamAngles[k]=v; });
-    renderSeamSidePanel();
-  };
-  const bulkOnBtn=$("seamSideBulkOn");
-  if(bulkOnBtn)bulkOnBtn.onclick=()=>{
-    allSeamSideKeys().forEach(k=>{ delete seamNoSide[k]; });
-    renderSeamSidePanel();
-  };
-  const bulkOffBtn=$("seamSideBulkOff");
-  if(bulkOffBtn)bulkOffBtn.onclick=()=>{
-    allSeamSideKeys().forEach(k=>{ seamNoSide[k]=true; });
-    renderSeamSidePanel();
-  };
-  [].forEach.call(el.querySelectorAll(".seamSideUse"),cb=>{
-    cb.onchange=()=>{
-      const key=cb.dataset.key;
-      if(cb.checked) delete seamNoSide[key]; else seamNoSide[key]=true;
-      const row=cb.closest(".acitem");
-      const rangeEl=row.querySelector(".seamSideRange"), numEl=row.querySelector(".seamSideDeg");
-      if(rangeEl)rangeEl.disabled=!cb.checked;
-      if(numEl)numEl.disabled=!cb.checked;
-    };
-  });
-  function setSeamSideDeg(key,n){
-    if(!isFinite(n)||n<1||n>89) return;
-    seamAngles[key]=n;
-  }
-  [].forEach.call(el.querySelectorAll(".seamSideDeg"),inp=>{
-    inp.onchange=()=>{
-      const key=inp.dataset.key, n=parseInt(inp.value,10);
-      setSeamSideDeg(key,n);
-      const rg=el.querySelector('.seamSideRange[data-key="'+key+'"]'); if(rg)rg.value=inp.value;
-    };
-  });
-  [].forEach.call(el.querySelectorAll(".seamSideRange"),rg=>{
-    rg.oninput=()=>{
-      const key=rg.dataset.key, n=parseInt(rg.value,10);
-      setSeamSideDeg(key,n);
-      const numEl=el.querySelector('.seamSideDeg[data-key="'+key+'"]'); if(numEl)numEl.value=rg.value;
-    };
-  });
-}
-function renderSeamSidePanel(){
-  const el=$("seamSidePanel"); if(!el)return;
-  el.innerHTML=buildSeamSideBulkHtml()+buildSeamSideGroupsHtml();
-  wireSeamSidePanelEvents(el);
-}
+// ★2026-07-10: 側面画像のテクスチャ利用(seamAngles/seamNoSide)編集UIは
+// character_3d.html(ビューア)の「継ぎ目」パネルに同一機能があり単純な
+// 重複だったため、ここでは持たない。seamAngles/seamNoSideのデータ自体は
+// normalizeSeamSideDefaults()で既定値(使わない)に揃えたままbuildJson()で
+// intermediateパッケージへ渡り、ビューア側のライブ編集の初期値になる。
 // ★2026-07-09: exclude_masks(体シルエット除外範囲)の概念自体を廃止した。
 // 全身のシルエットも色分けマップ(体=黒)由来の色許容誤差方式で抽出する
 // ようになり、アクセサリー色の画素は色距離判定の時点で体色とは一致しない
@@ -819,8 +705,11 @@ let currentSampleId="default"; // サンプルモード時、SAMPLESのどのid�
 // ランドマーク編集がビューア往復で消えてしまうのは不便との指摘を受け、
 // サンプルモードも自動保存の対象にした(画像本体は常に同梱のimages/*.pngを
 // 使う決定的なものなので保存不要。JSON相当の編集内容のみ保存する)。
-const NORMAL_SESSION_KEY="3dtoolJS_normal_session_v1";
-const SAMPLE_SESSION_KEY="3dtoolJS_sample_session_v1";
+// ★2026-07-10: キー名自体はcharacter_3d.html(ビューア)からの書き戻しでも
+// 使うため、P3D.NORMAL_SESSION_KEY/SAMPLE_SESSION_KEY(js/common.js)に
+// 一元化した(2箇所で文字列リテラルを重複定義すると食い違いの元になるため)。
+const NORMAL_SESSION_KEY=P3D.NORMAL_SESSION_KEY;
+const SAMPLE_SESSION_KEY=P3D.SAMPLE_SESSION_KEY;
 function saveNormalSession(){
   try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(buildJson())); }
   catch(e){ console.warn("セッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
@@ -1284,7 +1173,8 @@ function buildJson(){
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-        colorTolerance:a.colorTolerance};
+        colorTolerance:a.colorTolerance,
+        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:null};
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
@@ -1337,7 +1227,8 @@ function applyLoadedJson(d){
   accessories=(d.accessories||[]).map(a=>{
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
       color:a.color||null,
-      colorTolerance:(a.colorTolerance!==undefined&&a.colorTolerance!==null)?a.colorTolerance:12};
+      colorTolerance:(a.colorTolerance!==undefined&&a.colorTolerance!==null)?a.colorTolerance:12,
+      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:null};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -1356,7 +1247,6 @@ function applyLoadedJson(d){
   const colorGradSl=$("colorGradSlider"); if(colorGradSl) colorGradSl.value=colorGradWidth;
   genParams=Object.assign({},DEFAULT_GEN_PARAMS,d.gen_params||{});
   renderParamsPanel();
-  renderSeamSidePanel();
   // ★2026-07-09: 色分けマップから全身/アクセサリー双方のマスクを再抽出する
   // (自動マスクタブを開かなくても生成できるようにするため)。
   resyncAnalysisToProfile();
@@ -1442,10 +1332,24 @@ function buildAutomaskItemHtml(a, idx){
     '<input type="number" class="automaskTolNum" data-i="'+idx+'" min="0" max="120" value="'+a.colorTolerance+'" style="width:56px">'+
     '</div></label>'
   ) : '';
+  // ★2026-07-10: 断面の丸み(psq、「パラメータ」タブのpsq_acc)は従来
+  // 全アクセサリー共通の1値しか無かった。アクセサリーごとに理想的な丸みが
+  // 異なる(硬いパーツは角ばらせたい、布物は丸くしたい等)という指摘を受け、
+  // 個別設定できるようにする。未使用時(a.psq===null)はpsq_accをそのまま使う。
+  const useCustomPsq=(a.psq!==undefined && a.psq!==null);
+  const psqVal=useCustomPsq?a.psq:genParams.psq_acc;
+  const psqHtml='<label>断面の丸み'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px;flex:0 0 auto;white-space:nowrap">'+
+    '<input type="checkbox" class="automaskPsqUse" data-i="'+idx+'" '+(useCustomPsq?"checked":"")+'> 個別設定</label>'+
+    '<input type="range" class="automaskPsqSlider" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" '+(useCustomPsq?"":"disabled")+' style="flex:1">'+
+    '<input type="number" class="automaskPsqNum" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" '+(useCustomPsq?"":"disabled")+' style="width:56px">'+
+    '</div></label>';
   return '<div class="acform" style="margin-bottom:8px">'+
     '<span class="tag">自動マスク / 面: '+views.join(",")+'</span>'+
     '<label>名前<input type="text" class="automaskNameEdit" data-i="'+idx+'" value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)"></label>'+
     tolHtml+
+    psqHtml+
     '</div>';
 }
 function wireAutomaskItemEvents(){
@@ -1462,7 +1366,6 @@ function wireAutomaskItemEvents(){
         normalizeSeamSideDefaults(); // 新キーが未設定なら既定(側面を使わない)を補う
       }
       renderAccessoryBoneList(); // 名前変更をマークタブ側の一覧にも反映
-      renderSeamSidePanel();
     };
   });
   // 個別の色許容誤差スライダー/数値入力。ドラッグ中にlistWrap全体を
@@ -1483,6 +1386,38 @@ function wireAutomaskItemEvents(){
   });
   [].forEach.call(document.querySelectorAll(".automaskTolNum"),num=>{
     num.onchange=()=>{ setAccessoryTolerance(+num.dataset.i, parseInt(num.value,10)||0); };
+  });
+  // アクセサリー個別の断面の丸み(psq)。マスク抽出には影響しないため
+  // reextractAndRefresh()は呼ばない(スライダー/数値入力どうしの値同期のみ)。
+  function setAccessoryPsq(i,n){
+    n=Math.max(1.2,Math.min(6,n));
+    accessories[i].psq=n;
+    const sl=document.querySelector('.automaskPsqSlider[data-i="'+i+'"]');
+    const num=document.querySelector('.automaskPsqNum[data-i="'+i+'"]');
+    if(sl)sl.value=n;
+    if(num)num.value=n;
+  }
+  [].forEach.call(document.querySelectorAll(".automaskPsqUse"),cb=>{
+    cb.onchange=()=>{
+      const i=+cb.dataset.i;
+      const sl=document.querySelector('.automaskPsqSlider[data-i="'+i+'"]');
+      const num=document.querySelector('.automaskPsqNum[data-i="'+i+'"]');
+      if(cb.checked){
+        accessories[i].psq=parseFloat((sl&&sl.value)||genParams.psq_acc);
+      }else{
+        accessories[i].psq=null;
+        if(sl)sl.value=genParams.psq_acc;
+        if(num)num.value=genParams.psq_acc;
+      }
+      if(sl)sl.disabled=!cb.checked;
+      if(num)num.disabled=!cb.checked;
+    };
+  });
+  [].forEach.call(document.querySelectorAll(".automaskPsqSlider"),sl=>{
+    sl.oninput=()=>{ setAccessoryPsq(+sl.dataset.i, parseFloat(sl.value)); };
+  });
+  [].forEach.call(document.querySelectorAll(".automaskPsqNum"),num=>{
+    num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||genParams.psq_acc); };
   });
 }
 // ★2026-07-10(UIレビュー): アクセサリーの取り付けボーン設定一覧
@@ -1755,7 +1690,8 @@ $("generateBtn").onclick=async()=>{
     const state={
       imgs, points, analysis, deriveFromPoints,
       accessories: accessories.map(a=>{
-        const out={name:a.name,mode:a.mode,bones:a.bones};
+        const out={name:a.name,mode:a.mode,bones:a.bones,
+          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:null};
         // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
         // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
         // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による
@@ -1785,6 +1721,11 @@ $("generateBtn").onclick=async()=>{
       seam_no_side: Object.assign({},seamNoSide),
       seam_smooth_iters: seamSmoothIters,
       color_grad_width: colorGradWidth,
+      // ★2026-07-10: ビューアの「戻る」でジェネレータの自動保存セッションへ
+      // ライブ編集結果を書き戻す際、どのlocalStorageキー(通常/サンプルどれか)
+      // に書けばよいかをビューア側は知らないため、ここで教えておく。
+      session_mode: currentMode,
+      session_sample_id: currentSampleId,
     };
     await P3D.saveGeneratedModel(pkg);
     if(currentMode==="normal"){
@@ -1805,13 +1746,6 @@ $("paramsResetAll").onclick=()=>{
   renderParamsPanel();
   setMsg("パラメータを全て既定値に戻しました。");
 };
-// ★Task3で「画像境界」タブごと削除したseamAngles/seamNoSide編集UIのうち、
-// 側面画像利用(seamAngles/seamNoSide)は2026-07-10に「設定値」タブへ
-// renderSeamSidePanel()として復活させた(全身は部位グループ別・アクセサリーは
-// 個別、既定は「使わない」)。継ぎ目の平滑化回数(seamSmoothIters)・色の
-// ディザグラデーション幅(colorGradWidth)はcharacter_3d.html側の編集のみで
-// 引き続き足りるため、ジェネレータ側UIは復活させていない(データ自体は
-// 既定値のままgenParamsと同様buildJson()経由でintermediateパッケージへ渡す)。
 [].forEach.call(document.querySelectorAll("#viewbar .viewbtn"),b=>{
   b.onclick=()=>{
     if(!imgs[b.dataset.view]){setMsg("先に"+b.textContent+"画像を読み込んでください。");return;}
@@ -1865,7 +1799,6 @@ function wireBoneToggle(overlayId,regionId){
 wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
 buildLegend();
 renderParamsPanel();
-renderSeamSidePanel();
 $("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on"); };
 // 全パーツの色許容誤差を一括変更するスライダー。#automaskBulkRowは
 // automaskList/automaskColormapsの外側の静的markupなので、renderAutomaskTab()

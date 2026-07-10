@@ -795,7 +795,12 @@ function wireSeamBulkHtml(el){
   document.getElementById('vSeamBulkApply').onclick=()=>{
     const v=parseInt(document.getElementById('vSeamBulkVal').value,10);
     if(!isFinite(v)||v<1||v>89){ if(statusEl)statusEl.textContent='角度は1〜89の範囲で入力してください。'; return; }
-    P3D.BONES.forEach(b=>{ if(v===SEAM_DEFAULT_DEG) delete liveSeamAngles[b]; else liveSeamAngles[b]=v; });
+    // ★2026-07-10: landmark_tool.html(ジェネレータ)側の同等機能(allSeamSideKeys)
+    // はボーンだけでなくアクセサリーにも角度一括適用していたが、こちらは
+    // P3D.BONESのみが対象でアクセサリーが漏れていた(ジェネレータ側の当該UIは
+    // 単純重複のため削除し、以後はビューアのこのパネルが唯一の実装になったため
+    // 差異を解消する)。
+    P3D.BONES.concat(accKeys).forEach(b=>{ if(v===SEAM_DEFAULT_DEG) delete liveSeamAngles[b]; else liveSeamAngles[b]=v; });
     renderSeamPanel();
     scheduleGenRecompute();
   };
@@ -1072,7 +1077,32 @@ document.getElementById('download').onclick=()=>{
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 };
-document.getElementById('backToLandmark').onclick=()=>{ location.href='landmark_tool.html'; };
+// ★2026-07-10: ジェネレータ→「モデル生成」→ビューアでライブ編集(丸み/
+// 継ぎ目設定等)→「戻る」の往復で、ビューア側の編集結果がジェネレータの
+// 自動保存セッションに反映されず消えてしまっていた(ユーザー指摘)。
+// currentPackage.landmarks_json(ジェネレータのbuildJson()スナップショット)に
+// ライブ値を上書きしたものを、ジェネレータと同じlocalStorageキー
+// (P3D.sessionStorageKey、js/common.js)へ書き戻してから遷移する。
+// currentPackageが無い(直接ビューアを開いた/ビューア専用サンプルを見ている
+// 等、ジェネレータ側に対応するセッションが元々存在しないケース)場合は何もしない。
+function saveLiveSettingsToGeneratorSession(){
+  if(!currentPackage || !currentPackage.landmarks_json || !currentPackage.session_mode) return;
+  try{
+    const json=Object.assign({}, currentPackage.landmarks_json, {
+      gen_params: Object.assign({}, liveGP),
+      seam_angles: Object.assign({}, liveSeamAngles),
+      seam_no_side: Object.assign({}, liveSeamNoSide),
+      seam_smooth_iters: liveSeamSmoothIters,
+      color_grad_width: liveColorGradWidth,
+    });
+    const key=P3D.sessionStorageKey(currentPackage.session_mode, currentPackage.session_sample_id);
+    localStorage.setItem(key, JSON.stringify(json));
+  }catch(e){ console.warn("ジェネレータセッションへの書き戻しに失敗しました:", e); }
+}
+document.getElementById('backToLandmark').onclick=()=>{
+  saveLiveSettingsToGeneratorSession();
+  location.href='landmark_tool.html';
+};
 document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
 document.getElementById('barToggle').onclick=()=>{
   const bar=document.getElementById('bar'), open=bar.classList.toggle('show');

@@ -109,6 +109,7 @@ function stageAccessories(opts){
     var name = acc.name || 'accessory';
     var mode = acc.mode || 'rigid';
     var bones = acc.bones || [];
+    var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : gp.psq_acc;
     // accessoryはマスク(mask[view].bbox、色分けマップ由来・自動抽出のみ)形式
     // だけを持つ(多角形(regions)形式は2026-07-09に廃止)。実際の3D彫刻は
     // bbox範囲内のアルファ検出(carveRegion)で行われる。
@@ -188,10 +189,13 @@ function stageAccessories(opts){
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
       vox: gp.acc_vox,
       // アクセサリーは頭/胴体/脚のような部位分けが無いため、部位別指数は
-      // 全て同じ値(psq_acc)を渡す(neckY/hipsYを渡さないのでcarveRegion側は
-      // 常にpsqTorso=psq_accを使う)。
-      psqHead: gp.psq_acc, psqTorso: gp.psq_acc, psqLegs: gp.psq_acc,
-      psqArms: gp.psq_acc, psqHands: gp.psq_acc,
+      // 全て同じ値を渡す(neckY/hipsYを渡さないのでcarveRegion側は常に
+      // psqTorso=accPsqを使う)。★2026-07-10: 従来は全アクセサリー共通の
+      // gp.psq_accしか無かったが、アクセサリーごとに理想的な丸みが異なる
+      // (硬いアクセサリー/柔らかい布等)ため、acc.psq(個別設定、未設定なら
+      // null)があればそちらを優先する。
+      psqHead: accPsq, psqTorso: accPsq, psqLegs: accPsq,
+      psqArms: accPsq, psqHands: accPsq,
       trackGap: gp.track_gap, trackWin: gp.track_win,
       // ★フェーズ1: bodyと同様、平滑化前の生メッシュをキャッシュするため
       // carveRegion自体には常にsmoothIters:0を渡し、平滑化はfinishAccessoryMesh
@@ -239,7 +243,7 @@ P3D.stageAccessories = stageAccessories;
 // 再彫刻なしに平滑化/間引きパラメータを反映できる(フェーズ2で使用)。
 function finishAccessoryMesh(rawV, rawF, gp){
   var V=rawV, F=rawF;
-  if(gp.acc_smooth_iters>0) V=P3D.laplacianSmooth(V,F,gp.acc_smooth_iters);
+  if(gp.acc_smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.acc_smooth_iters);
   if(gp.acc_decimate){
     var dec=P3D.decimateMesh(V,F,gp.acc_target_verts);
     V=dec.V; F=dec.F;
