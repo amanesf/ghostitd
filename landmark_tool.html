@@ -423,35 +423,19 @@ function normalizeSeamSideDefaults(){
     if(!(key in seamNoSide)) seamNoSide[key]=true;
   });
 }
-let seamSmoothIters=8; // 境界線平滑化の反復回数(atlas.jsのSEAM_DEFAULT_SMOOTHと一致)
-const SEAM_DEFAULT_SMOOTH=8;
+// ★2026-07-10: 素材(正面/側面/背面画像)の精度が高ければテクスチャ継ぎ目の
+// 平滑化は不要という判断により、既定を8→0(平滑化なし)に変更(ユーザー指摘)。
+// js/atlas.jsのopts.seamSmoothIters未指定時フォールバックも合わせて変更した。
+let seamSmoothIters=0; // 境界線平滑化の反復回数(atlas.jsのフォールバック既定と一致)
+const SEAM_DEFAULT_SMOOTH=0;
 let colorGradWidth=0; // 色のディザ(擬似)グラデーション幅(既定0=無効)
 const COLOR_GRAD_DEFAULT=0;
-// モデル生成パラメータ(js/common.jsのDEFAULT_GEN_PARAMSと値を一致させる。
-// ブラウザ版はvox解像度・間引きライブラリの制約から、Python版より粗い既定値に
-// している。詳細はjs/common.jsのコメント参照)。パラメータタブで数値/
-// チェックボックスを操作するとgenParamsが更新され、書き出したlandmarks_ai.json
-// のgen_paramsに入る。
-const DEFAULT_GEN_PARAMS={
-  body_vox:0.003, acc_vox:0.003,
-  body_decimate:true, body_target_verts:3000,
-  acc_decimate:true, acc_target_verts:1000,
-  psq_head:2.0, psq_torso:2.2, psq_legs:2.2, psq_arms:2.0, psq_hands:3.0, psq_acc:2.2,
-  track_gap:6, track_win:1,
-  body_smooth_iters:0, acc_smooth_iters:0,
-  arm_circle:true, arm_tol:0.06, arm_max_hw:0.2,
-  hand_extrude:true, hand_depth:0.01, hand_max_hw:0.1, hand_len:0.25,
-  alpha_dilate:9,
-  // ★2026-07-09: 全身のシルエットも色分けマップ+色許容誤差方式に統一した
-  // ため、body(体=黒)の色許容誤差はここに持つ(自動マスクタブの「全身」
-  // スライダーで編集する、accessoryのcolorToleranceと同じ意味の値)。
-  body_color_tolerance:12,
-  kb_per_face:200,
-  back_offset_x:0, back_offset_y:0,
-  side_offset_x:0, side_offset_y:0,
-  leftside_offset_x:0, leftside_offset_y:0,
-  rigid_soft_width:0,
-};
+// ★2026-07-10: 以前はjs/common.jsのP3D.DEFAULT_GEN_PARAMSと値を「一致させる」
+// 前提で、ここに丸ごとコピーした独自定義を持っていた。rigid_soft_widthが
+// こちらにしか存在しないという食い違いが生じていた(ユーザー指摘により発覚)ため、
+// P3D.DEFAULT_GEN_PARAMSを直接参照する形に統一し、定義元を1箇所にした
+// (ブラウザ版の既定値そのものの説明はjs/common.jsのコメント参照)。
+const DEFAULT_GEN_PARAMS=P3D.DEFAULT_GEN_PARAMS;
 // group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
 // (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
 const PARAM_META=[

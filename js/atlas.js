@@ -99,7 +99,7 @@ P3D.buildAtlasCanvas = buildAtlasCanvas;
  *   seamAngles: {boneName:deg}
  *   seamNoSide: {boneName:true} (境目タブの「側面画像を使う」チェックを外したパーツ。
  *     "acc:"+名前キーでアクセサリー個別指定も可)
- *   seamSmoothIters: 境界線平滑化の反復回数(既定8、0で平滑化なし=法線そのままの
+ *   seamSmoothIters: 境界線平滑化の反復回数(既定0=平滑化なし=法線そのままの
  *     ギザギザ境界、大きくするほど境界線が滑らかな曲線になる)
  *   colorGradWidth: 色グラデーション(境界ぼかし)の幅(既定0=無効)。0より大きいと
  *     境目付近の帯の中で、実際にfront/side(および正面/背面)の写真ピクセルを
@@ -217,7 +217,7 @@ function stageAtlasBake(opts){
   var seamNoSideArr = loadSeamNoSide(opts.seamNoSide);
   var accSeamNoSide = loadAccessorySeamNoSide(opts.seamNoSide);
   var seamSmoothIters = (opts.seamSmoothIters!==undefined && opts.seamSmoothIters!==null)
-    ? Math.max(0, Math.min(30, Number(opts.seamSmoothIters))) : 8;
+    ? Math.max(0, Math.min(30, Number(opts.seamSmoothIters))) : 0;
   // 色グラデーション(境界ぼかし)の幅(既定0=無効)。0より大きいと、境目付近の
   // 帯の中でfront/side(および正面/背面)の実ピクセル色を角度ベースの重みで
   // 数値的に混ぜてfront/back/sideキャンバスへ焼き込む(下のblendOnブロック)。

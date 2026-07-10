@@ -33,6 +33,13 @@ var DEFAULT_GEN_PARAMS = {
   psq_head: 2.0, psq_torso: 2.2, psq_legs: 2.2, psq_arms: 2.0, psq_hands: 3.0, psq_acc: 2.2,
   track_gap: 6, track_win: 1,
   body_smooth_iters: 0, acc_smooth_iters: 0,
+  // ★2026-07-10: landmark_tool.htmlは以前このオブジェクトを丸ごとコピーした
+  // 独自定義を持っており(「値を一致させる」というコメントで手動同期の前提に
+  // なっていた)、そちらにだけrigid_soft_widthが存在しこちらには無いという
+  // 食い違いが生じていた(ユーザー指摘により発覚)。landmark_tool.htmlは
+  // このP3D.DEFAULT_GEN_PARAMSを直接参照する形に統一したため、ここが唯一の
+  // 定義元になる。
+  rigid_soft_width: 0,
   arm_circle: true, arm_tol: 0.06, arm_max_hw: 0.2,
   hand_extrude: true, hand_depth: 0.01, hand_max_hw: 0.1, hand_len: 0.25,
   alpha_dilate: 9,
