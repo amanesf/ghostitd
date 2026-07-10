@@ -73,6 +73,13 @@ function stageVisualHull(opts){
     armLines: armLines, armMaxHw: gp.arm_max_hw,
     handLines: handLines.length ? handLines : null,
     handDepthHw: gp.hand_depth, handMaxHw: gp.hand_max_hw,
+    // ★2026-07-10: 全身シルエットが色分けマップの黒(体色)のみで判定される
+    // ようになったことで、マフラー/スカート等に覆われた行で体が分断され、
+    // 頭部や脚が独立した閉じたパーツとして彫られることがある。これは
+    // 正当な体のパーツなので、dropSmallFragments(js/carving.js)の既定閾値
+    // (最大成分比5%未満を削除)では消さないよう、極小ノイズだけを除去する
+    // 値まで下げる。
+    minFragFrac: 0.001,
   });
   if(!result) throw new Error("visual_hull: carving produced an empty mesh");
   var rawV=result.V, rawF=result.F;

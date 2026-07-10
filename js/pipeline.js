@@ -123,14 +123,13 @@ async function runCarvingStages(state, report){
     rgbaFull[v] = id.data;
     sizes[v] = {w:w,h:h};
   });
-  // ★2026-07-09: 全身のシルエットも色分けマップから抽出するようにした
-  // (以前は素の写真に白背景しきい値(white_thr)を掛けていた)。ただし
-  // 「体色(黒)と一致する画素だけを体とみなす」方式にすると、マフラーが
-  // 首を・スカートが腰を覆う行では体色の画素が無くなり、visual hullが
-  // 頭部/脚を胴体から浮いた別パーツとして彫ってしまうバグがあった(P3D.
-  // loadAlphaFromColormap参照)。色分けマップは元々「背景=白、それ以外は
-  // キャラクター」という前提で作られているため、体のシルエットも
-  // 「白でなければ体」という判定(旧white_thr方式と同じ考え方)で抽出する。
+  // ★2026-07-09/10: 全身のシルエットも色分けマップから抽出するようにした
+  // (以前は素の写真に白背景しきい値(white_thr)を掛けていた)。体色(黒)と
+  // 一致する画素だけを体とみなす方式(P3D.loadAlphaFromColormap参照)のため、
+  // マフラーが首を・スカートが腰を覆う行では体シルエットが分断され、
+  // visual hullが頭部/脚を胴体から独立した閉曲面として彫ることがあるが、
+  // これは許容する(js/visual_hull.jsのminFragFrac、js/carving.jsの
+  // dropSmallFragments/computeNormalsFixWinding参照)。
   views.forEach(function(v){
     var cm = state.colormaps && state.colormaps[v];
     if(!cm) throw new Error("色分けマップ("+v+")が見つかりません。front/side/backの3面とも色分けマップが必要です(ゴーストスキャナーで生成/アップロードしてから引き継いでください)。");

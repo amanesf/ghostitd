@@ -309,49 +309,24 @@ function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAre
 }
 P3D.extractMaskFromColormap = extractMaskFromColormap;
 
-// ---- 体(全身)のシルエット抽出: 色分けマップの「白背景でない領域」方式 ----
-// ★2026-07-09: 当初は体(色分けマップ上は黒)をaccessoryと同じ「対象色との
-// 色距離」で抽出していたが、マフラーが首を・スカートが腰を覆う等、体の上に
-// アクセサリーが重なる場所では、その行の画素が体色(黒)と一致しなくなり、
-// visual hull(全身の輪郭カービング)が行単位で連続性を追えず、頭部が胴体から、
-// 脚が腰から浮いて分離するバグを引き起こした(旧来のwhite_thr方式では
-// 「白でなければ全て体」という判定だったため、体の上に重なるアクセサリーの
-// 画素もそのまま体のシルエット測定に使え、この問題が起きなかった)。
-// 色分けマップは元々「背景=白、それ以外=キャラクター」という前提で作られて
-// いるため、体のシルエットも同じ考え方(白でなければ体)で抽出するのが正しい。
-// これはwhiteBackgroundMask(旧)と同じロジックだが、写真ではなくノイズの
-// 少ない色分けマップに対して行うため、しきい値ではなく色許容誤差
-// (白との色距離)で判定する。
-// ctx,w,h: 色分けマップが描画済みのcanvas context、toleranceOpt: 白との
-// 色許容誤差(既定40。大きくするほど淡い色も背景とみなされやすくなる)。
+// ---- 体(全身)のシルエット抽出: 色分けマップの「黒(体色)」方式 ----
+// ★2026-07-09: 一度は「白背景でなければ全て体」(白との色距離)方式にしていた
+// (マフラーが首を・スカートが腰を覆う行でも体シルエットが途切れないように
+// するため)。しかしこの方式だと体の彫刻(visual hull)がアクセサリーの
+// 見た目の幅まで体として彫ってしまい(体がスカート/マフラーの形に膨らむ)、
+// 生成モデルにおいて全身がアクセサリー領域を含んだ不自然な形状になる不具合が
+// あった。
+// ★2026-07-10: 体は色分けマップの黒(体色)のみと一致する画素だけを対象にする
+// 方式に戻した。マフラー/スカートで覆われた行では体シルエットが途切れ、
+// visual hullが頭部/脚を独立した閉曲面として彫ることがあるが、この分断自体は
+// 許容する(js/carving.jsのdropSmallFragments/computeNormalsFixWindingを
+// 連結成分単位で処理するよう修正済み。js/visual_hull.jsのminFragFrac参照)。
+// ctx,w,h: 色分けマップが描画済みのcanvas context、toleranceOpt: 黒との
+// 色許容誤差(既定12)。
 // 戻り値: Uint8Array(w*h)、1=体のシルエット(穴埋め・ノイズ除去済み)。
 function loadAlphaFromColormap(ctx, w, h, toleranceOpt){
-  var passable = colorRegionRawMask(ctx, w, h, "#ffffff", toleranceOpt);
-  var w_ = w, h_ = h, n = w_*h_;
-  // 外周(画像の縁)に連結したpassable(白に近い)領域だけを背景とする
-  // (whiteBackgroundMaskと同じBFS。内部の白い衣装等を誤って背景扱いしない)。
-  var bg = new Uint8Array(n);
-  var visited = new Uint8Array(n);
-  var stack = [];
-  function pushIfPassable(idx){ if(!visited[idx] && passable[idx]){ visited[idx]=1; stack.push(idx); } }
-  for(var x=0;x<w_;x++){ pushIfPassable(x); pushIfPassable((h_-1)*w_+x); }
-  for(var y=0;y<h_;y++){ pushIfPassable(y*w_); pushIfPassable(y*w_+(w_-1)); }
-  while(stack.length){
-    var idx=stack.pop();
-    bg[idx]=1;
-    var xx=idx%w_, yy=(idx/w_)|0;
-    if(xx>0) pushIfPassable(idx-1);
-    if(xx<w_-1) pushIfPassable(idx+1);
-    if(yy>0) pushIfPassable(idx-w_);
-    if(yy<h_-1) pushIfPassable(idx+w_);
-    if(xx>0&&yy>0) pushIfPassable(idx-w_-1);
-    if(xx<w_-1&&yy>0) pushIfPassable(idx-w_+1);
-    if(xx>0&&yy<h_-1) pushIfPassable(idx+w_-1);
-    if(xx<w_-1&&yy<h_-1) pushIfPassable(idx+w_+1);
-  }
-  var alpha = new Uint8Array(n);
-  for(var i=0;i<n;i++) alpha[i] = bg[i] ? 0 : 1;
-  alpha = significantComponentsMask(alpha, w, h);
+  var raw = colorRegionRawMask(ctx, w, h, "#000000", toleranceOpt);
+  var alpha = significantComponentsMask(raw, w, h);
   alpha = fillHoles(alpha, w, h);
   return alpha;
 }

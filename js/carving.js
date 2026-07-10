@@ -261,51 +261,61 @@ function laplacianSmooth(V, F, iters, alpha, beta){
 P3D.laplacianSmooth = laplacianSmooth;
 
 // 面法線から頂点法線を再計算し、符号付き体積で外向きか判定して巻きを補正する。
+// ★2026-07-10: 全身シルエットの黒(体色)一致判定により、体が複数の独立した
+// 閉曲面(頭部/胴体/脚等)に分かれることがある(js/pipeline.js/js/common.js
+// のloadAlphaFromColormap参照)。以前は符号付き体積をメッシュ全体で1回だけ
+// 計算していたため、最大の成分(胴体)の符号に引きずられ、marching cubesが
+// たまたま逆巻きで生成した小さい成分(頭部等)の法線が直らないまま裏返り、
+// バックフェイスカリングでその部分が透けて見える(または消えて見える)
+// 不具合があった。連結成分(面の頂点共有によるunion-find)ごとに符号付き
+// 体積を判定し、成分単位で巻きを補正する。
 function computeNormalsFixWinding(V, F){
-  function calc(F){
-    var n=V.length/3, nf=F.length/3;
-    var Nv=new Float32Array(n*3);
-    for(var f=0;f<nf;f++){
-      var ia=F[f*3],ib=F[f*3+1],ic=F[f*3+2];
-      var ax=V[ia*3],ay=V[ia*3+1],az=V[ia*3+2];
-      var bx=V[ib*3],by=V[ib*3+1],bz=V[ib*3+2];
-      var cx=V[ic*3],cy=V[ic*3+1],cz=V[ic*3+2];
-      var ux=bx-ax, uy=by-ay, uz=bz-az;
-      var wx=cx-ax, wy=cy-ay, wz=cz-az;
-      var nx=uy*wz-uz*wy, ny=uz*wx-ux*wz, nz=ux*wy-uy*wx;
-      Nv[ia*3]+=nx;Nv[ia*3+1]+=ny;Nv[ia*3+2]+=nz;
-      Nv[ib*3]+=nx;Nv[ib*3+1]+=ny;Nv[ib*3+2]+=nz;
-      Nv[ic*3]+=nx;Nv[ic*3+1]+=ny;Nv[ic*3+2]+=nz;
-    }
-    for(var v=0;v<n;v++){
-      var x=Nv[v*3],y=Nv[v*3+1],z=Nv[v*3+2];
-      var len=Math.sqrt(x*x+y*y+z*z)+1e-9;
-      Nv[v*3]=x/len;Nv[v*3+1]=y/len;Nv[v*3+2]=z/len;
-    }
-    return Nv;
+  var n=V.length/3, nf=F.length/3;
+  function faceCross(ia,ib,ic){
+    var ax=V[ia*3],ay=V[ia*3+1],az=V[ia*3+2];
+    var bx=V[ib*3],by=V[ib*3+1],bz=V[ib*3+2];
+    var cx=V[ic*3],cy=V[ic*3+1],cz=V[ic*3+2];
+    var ux=bx-ax, uy=by-ay, uz=bz-az;
+    var wx=cx-ax, wy=cy-ay, wz=cz-az;
+    return { nx:uy*wz-uz*wy, ny:uz*wx-ux*wz, nz:ux*wy-uy*wx, ax:ax,ay:ay,az:az, bx:bx,by:by,bz:bz, cx:cx,cy:cy,cz:cz };
   }
-  function signedVolume(F){
-    var nf=F.length/3, vol=0;
-    for(var f=0;f<nf;f++){
-      var ia=F[f*3],ib=F[f*3+1],ic=F[f*3+2];
-      var ax=V[ia*3],ay=V[ia*3+1],az=V[ia*3+2];
-      var bx=V[ib*3],by=V[ib*3+1],bz=V[ib*3+2];
-      var cx=V[ic*3],cy=V[ic*3+1],cz=V[ic*3+2];
-      var cxv=by*cz-bz*cy, cyv=bz*cx-bx*cz, czv=bx*cy-by*cx;
-      vol += ax*cxv+ay*cyv+az*czv;
-    }
-    return vol/6.0;
+  // 連結成分ごとにfaceインデックスをグルーピング(頂点共有ベース、union-find)。
+  var parent=new Int32Array(n); for(var i=0;i<n;i++)parent[i]=i;
+  function find(x){ while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; }
+  function union(a,b){ var ra=find(a),rb=find(b); if(ra!==rb) parent[ra]=rb; }
+  for(var f0=0;f0<nf;f0++){ union(F[f0*3],F[f0*3+1]); union(F[f0*3+1],F[f0*3+2]); }
+  var compOfFace=new Int32Array(nf);
+  var volOfComp=new Map();
+  for(var f1=0;f1<nf;f1++){
+    var root=find(F[f1*3]);
+    compOfFace[f1]=root;
+    var c=faceCross(F[f1*3],F[f1*3+1],F[f1*3+2]);
+    var cxv=c.by*c.cz-c.bz*c.cy, cyv=c.bz*c.cx-c.bx*c.cz, czv=c.bx*c.cy-c.by*c.cx;
+    var contrib=(c.ax*cxv+c.ay*cyv+c.az*czv)/6.0;
+    volOfComp.set(root, (volOfComp.get(root)||0)+contrib);
   }
-  var Nv=calc(F);
-  var vol=signedVolume(F);
-  if(vol<0){
-    var nf=F.length/3;
-    var F2=new Uint32Array(F.length);
-    for(var f=0;f<nf;f++){ F2[f*3]=F[f*3]; F2[f*3+1]=F[f*3+2]; F2[f*3+2]=F[f*3+1]; }
-    F=F2;
-    Nv=calc(F);
+  // 成分の符号付き体積が負(=内向き巻き)なら、その成分に属する面だけ巻きを反転する。
+  var F2=new Uint32Array(F.length);
+  for(var f2=0;f2<nf;f2++){
+    var root2=compOfFace[f2];
+    var flip=(volOfComp.get(root2)||0)<0;
+    if(flip){ F2[f2*3]=F[f2*3]; F2[f2*3+1]=F[f2*3+2]; F2[f2*3+2]=F[f2*3+1]; }
+    else{ F2[f2*3]=F[f2*3]; F2[f2*3+1]=F[f2*3+1]; F2[f2*3+2]=F[f2*3+2]; }
   }
-  return {N:Nv, F:F};
+  var Nv=new Float32Array(n*3);
+  for(var f3=0;f3<nf;f3++){
+    var ia=F2[f3*3],ib=F2[f3*3+1],ic=F2[f3*3+2];
+    var c2=faceCross(ia,ib,ic);
+    Nv[ia*3]+=c2.nx;Nv[ia*3+1]+=c2.ny;Nv[ia*3+2]+=c2.nz;
+    Nv[ib*3]+=c2.nx;Nv[ib*3+1]+=c2.ny;Nv[ib*3+2]+=c2.nz;
+    Nv[ic*3]+=c2.nx;Nv[ic*3+1]+=c2.ny;Nv[ic*3+2]+=c2.nz;
+  }
+  for(var v=0;v<n;v++){
+    var x=Nv[v*3],y=Nv[v*3+1],z=Nv[v*3+2];
+    var len=Math.sqrt(x*x+y*y+z*z)+1e-9;
+    Nv[v*3]=x/len;Nv[v*3+1]=y/len;Nv[v*3+2]=z/len;
+  }
+  return {N:Nv, F:F2};
 }
 P3D.computeNormalsFixWinding = computeNormalsFixWinding;
 
@@ -691,7 +701,10 @@ function carveRegion(opts){
     V[vi*3+2] = izF/(nz-1)*(mzMax-mzMin)+mzMin;
   }
   var F=mc.faces;
-  var dropped=dropSmallFragments(V,F);
+  // ★2026-07-10: opts.minFragFracで呼び出し側(体の彫刻)から閾値を下げられる
+  // ようにした(js/visual_hull.js参照)。未指定時はdropSmallFragmentsの既定値
+  // (0.05)のまま。
+  var dropped=dropSmallFragments(V,F,opts.minFragFrac);
   V=dropped.V; F=dropped.F;
 
   if(smoothIters>0) V=laplacianSmooth(V,F,smoothIters);
