@@ -35,13 +35,17 @@ const os = require("os");
 const { chromium } = require("playwright");
 const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 
+// ★2026-07-10: ジェネレータに側面画像のテクスチャ利用設定UIを復活させ、
+// 既定値を「側面画像を使わない」に変更した(従来はUIが無い間、暗黙的に
+// 「全パーツ側面を使う」がデフォルト挙動だった)。この既定値変更で継ぎ目
+// テクスチャの焼き込み結果が変わるため、ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 470072,
-  sha256: "0e4d1e5c770849abd3ebabea08084978488044ed0133f99134ce238fb1b3ff1d",
+  byteLength: 470800,
+  sha256: "fca0d04fb57f7b02f16ac368f858f0ff68d0cfcf413aec5490f95f9cf9816bff",
 };
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 815312,
-  sha256: "f581b946de56d2a9aac3ee059c430979e51f7c7fb8c1499f50060bfd0250e953",
+  byteLength: 815592,
+  sha256: "1c423d6bf8349449203a9c3fd35634cbbe20ef2bb73fe71f11484ebf1328bd94",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
