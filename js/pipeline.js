@@ -137,10 +137,48 @@ async function runCarvingStages(state, report){
   });
   await tick();
 
+  // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)は「体(alphaFull、色分け
+  // マップの黒だけ)」を前景とみなし、それ以外(スカート/マフラー/髪等の
+  // アクセサリー領域は体とは別の色で塗られているため体シルエットから見れば
+  // 「背景」)を周囲の最近傍色で問答無用に上書きしてしまっていた。
+  // その結果、アクセサリー自体の3D形状の切り抜きはアクセサリー専用マスクで
+  // 正しく行われるのに、テクスチャの元になるこの共有キャンバス上では
+  // アクセサリーの実際の絵柄が上着の裾や太もも等・隣接する体領域の色で
+  // 塗り潰されて消え、アトラスに焼き込んだ際に縞状の破綻に見えていた
+  // (ユーザー指摘により発覚)。bleedの前景判定だけは「体∪全アクセサリー」の
+  // 和集合にし、アクセサリー領域の実ピクセルも保護対象に含める(3D彫刻用の
+  // alphaFull自体は体オンリーのまま変更しない=体がアクセサリー形状に
+  // 膨らむ不具合を再発させない)。
+  var bleedFgAlpha={};
+  views.forEach(function(v){ bleedFgAlpha[v]=Uint8Array.from(alphaFull[v]); });
+  if(state.accessories && state.accessories.length){
+    var earlyMaskLoads=[];
+    state.accessories.forEach(function(a){
+      if(!a.mask) return;
+      ["front","back","side"].forEach(function(v){
+        var m=a.mask[v];
+        if(!m || !m.maskDataUrl || m.alpha) return;
+        var sz = (v==='side') ? sizes.side : sizes.front;
+        earlyMaskLoads.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, sz.w, sz.h).then(function(alpha){ m.alpha=alpha; }));
+      });
+    });
+    if(earlyMaskLoads.length) await Promise.all(earlyMaskLoads);
+    state.accessories.forEach(function(a){
+      if(!a.mask) return;
+      ["front","back","side"].forEach(function(v){
+        var m=a.mask[v];
+        if(!m || !m.alpha) return;
+        var fg=bleedFgAlpha[v];
+        for(var i=0;i<fg.length;i++){ if(m.alpha[i]) fg[i]=1; }
+      });
+    });
+  }
+  await tick();
+
   report("bleed(縁の色にじみ)");
   var bledRgba={};
   views.forEach(function(v){
-    bledRgba[v] = P3D.bleedEdges(rgbaFull[v], sizes[v].w, sizes[v].h, alphaFull[v], gp.alpha_dilate);
+    bledRgba[v] = P3D.bleedEdges(rgbaFull[v], sizes[v].w, sizes[v].h, bleedFgAlpha[v], gp.alpha_dilate);
   });
   function toCanvas(rgba,w,h){
     var c=document.createElement('canvas'); c.width=w; c.height=h;

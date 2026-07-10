@@ -43,9 +43,16 @@ const EXPECTED_BODY_ONLY = {
   byteLength: 470800,
   sha256: "fca0d04fb57f7b02f16ac368f858f0ff68d0cfcf413aec5490f95f9cf9816bff",
 };
+// ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
+// みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
+// を「背景」として周囲の色で上書きしていたため、アクセサリーの実際の絵柄が
+// 消えて縞状に破綻していた(js/pipeline.js参照)。bleedの前景判定を「体∪全
+// アクセサリー」の和集合に修正したことでwith-accessory側のテクスチャ焼き込み
+// 結果が変わるため、ハッシュを更新した(body-onlyはアクセサリーが無いため
+// 影響を受けず不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 815592,
-  sha256: "1c423d6bf8349449203a9c3fd35634cbbe20ef2bb73fe71f11484ebf1328bd94",
+  byteLength: 865844,
+  sha256: "bf2b9ef04cbd372934512f85d17ee986f4a048491a7e9a2b496f6138ec250c9a",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
