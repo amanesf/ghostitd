@@ -19,10 +19,24 @@ async function testSampleDropdown(server, browser) {
 async function testSampleLoadAndMaterialToggles(server, browser) {
   const { page, errors } = await openPage(browser, server.url + "/character_3d.html");
   await page.click("#modeSampleBtn b");
-  await page.waitForTimeout(2000);
+  // ★2026-07-10: 固定sleep(2000ms)だと、CPUが混み合った際にモデル読み込みが
+  // 2秒を超えて完了しないケースがありflakyだった。実際の完了条件をポーリング
+  // する方式に変更。ただしtryAutoLoad()はモデル本体のloadGLB完了(dropに
+  // hideが付く)→その後に別途fetchするmotion_*.glb群のloadGLB(animSelへの
+  // 追加)という2段階の非同期処理なので、両方を別々に待つ必要がある
+  // (dropのhideだけを待つとmotionOptionsがまだ0〜1件のまま次のassertに
+  // 進んでしまい、別の意味でflakyになる)。
+  await page.waitForFunction(
+    () => document.getElementById("drop").classList.contains("hide"),
+    { timeout: 20000 }
+  );
   const dropHidden = await page.$eval("#drop", (el) => el.classList.contains("hide"));
   assert.ok(dropHidden, "sample model load should hide the drop/file-picker screen");
 
+  await page.waitForFunction(
+    () => document.querySelectorAll("#animSel option").length > 1,
+    { timeout: 20000 }
+  );
   const motionOptions = await page.$$eval("#animSel option", (els) => els.map((e) => e.textContent));
   assert.ok(motionOptions.length > 1, "motion dropdown should be populated (setupMotionDropdown)");
 

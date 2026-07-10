@@ -33,7 +33,12 @@ async function testJsonModeLoadsEditor(server, browser) {
   const jsonPath = path.join(require("./lib/testkit").REPO_ROOT, "landmarks_ai_2_embedded.json");
   await page.click("#modeJsonBtn b");
   await page.setInputFiles("#jsonFile", jsonPath);
-  await page.waitForTimeout(1500);
+  // ★2026-07-10: 固定sleepだと並列実行時のCPU競合でflakyになるため、実際の
+  // 完了条件(runAnalyze()がeditorからhiddenを外す)をポーリングする方式に変更。
+  await page.waitForFunction(
+    () => !document.getElementById("editor").classList.contains("hidden"),
+    { timeout: 20000 }
+  );
 
   editorHidden = await page.$eval("#editor", (el) => el.classList.contains("hidden"));
   assert.ok(!editorHidden, "editor must show once an image-embedded JSON is loaded");
@@ -47,7 +52,10 @@ async function testJsonModeLoadsEditor(server, browser) {
 async function testEditorTabsAndOverlays(server, browser) {
   const { page, errors } = await openPage(browser, server.url + "/landmark_tool.html");
   await page.click("#modeSampleBtn b");
-  await page.waitForTimeout(1500);
+  await page.waitForFunction(
+    () => !document.getElementById("editor").classList.contains("hidden"),
+    { timeout: 20000 }
+  );
   const editorVisible = await page.$eval("#editor", (el) => !el.classList.contains("hidden"));
   assert.ok(editorVisible, "sample mode should reach the editor screen");
 

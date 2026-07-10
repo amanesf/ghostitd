@@ -18,7 +18,14 @@ async function testSampleDropdown(server, browser) {
 async function testMovementAndPip(server, browser) {
   const { page, errors } = await openPage(browser, server.url + "/controller.html");
   await page.click("#modeSampleBtn b");
-  await page.waitForTimeout(2000);
+  // ★2026-07-10: 固定sleep(2000ms)は、テストを並列実行してCPUが競合すると
+  // モデル読み込みが2秒を超えて完了せずflakyになったため、実際の完了条件
+  // (resetCharacterUiState()がselfieBoxにvisibleを付与する)をポーリングする
+  // 方式に変更した(並列化してもしなくても、固定sleepより正しく速い)。
+  await page.waitForFunction(
+    () => document.getElementById("selfieBox").classList.contains("visible"),
+    { timeout: 20000 }
+  );
 
   const pipVisible = await page.$eval("#selfieBox", (el) => el.classList.contains("visible"));
   assert.ok(pipVisible, "PIP cameras should be visible once a character model is loaded");
