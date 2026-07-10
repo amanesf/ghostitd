@@ -15,7 +15,13 @@ async function testSampleDropdown(server, browser) {
   await page.close();
 }
 
-async function testMovementAndPip(server, browser) {
+// ★2026-07-10: 元は「移動+PIP+懐中電灯」と「ノイズ/設定パネル」を別々の
+// サブテストにしており、それぞれ独立にページを開いてキャラクターモデル一式
+// (model.glb+モーションclip複数本)を読み込み直していた。どちらもモデルの
+// 状態には依存しない独立した操作なので、モデル読み込みを1回に統合して
+// 所要時間を短縮する(GPU無しのヘッドレス環境ではモデル読み込み自体が
+// 相対的に重く、これがcontroller-ui.test.js全体の所要時間の大半を占めていた)。
+async function testMovementPipAndConfig(server, browser) {
   const { page, errors } = await openPage(browser, server.url + "/controller.html");
   await page.click("#modeSampleBtn b");
   // ★2026-07-10: 固定sleep(2000ms)は、テストを並列実行してCPUが競合すると
@@ -43,15 +49,6 @@ async function testMovementAndPip(server, browser) {
   await page.waitForTimeout(200);
   await page.click("#flashToggle");
   await page.waitForTimeout(200);
-
-  assert.deepStrictEqual(errors, []);
-  await page.close();
-}
-
-async function testNoiseToggleAndConfig(server, browser) {
-  const { page, errors } = await openPage(browser, server.url + "/controller.html");
-  await page.click("#modeSampleBtn b");
-  await page.waitForTimeout(1500);
 
   await page.click("#configBtn");
   await page.waitForTimeout(200);
@@ -119,8 +116,7 @@ async function run() {
   const browser = await chromium.launch();
   try {
     await testSampleDropdown(server, browser);
-    await testMovementAndPip(server, browser);
-    await testNoiseToggleAndConfig(server, browser);
+    await testMovementPipAndConfig(server, browser);
     await testWebglContextLossRecovery(server);
   } finally {
     await browser.close();
