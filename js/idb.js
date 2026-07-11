@@ -23,8 +23,13 @@ function openDb(){
 // はBlobから元のHTMLCanvasElementを復元してから返す。
 // package: {
 //   landmarks_json: object,           // buildJson()の戻り値そのもの(元JSON全体)
-//   raw_body: {V:Float32Array, F:Uint32Array},
-//   raw_accessories: [{name,mode,bones,V:Float32Array,F:Uint32Array}, ...],
+//   raw_unified: {V:Float32Array, F:Uint32Array, owner:Int32Array},
+//     // ★2026-07-11: 体+全アクセサリーを統合彫刻した直後・間引き/平滑化前の
+//     // 継ぎ目のない1枚のメッシュ(以前はraw_body/raw_accessoriesという分割
+//     // 済みの形だったが、パーツ分割を間引き・平滑化の後まで遅らせるよう
+//     // 変更したため統合形のまま保持する。ownerは頂点ごとの所属パーツID)。
+//   parts_meta: [{ownerId,name,mode,bones}, ...],
+//     // ownerId=0が体、1以降が各アクセサリー(raw_unified.ownerと対応)。
 //   bled_canvases: {front,back,side}, // 保存時はHTMLCanvasElement、読み込み後もHTMLCanvasElementに復元
 //   pivots: object,
 //   calib: {SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF},

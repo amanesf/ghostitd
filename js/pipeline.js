@@ -385,43 +385,48 @@ async function runCarvingStages(state, report){
     accBuilt.map(function(a,i){ return {ownerId:i+1, opts:a.carveOpts}; }));
   var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001);
   if(!unified) throw new Error("visual_hull+accessories: carving produced an empty mesh");
-  var split = P3D.splitMeshByOwner(unified.V, unified.F, unified.owner,
-    [0].concat(accBuilt.map(function(a,i){ return i+1; })));
   console.log("  carveUnifiedRegions: total verts", unified.V.length/3, "faces", unified.F.length/3);
 
-  var body = {rawV: split[0].V, rawF: split[0].F};
-  var acc = accBuilt.length ? {
-    rawParts: accBuilt.map(function(a,i){
-      return {name:a.name, mode:a.mode, bones:a.bones, rawV:split[i+1].V, rawF:split[i+1].F};
-    }),
-  } : null;
+  // ★2026-07-11(ユーザー指摘「パーツ分割のタイミングが早すぎる」対応):
+  // 以前はここで即座にsplitMeshByOwnerしていたが、その後の間引き・平滑化を
+  // パーツごとに独立して行うと、彫刻直後はぴったり合っていた境界の頂点が
+  // 両側で別々に動いて隙間・段差になっていた。統合されたままの1枚のメッシュ
+  // (owner付き)を返し、分割は間引き・平滑化が全て終わった後(pipeline.jsの
+  // decimateStage/meshFinishStage参照)にだけ行う。
+  var partsMeta = [{ownerId:0, name:"body", mode:null, bones:null}].concat(
+    accBuilt.map(function(a,i){ return {ownerId:i+1, name:a.name, mode:a.mode, bones:a.bones}; }));
   await tick();
 
-  return {sizes:sizes, prof:prof, core:core, SCALE:SCALE, pivots:pivots, bledCanvas:bledCanvas, body:body, acc:acc};
+  return {sizes:sizes, prof:prof, core:core, SCALE:SCALE, pivots:pivots, bledCanvas:bledCanvas,
+    unified:{V:unified.V, F:unified.F, owner:unified.owner}, partsMeta:partsMeta};
 }
 
 /**
  * フェーズ1: 中間データ契約。runCarvingStages()(prep〜accessories、重い
  * marching cubesまで)だけを実行し、GLBを作らずに以下を返す:
- *   - rawBody: {V,F} (visual_hullの彫刻直後・平滑化/間引き前メッシュ)
- *   - rawAccessories: [{name,mode,bones,V,F}, ...] (アクセサリー別、平滑化/間引き前)
+ *   - rawUnified: {V,F,owner} (体+全アクセサリーを1つの共有gridで彫刻した
+ *     直後・間引き/平滑化前の継ぎ目のない1枚のメッシュ。owner=頂点ごとの
+ *     所属パーツID)
+ *   - partsMeta: [{ownerId,name,mode,bones}, ...] (ownerId=0が体、1以降が
+ *     各アクセサリー。スキニング時にownerIdでパーツへ分割するのに使う)
  *   - bledCanvases: {front,back,side} (prep+bleed済みcanvas。atlas_bakeの入力用)
  *   - pivots: スキン計算/atlas継ぎ目判定に必要な骨格ピボット(モデル座標)
  *   - calib: {SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF} (atlas_bake/finishFromIntermediateで再利用)
  * ビューア(character_3d.html)側はこの中間データ+gen_paramsの一部を使って
  * finishFromIntermediate()を呼べば、再彫刻なしにモデルを再構築できる。
+ * ★2026-07-11: 以前はrawBody/rawAccessoriesという分割済みの形で返していたが、
+ * パーツ分割は間引き・平滑化が終わった後(finishFromIntermediate内)にのみ
+ * 行うよう変更したため、ここでは統合済みのrawUnifiedをそのまま返す。
  * 戻り値: Promise<object>
  */
 async function runToIntermediate(state, onProgress){
   function report(label){ console.log("=== stage:", label, "==="); if(onProgress) onProgress(label); }
   var staged = await runCarvingStages(state, report);
-  var body=staged.body, acc=staged.acc, prof=staged.prof, core=staged.core;
+  var prof=staged.prof, core=staged.core;
 
   return {
-    rawBody: {V: body.rawV, F: body.rawF},
-    rawAccessories: (acc && acc.rawParts) ? acc.rawParts.map(function(p){
-      return {name:p.name, mode:p.mode, bones:p.bones, V:p.rawV, F:p.rawF};
-    }) : [],
+    rawUnified: staged.unified,
+    partsMeta: staged.partsMeta,
     bledCanvases: staged.bledCanvas,
     pivots: staged.pivots,
     calib: {SCALE:staged.SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF},
@@ -432,26 +437,31 @@ P3D.runToIntermediate = runToIntermediate;
 /**
  * フェーズ1/2: 中間データ(runToIntermediateの戻り値と同じ形。IndexedDBから
  * 読み込んだ場合はbledCanvasesがHTMLCanvasElementに復元済みであること)から
- * GLBを再構築する。彫刻(marching cubes)はやり直さず、rawBody/rawAccessories
- * に間引き(decimate)・平滑化(smooth_iters)・スキニング・atlas焼き込み・
- * GLB書き出しだけを適用する(フェーズ2のライブパラメータ編集の中核関数)。
+ * GLBを再構築する。彫刻(marching cubes)はやり直さず、rawUnified(体+全
+ * アクセサリー統合済み・継ぎ目なしの1枚のメッシュ)に間引き(decimate)・
+ * 平滑化(smooth_iters)・スキニング・atlas焼き込み・GLB書き出しだけを適用する
+ * (フェーズ2のライブパラメータ編集の中核関数)。
  * opts: {gp, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth}
  * 戻り値: Promise<ArrayBuffer>
  *
+ * ★2026-07-11(ユーザー指摘「パーツ分割のタイミングが早すぎる」対応):
+ * 以前はbody/各アクセサリーを彫刻直後にsplitMeshByOwnerで分割し、間引き・
+ * 平滑化をパーツごとに独立して行っていた。境界を共有する頂点が両側で別々に
+ * 動くため、彫刻直後はぴったり合っていた継ぎ目が最終的にズレて隙間になって
+ * いた。間引き・平滑化は統合されたままの1枚のメッシュに対して1回だけ行い、
+ * その後(スキニングの直前)にだけsplitMeshByOwnerでパーツへ分割するように
+ * 変更した。これに伴い、パーツごとに分かれていた間引き目標頂点数・平滑化
+ * 回数(body_target_verts/acc_target_verts、body_smooth_iters/
+ * acc_smooth_iters)は、共有トポロジーを1回で処理する以上分けようがない
+ * ため、1本の値(target_verts、smooth_iters)に統合した(ユーザー承認済み。
+ * 「髪だけ多めに平滑化」等パーツ別の強弱は失われるトレードオフ)。
+ *
  * ★フェーズ2追加課題6の対応(段階的キャッシュ): どのパラメータ層(Tier1〜3)が
  * 実際に変わったかに応じて、変化のなかった段の再計算を省略する。
- * 段の依存関係と実際の処理順(このinter._stageCacheのみで完結する話であり、
- * P3D.finishBodyMesh/finishAccessoryMesh(stageVisualHull/stageAccessories内部で
- * 平滑化→間引きの順に呼ばれる関数)には手を入れていない。ここでは
- * キャッシュを効かせるため意図的に「間引き→平滑化」の順に組み替えている
- * (間引きはTier2のみに依存させ、Tier1(平滑化回数等)だけを変えた時に
- * 間引き結果を再利用できるようにするための設計変更。数式的な最終結果は
- * 従来の「平滑化→間引き」と厳密には同一にならない可能性があるが、
- * どちらも彫刻直後の生メッシュに対する後処理であり見た目上の破綻はない):
- *   1. decimate段: body_decimate/body_target_verts/acc_decimate/acc_target_verts
- *      (Tier2)にのみ依存。rawV/rawFに対して間引きのみ適用。
- *   2. mesh_finish段(平滑化+スキニング): 1の出力 + body_smooth_iters/
- *      acc_smooth_iters/rigid_soft_width(Tier1)に依存。
+ *   1. decimate段: decimate/target_verts(Tier2)にのみ依存。統合メッシュに
+ *      間引きのみ適用(owner配列も追従)。
+ *   2. mesh_finish段(平滑化+パーツ分割+スキニング): 1の出力 + smooth_iters/
+ *      rigid_soft_width(Tier1)に依存。
  *   3. atlas_bake段: 2の出力 + seamAngles/seamNoSide/seamSmoothIters/
  *      colorGradWidth(Tier3)に依存。
  *   4. model_glb段(テクスチャ圧縮+GLB書き出し): 3の出力 + kb_per_face(Tier1)。
@@ -461,57 +471,58 @@ P3D.runToIntermediate = runToIntermediate;
  * 上流の段が再計算されれば、その下流の段も強制的に再計算する。
  */
 function decimateStage(inter, gp){
-  var bodyV=inter.raw_body.V, bodyF=inter.raw_body.F;
-  if(gp.body_decimate){
-    var d=P3D.decimateMesh(bodyV,bodyF,gp.body_target_verts);
-    bodyV=d.V; bodyF=d.F;
+  var V=inter.raw_unified.V, F=inter.raw_unified.F, owner=inter.raw_unified.owner;
+  if(gp.decimate){
+    var d=P3D.decimateMesh(V,F,gp.target_verts,owner);
+    V=d.V; F=d.F; owner=d.owner;
   }
-  var accParts=[];
-  (inter.raw_accessories||[]).forEach(function(p){
-    var V=p.V, F=p.F;
-    if(gp.acc_decimate){
-      var d=P3D.decimateMesh(V,F,gp.acc_target_verts);
-      V=d.V; F=d.F;
-    }
-    accParts.push({name:p.name, mode:p.mode, bones:p.bones, V:V, F:F});
-  });
-  return {bodyV:bodyV, bodyF:bodyF, accParts:accParts};
+  return {V:V, F:F, owner:owner};
 }
 
-function meshFinishStage(decimated, gp, pivots){
-  var V=decimated.bodyV, F=decimated.bodyF;
-  if(gp.body_smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.body_smooth_iters);
+function meshFinishStage(decimated, gp, pivots, partsMeta){
+  var V=decimated.V, F=decimated.F, owner=decimated.owner;
+  if(gp.smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.smooth_iters);
   var fw=P3D.computeNormalsFixWinding(V,F);
-  var bodyV=V, bodyF=fw.F, bodyN=fw.N;
+  F=fw.F;
+
+  // ★2026-07-11: 形状(間引き・平滑化・法線)が確定した後、ここで初めて
+  // パーツ(体/各アクセサリー)へ分割する。法線Nもowner配列と同じ頂点並びで
+  // 一緒に分割する(splitMeshByOwnerのextraVertArrays)。
+  var ownerIds=partsMeta.map(function(p){ return p.ownerId; });
+  var split=P3D.splitMeshByOwner(V, F, owner, ownerIds, {N:fw.N});
+
+  var bodyPart=split[0];
+  var bodyV=bodyPart.V, bodyF=bodyPart.F, bodyN=bodyPart.extra.N;
   var bodySkin=P3D.nearestBoneSegmentSkin(bodyV, pivots, P3D.BONES, 4, gp.rigid_soft_width);
 
   var acc=null;
-  if(decimated.accParts && decimated.accParts.length){
+  if(partsMeta.length>1){
     var allV=[],allN=[],allF=[],allJ=[],allW=[],allAccName=[]; var voff=0;
-    decimated.accParts.forEach(function(p){
-      var V2=p.V, F2=p.F;
-      if(gp.acc_smooth_iters>0) V2=P3D.laplacianSmoothPreserveExtent(V2,F2,gp.acc_smooth_iters);
-      var fw2=P3D.computeNormalsFixWinding(V2,F2);
-      V2=V2; var F2b=fw2.F, Nv=fw2.N;
+    for(var i=1;i<partsMeta.length;i++){
+      var p=partsMeta[i], part=split[i];
+      if(!part.V.length) continue;
+      var V2=part.V, F2=part.F, N2=part.extra.N;
       var skin;
       if(p.mode==='rigid'){
         skin = P3D.rigidSkin(V2, (p.bones&&p.bones[0])||'head');
       }else{
         skin = P3D.nearestBoneSegmentSkin(V2, pivots, (p.bones&&p.bones.length)?p.bones:P3D.BONES, 4, gp.rigid_soft_width);
       }
-      allV.push(V2); allN.push(Nv);
-      for(var i=0;i<F2b.length;i++) allF.push(F2b[i]+voff);
+      allV.push(V2); allN.push(N2);
+      for(var j=0;j<F2.length;j++) allF.push(F2[j]+voff);
       allJ.push(skin.J); allW.push(skin.W);
       var nv=V2.length/3;
-      for(var i2=0;i2<nv;i2++) allAccName.push(p.name);
+      for(var k=0;k<nv;k++) allAccName.push(p.name);
       voff+=nv;
-    });
-    var accV=P3D.concatTypedArrays(Float32Array,allV), accN=P3D.concatTypedArrays(Float32Array,allN);
-    var accF=Uint32Array.from(allF);
-    var accJ=P3D.concatTypedArrays(Uint16Array,allJ);
-    var accW=P3D.concatTypedArrays(Float32Array,allW);
-    var accNF=Uint8Array.from(allAccName.map(function(){return 0;}));
-    acc = {V:accV, N:accN, F:accF, J:accJ, W:accW, NF:accNF, accName:allAccName};
+    }
+    if(allV.length){
+      var accV=P3D.concatTypedArrays(Float32Array,allV), accN=P3D.concatTypedArrays(Float32Array,allN);
+      var accF=Uint32Array.from(allF);
+      var accJ=P3D.concatTypedArrays(Uint16Array,allJ);
+      var accW=P3D.concatTypedArrays(Float32Array,allW);
+      var accNF=Uint8Array.from(allAccName.map(function(){return 0;}));
+      acc = {V:accV, N:accN, F:accF, J:accJ, W:accW, NF:accNF, accName:allAccName};
+    }
   }
   return {bodyV:bodyV, bodyF:bodyF, bodyN:bodyN, bodySkin:bodySkin, acc:acc};
 }
@@ -522,7 +533,7 @@ async function finishFromIntermediate(inter, opts, onProgress){
   var cache = inter._stageCache || (inter._stageCache = {});
   function sig(o){ return JSON.stringify(o); }
 
-  var decSig = sig({bd:gp.body_decimate, btv:gp.body_target_verts, ad:gp.acc_decimate, atv:gp.acc_target_verts});
+  var decSig = sig({d:gp.decimate, tv:gp.target_verts});
   var decimated;
   if(cache.decSig===decSig && cache.decimated){
     decimated = cache.decimated;
@@ -534,13 +545,13 @@ async function finishFromIntermediate(inter, opts, onProgress){
   }
   await tick();
 
-  var meshSig = decSig+"|"+sig({bs:gp.body_smooth_iters, as:gp.acc_smooth_iters, rsw:gp.rigid_soft_width});
+  var meshSig = decSig+"|"+sig({si:gp.smooth_iters, rsw:gp.rigid_soft_width});
   var meshFinished;
   if(cache.meshSig===meshSig && cache.meshFinished){
     meshFinished = cache.meshFinished;
   }else{
     report("mesh_finish(平滑化/スキニング)");
-    meshFinished = meshFinishStage(decimated, gp, inter.pivots);
+    meshFinished = meshFinishStage(decimated, gp, inter.pivots, inter.parts_meta);
     cache.meshSig = meshSig; cache.meshFinished = meshFinished;
     cache.bakeSig = null; // 下流を強制再計算
   }

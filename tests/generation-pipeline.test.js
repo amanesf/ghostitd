@@ -47,9 +47,21 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 目窩(eye_L/eye_R landmark中心の凹み、js/carving.jsのapplyEyeSocketRecess)
 // を彫るようにした。body-only/with-accessoryとも彫刻結果(=GLB)が変わり、
 // ハッシュを更新した。
+// ★2026-07-11(パーツ分割タイミングの是正): 体+全アクセサリーを彫刻直後に
+// 分割し、間引き・平滑化をパーツごとに独立して行っていたことが、境界を
+// 共有する頂点が両側で別々に動いて隙間になる根本原因と判明した(ユーザー
+// 指摘)。間引き・平滑化を統合されたままの1枚のメッシュに対して1回だけ
+// 行い、スキニング直前にだけパーツへ分割するよう変更した(js/pipeline.js
+// のdecimateStage/meshFinishStage、js/carving.jsのdecimateMesh/
+// splitMeshByOwner参照)。これに伴い、パーツ別だった間引き目標頂点数
+// (body_target_verts/acc_target_verts)を1本(target_verts)に統合した
+// ため、サンプルの埋め込みgen_params(古いbody_target_verts:3000)が
+// 効かなくなり、新しい既定値(target_verts:10000)が使われるようになった
+// (=間引きが弱まり高精細になった)。body-only/with-accessoryとも彫刻
+// 結果(=GLB)が変わり、ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 471220,
-  sha256: "5c8de03492339cc0194adf3cb2d16e7e1e7e987c9edf37c0f4cd0f992e082074",
+  byteLength: 635916,
+  sha256: "83c24c6b1644e8fa638a635fd590238c6e4fb25141f219fdaff6710bf95b10f1",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -74,8 +86,8 @@ const EXPECTED_BODY_ONLY = {
 // 画素だけを最近傍色で埋める修正によりwith-accessory側の彫刻結果が変わり、
 // ハッシュを更新した(body-onlyはアクセサリーが無く対象外のため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 825028,
-  sha256: "0665346262621f241249c965809421ad748a366f9031750c821084ea30de18fa",
+  byteLength: 834072,
+  sha256: "577e3c31bd5d8f0af19015962c1576ec6bb53524f22b6f36f8d6922fcc486a11",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

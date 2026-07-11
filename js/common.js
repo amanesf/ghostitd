@@ -30,8 +30,14 @@ var DEFAULT_GEN_PARAMS = {
   // ★2026-07-10: 既定の間引き後頂点数(3000/1000)だと、特に顔まわり・
   // アクセサリーの折り目等で三角面のカクつき(ローポリ感)が目立つとの指摘
   // により、body/accともに10000へ引き上げた(ユーザー指摘)。
-  body_decimate: true, body_target_verts: 10000,
-  acc_decimate: true, acc_target_verts: 10000,
+  // ★2026-07-11(ユーザー指摘「パーツ分割のタイミングが早すぎる」対応):
+  // 体+全アクセサリーを間引き・平滑化が終わるまで1枚の連続したメッシュの
+  // まま扱うよう変更した(js/pipeline.jsのdecimateStage/meshFinishStage
+  // 参照)。境界を共有する頂点に別々の強さを適用すること自体が矛盾するため、
+  // body_decimate/acc_decimateとbody_target_verts/acc_target_vertsを
+  // それぞれ1本の値に統合した(ユーザー承認済み。パーツ別の強弱調整は
+  // 失われるトレードオフ)。
+  decimate: true, target_verts: 10000,
   // ★2026-07-06: 断面スーパー楕円の指数はこれまで全身共通(psq_hull)の1個
   // だったが、部位ごとに理想的な丸み/角ばりが異なる(頭は卵型に近く丸め、
   // 腕は円筒に近いほど自然、手は厚み一定の板に近いため角を立たせたい等)
@@ -51,7 +57,9 @@ var DEFAULT_GEN_PARAMS = {
   // (px)。実サンプルで実測した最悪ケース(約10px)を余裕を持って埋められる値。
   // 0で無効(従来の挙動に戻る)。
   track_gap_close_px: 6,
-  body_smooth_iters: 0, acc_smooth_iters: 0,
+  // ★2026-07-11: 上記target_vertsと同じ理由(統合メッシュとして1回だけ
+  // 平滑化する)でbody_smooth_iters/acc_smooth_itersを1本に統合した。
+  smooth_iters: 0,
   // ★2026-07-10: landmark_tool.htmlは以前このオブジェクトを丸ごとコピーした
   // 独自定義を持っており(「値を一致させる」というコメントで手動同期の前提に
   // なっていた)、そちらにだけrigid_soft_widthが存在しこちらには無いという

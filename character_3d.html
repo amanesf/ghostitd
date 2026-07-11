@@ -633,7 +633,7 @@ document.getElementById('err').textContent='';
 (async function(){
   try{
     const pkg = window.P3D && await P3D.loadGeneratedModel();
-    if(pkg && pkg.raw_body){
+    if(pkg && pkg.raw_unified){
       currentPackage = pkg;
       liveGP = Object.assign({}, pkg.gen_params);
       liveSeamSmoothIters = pkg.seam_smooth_iters;
@@ -661,25 +661,27 @@ document.getElementById('err').textContent='';
 })();
 
 /* ---------- フェーズ2: ライブパラメータ編集パネル ---------- */
-// 彫刻(marching cubes)をやり直さずに反映できる12パラメータをTier1〜3で分類
+// 彫刻(marching cubes)をやり直さずに反映できるパラメータをTier1〜3で分類
 // (GENERATOR_LIVE_PREVIEW_PLAN.md「移動可能パラメータの分類」参照)。
-// Tier1: 完全即時。Tier2: raw_body/raw_accessoriesの間引き前メッシュがあれば
-// 反映可能。Tier3: 上記に加えてbled_canvases(atlas_bake再実行)が必要。
-// いずれもcharacter_3d.htmlは常にraw_*とbled_canvasesを保持しているため、
+// Tier1: 完全即時。Tier2: raw_unifiedの間引き前メッシュがあれば反映可能。
+// Tier3: 上記に加えてbled_canvases(atlas_bake再実行)が必要。
+// いずれもcharacter_3d.htmlは常にraw_unifiedとbled_canvasesを保持しているため、
 // 実装上は全てP3D.finishFromIntermediate()を丸ごと呼び直すだけで反映できる
-// (finishFromIntermediate自体が毎回smooth→decimate→atlas_bakeの順で計算する)。
+// (finishFromIntermediate自体が毎回decimate→smooth→atlas_bakeの順で計算する)。
+// ★2026-07-11(ユーザー指摘「パーツ分割のタイミングが早すぎる」対応): 体+
+// 全アクセサリーを間引き・平滑化が終わるまで1枚の連続したメッシュのまま
+// 扱うよう変更したため、境界を共有する頂点に別々の強さを適用できなくなり、
+// body_*/acc_*に分かれていたTier1/Tier2パラメータを1本に統合した
+// (ユーザー承認済み。パーツ別の強弱調整は失われるトレードオフ)。
 const GEN_PARAM_TIERS=[
   {tier:"Tier1(即時反映)", items:[
-    {key:"body_smooth_iters", label:"全身の表面平滑化回数", min:0,max:60,step:1,unit:"回"},
-    {key:"acc_smooth_iters", label:"アクセサリーの平滑化回数", min:0,max:60,step:1,unit:"回"},
+    {key:"smooth_iters", label:"表面平滑化回数(体+アクセサリー共通)", min:0,max:60,step:1,unit:"回"},
     {key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", min:0,max:0.8,step:0.05,unit:""},
     {key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", min:50,max:1000,step:10,unit:"KB"},
   ]},
   {tier:"Tier2(生メッシュキャッシュ利用)", items:[
-    {key:"body_decimate", label:"全身の頂点数を間引く", type:"checkbox"},
-    {key:"body_target_verts", label:"全身の間引き後目標頂点数", min:1000,max:300000,step:1000,unit:"頂点"},
-    {key:"acc_decimate", label:"アクセサリーの頂点数を間引く", type:"checkbox"},
-    {key:"acc_target_verts", label:"アクセサリーの間引き後目標頂点数", min:500,max:300000,step:500,unit:"頂点"},
+    {key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
+    {key:"target_verts", label:"間引き後目標頂点数(体+アクセサリー合計)", min:1000,max:300000,step:1000,unit:"頂点"},
   ]},
   {tier:"Tier3(生メッシュ+画像キャッシュ利用)", items:[
     {key:"__seamSmoothIters", label:"継ぎ目の平滑化回数", min:0,max:30,step:1,unit:"回"},
@@ -791,7 +793,7 @@ function wireSeamBulkHtml(el){
   const bulkDetails=el.querySelector('details[data-vseamgroup="一括設定"]');
   if(bulkDetails) bulkDetails.addEventListener("toggle",()=>{ seamBulkOpen=bulkDetails.open; });
   const statusEl=document.getElementById('genPanelStatus');
-  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  const accKeys=(currentPackage.parts_meta||[]).filter(p=>p.ownerId>0).map(p=>"acc:"+p.name);
   document.getElementById('vSeamBulkApply').onclick=()=>{
     const v=parseInt(document.getElementById('vSeamBulkVal').value,10);
     if(!isFinite(v)||v<1||v>89){ if(statusEl)statusEl.textContent='角度は1〜89の範囲で入力してください。'; return; }
@@ -874,7 +876,7 @@ function wireSeamPanelEvents(el){
 }
 function renderSeamPanel(){
   const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
-  const accKeys=(currentPackage.raw_accessories||[]).map(p=>"acc:"+p.name);
+  const accKeys=(currentPackage.parts_meta||[]).filter(p=>p.ownerId>0).map(p=>"acc:"+p.name);
   el.innerHTML=renderSeamBulkHtml()+buildSeamGroupsHtml(accKeys);
   wireSeamBulkHtml(el);
   wireSeamPanelEvents(el);

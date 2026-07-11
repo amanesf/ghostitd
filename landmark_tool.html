@@ -497,9 +497,9 @@ const PARAM_META=[
  {group:"背面/側面ズレ補正", key:"leftside_offset_y", label:"側面(左)画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
   desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
 ];
-// ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): body_smooth_iters/
-// acc_smooth_iters/rigid_soft_width/kb_per_face(Tier1)、body_decimate/
-// body_target_verts/acc_decimate/acc_target_verts(Tier2)は、生成後の
+// ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): smooth_iters/
+// rigid_soft_width/kb_per_face(Tier1)、decimate/target_verts(Tier2、
+// ★2026-07-11: 体+アクセサリー別だったbody_*/acc_*を統合)は、生成後の
 // character_3d.html(ビューア)側で彫刻をやり直さずライブ編集できるように
 // なったため、このPARAM_META(生成前の設定パネル)からは編集UIを削除した。
 // ただしgenParams自体(DEFAULT_GEN_PARAMSの値)は従来通りbuildJson()経由で
@@ -1710,8 +1710,8 @@ $("generateBtn").onclick=async()=>{
     const inter=await P3D.runToIntermediate(state, (label)=>{ $("genStage").textContent=label; });
     const pkg={
       landmarks_json: buildJson(),
-      raw_body: inter.rawBody,
-      raw_accessories: inter.rawAccessories,
+      raw_unified: inter.rawUnified,
+      parts_meta: inter.partsMeta,
       bled_canvases: inter.bledCanvases,
       pivots: inter.pivots,
       calib: inter.calib,

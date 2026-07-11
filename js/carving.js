@@ -116,13 +116,31 @@ P3D.dropSmallFragments = dropSmallFragments;
 // SimplifyModifier自体が例外を投げた場合は、頂点クラスタリング法
 // (gridClusterDecimate、半エッジ構造に依存しないため巨大メッシュでも壊れない)
 // にフォールバックする。
+// ★2026-07-11(体+アクセサリー統合間引き対応のベンチマーク): パーツ分割を
+// 間引き後まで遅らせたことで、体+全アクセサリーの合計頂点数がこの閾値と
+// 比較されるようになった(以前はパーツごとに独立だったため、重い
+// アクセサリー1つだけが道連れになっていた)。実サンプル(7アクセサリー全部
+// 乗せ)で実測したところ合計163,254頂点で、SIMPLIFY_SAFE_LIMITを試しに
+// 200,000まで上げてもSimplifyModifier自体が同じ"hasVertex"例外で失敗する
+// (280,386頂点の失敗例と同種の限界に達している)ことを確認済み。閾値を
+// 上げても救えず、失敗までの試行時間(実測約90秒)を無駄にするだけなので
+// 60000のまま据え置く。体単体の生彫刻頂点数(実測80,238)も既にこの閾値を
+// 超えており、統合前から体はgridClusterDecimateへ落ちていたケースのため、
+// 体+全アクセサリー統合による新たな退行ではない(アクセサリー単体では
+// 高品質決着していたものが道連れになる可能性はあるが、フォールバック自体は
+// 安全に機能する)。
 var SIMPLIFY_SAFE_LIMIT = 60000;
 
 // 頂点クラスタリングによる間引き(Rossignac&Borrel方式の簡易版)。バウンディング
 // ボックスを立方体グリッドに分割し、同じセルに落ちる頂点をその重心1点に
 // まとめる。quadric error decimationよりは形状精度が落ちるが、edge collapseの
 // ような複雑な半エッジ構造を作らないため、頂点数に関わらず必ず動作する。
-function gridClusterDecimate(V, F, targetVerts){
+// ★2026-07-11追加(体+アクセサリー統合間引き対応、ユーザー指摘「パーツ分割の
+// タイミングが早すぎる」対応): owner(頂点ごとの所属パーツID、Int32Array)を
+// 渡すと、同じセルに集約される頂点群の多数決(同数ならownerId昇順を優先する
+// 決定的なタイブレーク)でセルの代表ownerを決め、間引き後の頂点にも
+// owner配列を付けて返す(未指定時は従来通り{V,F}のみ)。
+function gridClusterDecimate(V, F, targetVerts, owner){
   var n = V.length/3;
   var minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
   for(var i=0;i<n;i++){
@@ -147,13 +165,22 @@ function gridClusterDecimate(V, F, targetVerts){
     var x2=V[v*3],y2=V[v*3+1],z2=V[v*3+2];
     var key = cellKey(x2,y2,z2);
     var c = cellMap.get(key);
-    if(!c){ c={sx:0,sy:0,sz:0,count:0,idx:-1}; cellMap.set(key,c); }
+    if(!c){ c={sx:0,sy:0,sz:0,count:0,idx:-1,ownerVotes:owner?new Map():null}; cellMap.set(key,c); }
     c.sx+=x2; c.sy+=y2; c.sz+=z2; c.count++;
+    if(owner){ var ov2=owner[v]; c.ownerVotes.set(ov2, (c.ownerVotes.get(ov2)||0)+1); }
   }
   var newV = new Float32Array(cellMap.size*3);
+  var newOwner = owner ? new Int32Array(cellMap.size) : null;
   var vi=0;
   cellMap.forEach(function(c){
     newV[vi*3]=c.sx/c.count; newV[vi*3+1]=c.sy/c.count; newV[vi*3+2]=c.sz/c.count;
+    if(owner){
+      var bestOwner=-1, bestCount=-1;
+      c.ownerVotes.forEach(function(cnt, ownerId){
+        if(cnt>bestCount || (cnt===bestCount && ownerId<bestOwner)){ bestCount=cnt; bestOwner=ownerId; }
+      });
+      newOwner[vi]=bestOwner;
+    }
     c.idx=vi; vi++;
   });
   var remap = new Int32Array(n);
@@ -167,19 +194,26 @@ function gridClusterDecimate(V, F, targetVerts){
     if(a===b||b===c2||a===c2) continue; // 縮退三角形(セル統合で潰れた面)を除去
     newFArr.push(a,b,c2);
   }
-  return {V:newV, F:Uint32Array.from(newFArr)};
+  return owner ? {V:newV, F:Uint32Array.from(newFArr), owner:newOwner} : {V:newV, F:Uint32Array.from(newFArr)};
 }
 P3D.gridClusterDecimate = gridClusterDecimate;
 
 // three.js SimplifyModifierを使ったquadric error簡略化。失敗した場合は例外を
 //投げる(呼び出し元decimateMesh()がgridClusterDecimateにフォールバックする)。
-function simplifyModifierDecimate(V, F, targetVerts){
+// ★2026-07-11追加(体+アクセサリー統合間引き対応): owner(頂点ごとの所属
+// パーツID)を渡すと間引き後の頂点にもowner配列を付けて返す。
+// js/vendor/SimplifyModifier.jsのcollapse()は頂点位置を一切ブレンドせず、
+// 生き残る頂点は必ず入力頂点のいずれかと完全に同じ座標になる(統合彫刻の
+// marching cubes直後の入力は重複座標を持たない=1頂点1ownerが保証されている)
+// ため、座標一致だけで曖昧さ無くownerを復元できる(nearest-neighbor探索は
+// 不要)。
+function simplifyModifierDecimate(V, F, targetVerts, owner){
   var geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(V), 3));
   geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(F), 1));
   var curVerts = V.length/3;
   var removeCount = Math.max(0, curVerts - targetVerts);
-  if(removeCount<=0) return {V:V,F:F};
+  if(removeCount<=0) return owner ? {V:V,F:F,owner:owner} : {V:V,F:F};
   var modifier = new THREE.SimplifyModifier();
   var simplified = modifier.modify(geo, removeCount);
   var pos = simplified.attributes.position.array;
@@ -213,21 +247,39 @@ function simplifyModifierDecimate(V, F, targetVerts){
   if(V2.length/3 < 4 || newF.length < 12){
     throw new Error("簡略化結果が不正(頂点/面数が少なすぎる)");
   }
-  return {V:V2, F:newF};
+  if(!owner) return {V:V2, F:newF};
+  var origKey2Owner = new Map();
+  var origN = V.length/3;
+  for(var ov=0; ov<origN; ov++){
+    var okey = V[ov*3].toFixed(6)+"_"+V[ov*3+1].toFixed(6)+"_"+V[ov*3+2].toFixed(6);
+    if(!origKey2Owner.has(okey)) origKey2Owner.set(okey, owner[ov]);
+  }
+  var newOwner = new Int32Array(V2.length/3);
+  for(var nv=0; nv<newOwner.length; nv++){
+    var nkey = V2[nv*3].toFixed(6)+"_"+V2[nv*3+1].toFixed(6)+"_"+V2[nv*3+2].toFixed(6);
+    var oid = origKey2Owner.get(nkey);
+    newOwner[nv] = (oid===undefined) ? 0 : oid; // 見つからない場合のみ安全側(body)に倒す
+  }
+  return {V:V2, F:newF, owner:newOwner};
 }
 
-// V:Float32Array(N*3), F:Uint32Array(M*3), targetVerts: 目標頂点数
-// 戻り値: {V,F} (必ず何らかの方法で間引く。SimplifyModifierが使えない/失敗する
-// /メッシュが巨大すぎる場合はgridClusterDecimateにフォールバックする)
-function decimateMesh(V, F, targetVerts){
+// V:Float32Array(N*3), F:Uint32Array(M*3), targetVerts: 目標頂点数,
+// owner: 省略可、Int32Array(N) 頂点ごとの所属パーツID
+// 戻り値: {V,F}(ownerを渡した場合は{V,F,owner}、必ず何らかの方法で間引く。
+// SimplifyModifierが使えない/失敗する/メッシュが巨大すぎる場合は
+// gridClusterDecimateにフォールバックする)
+// ★2026-07-11追加: ownerを通すことで、体+全アクセサリーを1つの連続した
+// メッシュのまま間引ける(パーツ分割はこの後の平滑化まで終えてから行う。
+// js/pipeline.jsのdecimateStage/meshFinishStage参照)。
+function decimateMesh(V, F, targetVerts, owner){
   var targetFaces = Math.max(targetVerts*2, 4);
   var curFaces = F.length/3;
-  if(curFaces <= targetFaces) return {V:V, F:F};
+  if(curFaces <= targetFaces) return owner ? {V:V, F:F, owner:owner} : {V:V, F:F};
   var curVerts = V.length/3;
   var canUseSimplify = (typeof THREE !== "undefined" && THREE.SimplifyModifier && curVerts <= SIMPLIFY_SAFE_LIMIT);
   if(canUseSimplify){
     try{
-      return simplifyModifierDecimate(V, F, targetVerts);
+      return simplifyModifierDecimate(V, F, targetVerts, owner);
     }catch(e){
       console.warn("  decimateMesh: SimplifyModifierに失敗、頂点クラスタリングにフォールバックします:", e);
     }
@@ -236,7 +288,7 @@ function decimateMesh(V, F, targetVerts){
   }else{
     console.log("  decimateMesh: メッシュが大きい(頂点数"+curVerts+" > "+SIMPLIFY_SAFE_LIMIT+")ため、頂点クラスタリングで間引きます");
   }
-  return gridClusterDecimate(V, F, targetVerts);
+  return gridClusterDecimate(V, F, targetVerts, owner);
 }
 P3D.decimateMesh = decimateMesh;
 
@@ -1069,9 +1121,14 @@ P3D.carveUnifiedRegions = carveUnifiedRegions;
  * 回数0・間引きで境界頂点が消えない限り、2つのサブメッシュの境界は
  * ぴったり閉じたまま保たれる。
  * ownerIds: 分割したいownerIdの配列(この順で戻り値配列に対応する)
- * 戻り値: [{V,F}, ...] (ownerIdsと同じ長さ、該当頂点が無ければV,Fとも空)
+ * extraVertArrays: 省略可、{name: TypedArray(N)}(頂点ごとに1個の値、Vと
+ *   同じ頂点並びの補助配列)。渡すと、各パーツの生き残った頂点に合わせて
+ *   remapした結果をextra.<name>として一緒に返す(dropSmallFragmentsの
+ *   extraVertArraysと同じ規約。★2026-07-11追加: 平滑化後の法線Nをパーツ
+ *   ごとに分割するのに使う)。
+ * 戻り値: [{V,F,extra}, ...] (ownerIdsと同じ長さ、該当頂点が無ければV,Fとも空)
  */
-function splitMeshByOwner(V, F, owner, ownerIds){
+function splitMeshByOwner(V, F, owner, ownerIds, extraVertArrays){
   var nf=F.length/3;
   var faceOwner=new Int32Array(nf);
   for(var f=0;f<nf;f++){
@@ -1089,7 +1146,7 @@ function splitMeshByOwner(V, F, owner, ownerIds){
       if(faceOwner[f2]!==targetId) continue;
       usedVert.add(F[f2*3]); usedVert.add(F[f2*3+1]); usedVert.add(F[f2*3+2]);
     }
-    if(!usedVert.size) return {V:new Float32Array(0), F:new Uint32Array(0)};
+    if(!usedVert.size) return {V:new Float32Array(0), F:new Uint32Array(0), extra:extraVertArrays?{}:undefined};
     var remap=new Map(); var cnt=0;
     var Vout=new Float32Array(usedVert.size*3);
     usedVert.forEach(function(vi){
@@ -1102,7 +1159,20 @@ function splitMeshByOwner(V, F, owner, ownerIds){
       if(faceOwner[f3]!==targetId) continue;
       Fout.push(remap.get(F[f3*3]), remap.get(F[f3*3+1]), remap.get(F[f3*3+2]));
     }
-    return {V:Vout, F:Uint32Array.from(Fout)};
+    var extraOut;
+    if(extraVertArrays){
+      extraOut={};
+      Object.keys(extraVertArrays).forEach(function(name){
+        var src=extraVertArrays[name], perVert=src.length/(V.length/3);
+        var dst=new src.constructor(cnt*perVert);
+        usedVert.forEach(function(vi){
+          var ni=remap.get(vi);
+          for(var k=0;k<perVert;k++) dst[ni*perVert+k]=src[vi*perVert+k];
+        });
+        extraOut[name]=dst;
+      });
+    }
+    return {V:Vout, F:Uint32Array.from(Fout), extra:extraOut};
   });
 }
 P3D.splitMeshByOwner = splitMeshByOwner;
