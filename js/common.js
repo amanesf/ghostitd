@@ -47,7 +47,12 @@ var DEFAULT_GEN_PARAMS = {
   // 部位の実際の断面形状に合わせて調整したオススメ値。
   // ★2026-07-10: psq_headは2.0→5に変更(ユーザー指摘)。値が大きいほど
   // 断面は卵型より四角形に近づく(このファイル内のPARAM_META該当desc参照)。
-  psq_head: 5, psq_torso: 2.2, psq_legs: 2.2, psq_arms: 2.0, psq_hands: 3.0, psq_acc: 2.2,
+  // ★2026-07-11: 顔・前髪の丸みをかなり四角形寄りにしたいとの指摘を受け、
+  // psq_headを5→6(上限値)に、psq_acc(前髪含む全アクセサリー共通)を
+  // 2.2→5に引き上げた。psq_accは全アクセサリー(スカート/マフラー等)に
+  // 等しく効くため、特定のアクセサリーだけ丸みを残したい場合は設定値タブの
+  // 「断面の丸み具合」グループにあるアクセサリー個別の丸み上書きで調整できる。
+  psq_head: 6, psq_torso: 2.2, psq_legs: 2.2, psq_arms: 2.0, psq_hands: 3.0, psq_acc: 5,
   // ★2026-07-10: track_gap(track追跡の行許容ギャップ)は、js/carving.jsの
   // track判定を連結成分ラベリングに置き換えたことで不要になったため廃止した。
   track_win: 1,
@@ -557,6 +562,47 @@ function erode4N(mask, w, h, r){
   return m;
 }
 
+// ★2026-07-11追加(ユーザー指摘「にじみがパーツごとにバラバラに見える」対応):
+// bleedInsetPxによる侵食(erode4N)は、髪の房の毛先やアクセサリーの細い帯など
+// alphaの幅がinsetPx*2未満の細い部位を完全に消してしまうことがある。その
+// 部位のalpha連結成分にシード画素が1つも残らないと、にじみの起点が(近い
+// 別部位のたまたま最寄りの画素という)無関係な色に飛んでしまい、細い部位
+// だけ色が破綻して見える(パーツごとに扱いが違って見える原因)。alpha側の
+// 連結成分(4連結)ごとに、侵食後のシードが0個の成分だけ侵食前のalphaを
+// そのまま復元する(その部位だけinsetPx=0相当にフォールバックし、他の
+// 部位の色を借りることはない)。
+function restoreErodedThinComponents(alpha, eroded, w, h){
+  var n=w*h;
+  var label=new Int32Array(n).fill(-1);
+  var out=new Uint8Array(eroded);
+  var stack=[];
+  for(var start=0; start<n; start++){
+    if(!alpha[start] || label[start]!==-1) continue;
+    var lab=start;
+    stack.push(start); label[start]=lab;
+    var members=[start];
+    var hasSeed=!!eroded[start];
+    while(stack.length){
+      var idx=stack.pop();
+      var x=idx%w, y=(idx/w)|0;
+      var nbrs=[];
+      if(x>0)nbrs.push(idx-1); if(x<w-1)nbrs.push(idx+1);
+      if(y>0)nbrs.push(idx-w); if(y<h-1)nbrs.push(idx+w);
+      for(var k=0;k<nbrs.length;k++){
+        var ni=nbrs[k];
+        if(alpha[ni] && label[ni]===-1){
+          label[ni]=lab; stack.push(ni); members.push(ni);
+          if(eroded[ni]) hasSeed=true;
+        }
+      }
+    }
+    if(!hasSeed){
+      for(var m2=0;m2<members.length;m2++) out[members[m2]]=1;
+    }
+  }
+  return out;
+}
+
 // ---- 縁の色にじみ(prep.stage_bleedのJS移植) ----
 // 透明画素を最も近い不透明画素のRGBで埋め(distance_transform_edtのindices相当を
 // 多元BFSで代用)、アルファをalphaDilate回だけ膨張させる。
@@ -573,7 +619,11 @@ function bleedEdges(rgba, w, h, alpha, alphaDilate, bleedInsetPx){
   alphaDilate = (alphaDilate===undefined) ? 9 : alphaDilate;
   bleedInsetPx = (bleedInsetPx===undefined || bleedInsetPx===null) ? 0 : bleedInsetPx;
   var n=w*h;
-  var seedAlpha = bleedInsetPx>0 ? erode4N(alpha, w, h, bleedInsetPx) : alpha;
+  var seedAlpha = alpha;
+  if(bleedInsetPx>0){
+    seedAlpha = erode4N(alpha, w, h, bleedInsetPx);
+    seedAlpha = restoreErodedThinComponents(alpha, seedAlpha, w, h);
+  }
   var nearestIdx=new Int32Array(n).fill(-1);
   var dist=new Int32Array(n).fill(-1);
   var visited=new Uint8Array(n);

@@ -74,9 +74,26 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // いたため、縁取りが太って見える問題があった。gen_params.bleed_inset_px分
 // だけ内側の「安全な内部色」を起点にするよう変更した(js/common.jsの
 // bleedEdges参照)。テクスチャの焼き込み結果が変わるため、ハッシュを更新した。
+// ★2026-07-11(ユーザー指摘対応、追加3点): (1) bleedEdges侵食(bleedInsetPx)が
+// 髪の房の毛先等alpha幅の細い部位を完全に消してしまい、その部位のにじみ起点が
+// 無関係な別部位の色に飛んで「パーツごとに扱いが違って見える」不具合があった。
+// alpha連結成分ごとに、侵食後シードが0個の成分だけ侵食前のalphaへフォール
+// バックする修正(js/common.jsのrestoreErodedThinComponents)を追加。
+// (2) 顔・前髪の丸みを「かなり四角形寄り」にしたいとの指摘を受け、
+// psq_head(5→6、上限値)・psq_acc(2.2→5、全アクセサリー共通)を引き上げた。
+// あわせてサンプルJSON(landmarks_ai_2_embedded.json)に古いpsq_head:2/
+// psq_acc:2.2が埋め込み保存されており新しい既定値が反映されない状態だった
+// ため、サンプル側も新しい既定値に合わせて更新した。
+// (3) 耳の位置に穴が空いているように見えるとの指摘を受けGLBの頂点/面データを
+// 直接解析したが、実際の位相的な穴(1個の三角形にしか使われない境界辺)は
+// ゼロ件(UVシーム分割による見かけ上の「境界」を頂点座標でマージして除外した
+// 上での結果)で、耳専用のcarving機能自体が存在しないことも確認した(コード上の
+// バグではなく、ジオメトリ自体は閉じている)。
+// 上記3点の彫刻結果・テクスチャ焼き込み結果が変わるため、body-only/
+// with-accessoryともハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 647408,
-  sha256: "0ac739f25720abc809118e234de26205c518291368084754741ede8d5898d47c",
+  byteLength: 647948,
+  sha256: "635935e65d5bb2a3ee7df6ac01344299c1bc1af56c25ac239753d1f3b34a1176",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -103,9 +120,13 @@ const EXPECTED_BODY_ONLY = {
 // ★2026-07-11: 上記(切り抜き精度向上/にじみの起点修正)と同じ変更により
 // with-accessory側も彫刻結果・テクスチャ焼き込み結果が変わり、ハッシュを
 // 更新した。
+// ★2026-07-11(ユーザー指摘対応、追加3点): 上のEXPECTED_BODY_ONLYコメント
+// (bleedEdges細部位フォールバック/psq_head・psq_acc引き上げ/サンプルJSON
+// 側のpsq更新/耳の穴の有無を実データで確認)と同じ変更により、with-accessory
+// 側も彫刻結果・テクスチャ焼き込み結果が変わり、ハッシュを更新した。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 776848,
-  sha256: "f0a3eb0448c733b92950ca6b01c6ba24fa41b86c76349658325b967fd7fdaf82",
+  byteLength: 782064,
+  sha256: "37e3b29616588dcf76a96bde4fee347dc4669148f91c9b1d51c0cee8ae0bd14a",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
