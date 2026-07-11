@@ -190,6 +190,26 @@ async function runCarvingStages(state, report){
   // 和集合にし、アクセサリー領域の実ピクセルも保護対象に含める(3D彫刻用の
   // alphaFull自体は体オンリーのまま変更しない=体がアクセサリー形状に
   // 膨らむ不具合を再発させない)。
+  // ★2026-07-11バグ修正(退行): 最近傍色分類への置き換え時、この和集合計算に
+  // 必要なa.mask[v].alpha(マスクPNGから読み込んだ実際のUint8Array)を早期に
+  // ロードしていたearlyMaskLoadsブロック(旧・境界ギャップ埋め専用と誤認して
+  // 削除)が、実はこのbleedFgAlpha計算の前提でもあったため、削除後は
+  // 常にm.alphaが未ロード(undefined)のままここを素通りし、上のバグが
+  // 再発していた(スカート等が体色のにじみで塗り潰される)。ここで改めて
+  // 必要な分だけ早期ロードする。
+  if(state.accessories && state.accessories.length){
+    var bleedMaskLoads=[];
+    state.accessories.forEach(function(a){
+      if(!a.mask) return;
+      ["front","back","side"].forEach(function(v){
+        var m=a.mask[v];
+        if(!m || !m.maskDataUrl || m.alpha) return;
+        var sz = (v==='side') ? sizes.side : sizes.front;
+        bleedMaskLoads.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, sz.w, sz.h).then(function(alpha){ m.alpha=alpha; }));
+      });
+    });
+    if(bleedMaskLoads.length) await Promise.all(bleedMaskLoads);
+  }
   var bleedFgAlpha={};
   views.forEach(function(v){ bleedFgAlpha[v]=Uint8Array.from(alphaFull[v]); });
   if(state.accessories && state.accessories.length){

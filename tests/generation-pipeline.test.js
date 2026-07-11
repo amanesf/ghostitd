@@ -124,9 +124,23 @@ const EXPECTED_BODY_ONLY = {
 // (bleedEdges細部位フォールバック/psq_head・psq_acc引き上げ/サンプルJSON
 // 側のpsq更新/耳の穴の有無を実データで確認)と同じ変更により、with-accessory
 // 側も彫刻結果・テクスチャ焼き込み結果が変わり、ハッシュを更新した。
+// ★2026-07-11バグ修正(退行、重要): 最近傍色分類への置き換え(2026-07-11の
+// 「切り抜き精度向上」コミット)時、bleedFgAlpha(にじみの前景判定を「体∪全
+// アクセサリー」の和集合にする2026-07-10の修正)が必要とするa.mask[v].alpha
+// (マスクPNGから読み込んだ実データ)を早期にロードしていたearlyMaskLoads
+// ブロックを、旧・境界ギャップ埋め(fillColorGaps)専用の処理と誤認して丸ごと
+// 削除してしまっていた。この結果bleedFgAlphaのforEachループが常にm.alpha
+// 未ロードで素通りし、体以外(スカート/マフラー等)が全く前景とみなされず、
+// 2026-07-10に一度直したはずの「アクセサリーが周囲の体色のにじみで塗り
+// 潰される」不具合が退行していた(ユーザー指摘「スカートが上着や太もも
+// のにじみで消えてしまう」により発覚。git bisectで2026-07-11の切り抜き
+// 精度向上コミットが原因と特定)。bleedFgAlpha計算の直前に必要な分だけ
+// 早期ロードを復元した(js/pipeline.js参照)。with-accessory側のテクスチャ
+// 焼き込み結果が大きく変わるため、ハッシュを更新した(body-onlyはアクセサ
+// リーが無く対象外のため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 782064,
-  sha256: "37e3b29616588dcf76a96bde4fee347dc4669148f91c9b1d51c0cee8ae0bd14a",
+  byteLength: 850448,
+  sha256: "61ad81f323054982108aa968d8725e5a278a7f4468735035fc86899cec77f182",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
