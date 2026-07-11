@@ -74,6 +74,18 @@ function buildBodyCarveOpts(opts){
     // 値まで下げる。
     minFragFrac: 0.001,
   };
+  // ★2026-07-11追加(顔の立体感対応): noseランドマークがあり、face_sculptが
+  // 無効化されていなければ、彫刻済みの頭部表面へ局所的な鼻の突起を加算する
+  // (js/carving.jsのapplyNoseBump参照)。landmarkが無い旧プロジェクトは
+  // 何も変わらない(faceSculpt:nullでapplyNoseBump自体がスキップされる)。
+  if(gp.face_sculpt!==false && opts.faceNose){
+    carveOpts.faceSculpt = {
+      nose: opts.faceNose,
+      noseDepth: gp.nose_bump_depth,
+      noseRadiusX: gp.nose_bump_radius_x,
+      noseRadiusY: gp.nose_bump_radius_y,
+    };
+  }
   return {mxBounds:mxBounds, myBounds:myBounds, mzBounds:mzBounds, carveOpts:carveOpts};
 }
 P3D.buildBodyCarveOpts = buildBodyCarveOpts;

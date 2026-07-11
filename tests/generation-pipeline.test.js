@@ -39,9 +39,14 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 既定値を「側面画像を使わない」に変更した(従来はUIが無い間、暗黙的に
 // 「全パーツ側面を使う」がデフォルト挙動だった)。この既定値変更で継ぎ目
 // テクスチャの焼き込み結果が変わるため、ハッシュを更新した。
+// ★2026-07-11(顔の立体感対応): nose landmarkを追加し、js/carving.jsの
+// applyNoseBumpが頭部彫刻済みの表面へ局所的な鼻の突起を加算するようにした
+// (js/pipeline.js/js/visual_hull.js/js/common.js参照)。サンプル画像は
+// placeAllLandmarks()の自動配置でnose landmarkを得るため、body-only/
+// with-accessoryとも彫刻結果(=GLB)が変わり、ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 470800,
-  sha256: "fca0d04fb57f7b02f16ac368f858f0ff68d0cfcf413aec5490f95f9cf9816bff",
+  byteLength: 472012,
+  sha256: "99c932baca7145fb370e1c3d7e9aa1dbb44be80efbde0ec0dc2e54bdffa9ed9e",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -66,8 +71,8 @@ const EXPECTED_BODY_ONLY = {
 // 画素だけを最近傍色で埋める修正によりwith-accessory側の彫刻結果が変わり、
 // ハッシュを更新した(body-onlyはアクセサリーが無く対象外のため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 825044,
-  sha256: "a6594642f1df306f4674b169dedc382b3a15404878ddd7b1b08bcbafcb9cb7a4",
+  byteLength: 826244,
+  sha256: "3c471a42d8cbf573f46a11e6a123fd097d08fa0ccbb073bcb203b308d52cc575",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
