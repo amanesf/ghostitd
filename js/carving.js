@@ -737,47 +737,57 @@ function carveRegion(opts){
 
   // ★2026-07-11追加(顔の立体感対応、ユーザー指摘「顔がのっぺりしている」):
   // 頭部も他の部位と同じ「行(y)ごとのスーパー楕円断面」で彫っているため、
-  // 鼻筋の立体感はside画像のその行1行ぶんの前後端にしか依存せず、実質的に
-  // 出ない(丸い頭にテクスチャの鼻の線を貼っただけの見た目になる)。これは
+  // 立体感はside画像のその行1行ぶんの前後端にしか依存せず出にくい。これは
   // 平滑化の強さとは無関係な、行ベース彫刻という方式そのものの限界。
-  // nose landmark(js/pipeline.jsのbuildDerivedLandmarksでpx→model座標に
-  // 変換済み)を中心に、彫刻済みのfieldの上から局所的にドーム状の突起だけを
-  // 加算する(既存の奥行きを置き換えない=既存の彫刻結果を壊す/穴を開ける
-  // リスクが無い)。opts.grid越しに共有fieldへ蓄積するcarveUnifiedRegions
-  // 経由の呼び出しでも、body(ownerId=0)のcarveOptsにだけfaceSculptを渡す
-  // ことで自然にbodyだけに効く(アクセサリー側はfaceSculpt未設定のため)。
-  function applyNoseBump(field, ownerField, fs){
-    var fx=fs.nose[0], fy=fs.nose[1];
-    var rx=Math.max(fs.noseRadiusX,EPS), ry=Math.max(fs.noseRadiusY,EPS);
-    var depth=fs.noseDepth;
+  // ★2026-07-11(検討の結果、鼻ではなく目窩を対象にした): 当初は鼻先
+  // ランドマークに同様の加算式の突起を実装したが、鼻は顔の中心線上にあり
+  // side画像のその高さの行スキャンから既に実測の奥行きが出ている(ユーザー
+  // 指摘)。そこへ独自パラメータの突起を追加で盛ると、実測の側面イラストと
+  // 食い違う奥行きになってしまうため撤回した。目窩(眼球が収まる凹み)は
+  // front/back/sideどのシルエット輪郭にも現れない内部形状のため、局所的に
+  // 凹ませても輪郭(=元イラストの実測データ)とは矛盾しない。
+  // eye_L/eye_Rランドマーク(js/pipeline.jsのbuildDerivedLandmarksでpx→
+  // model座標に変換済み)を中心に、彫刻済みのfieldの表層だけを局所的に
+  // 凹ませる(min-combineで下げるだけ=既存の奥行きより外側に何かを足す
+  // ことは無い→輪郭を壊すリスクが無い)。opts.grid越しに共有fieldへ蓄積
+  // するcarveUnifiedRegions経由の呼び出しでも、body(ownerId=0)の
+  // carveOptsにだけfaceSculptを渡すことで自然にbodyだけに効く
+  // (アクセサリー側はfaceSculpt未設定のため)。
+  function applyEyeSocketRecess(field, fs){
+    var rx=Math.max(fs.eyeSocketRadiusX,EPS), ry=Math.max(fs.eyeSocketRadiusY,EPS);
+    var depth=fs.eyeSocketDepth;
     if(!(depth>0)) return;
-    var ix0=Math.max(0, Math.floor((fx-rx-mxMin)/(mxMax-mxMin)*(nx-1)));
-    var ix1=Math.min(nx-1, Math.ceil((fx+rx-mxMin)/(mxMax-mxMin)*(nx-1)));
-    var iy0=Math.max(0, Math.floor((fy-ry-myMin)/(myMax-myMin)*(ny-1)));
-    var iy1=Math.min(ny-1, Math.ceil((fy+ry-myMin)/(myMax-myMin)*(ny-1)));
-    for(var iyb=iy0; iyb<=iy1; iyb++){
-      var dy=(my[iyb]-fy)/ry;
-      var rowOff=iyb*strideY;
-      for(var ixb=ix0; ixb<=ix1; ixb++){
-        var dx=(mx[ixb]-fx)/rx;
-        var w2=dx*dx+dy*dy;
-        if(w2>=1) continue; // 楕円footprintの外
-        var extra=depth*(1-w2); // 中心で最大depth、footprint縁でゼロになる突き出し量
-        var base=rowOff+ixb*strideX;
-        // この列(ixb,iyb)の現在の最前面(+z側、front方向)の表面位置を探す。
-        var surfIz=-1;
-        for(var izs=nz-1; izs>=0; izs--){ if(field[base+izs]>0){ surfIz=izs; break; } }
-        if(surfIz<0) continue; // この列にまだ何も彫られていない(頭部シルエット外)
-        var zSurf=mz[surfIz];
-        var izHi=Math.min(nz-1, Math.ceil((zSurf+extra-mzMin)/(mzMax-mzMin)*(nz-1)));
-        for(var izb=surfIz; izb<=izHi; izb++){
-          var t=(mz[izb]-zSurf)/extra; // 0(表面)→1(突起の先端)
-          var val=1.0-t;
-          var idx=base+izb;
-          if(val>field[idx]){ field[idx]=val; if(ownerField) ownerField[idx]=ownerId; }
+    [fs.eyeL, fs.eyeR].forEach(function(eye){
+      if(!eye) return;
+      var fx=eye[0], fy=eye[1];
+      var ix0=Math.max(0, Math.floor((fx-rx-mxMin)/(mxMax-mxMin)*(nx-1)));
+      var ix1=Math.min(nx-1, Math.ceil((fx+rx-mxMin)/(mxMax-mxMin)*(nx-1)));
+      var iy0=Math.max(0, Math.floor((fy-ry-myMin)/(myMax-myMin)*(ny-1)));
+      var iy1=Math.min(ny-1, Math.ceil((fy+ry-myMin)/(myMax-myMin)*(ny-1)));
+      for(var iyb=iy0; iyb<=iy1; iyb++){
+        var dy=(my[iyb]-fy)/ry;
+        var rowOff=iyb*strideY;
+        for(var ixb=ix0; ixb<=ix1; ixb++){
+          var dx=(mx[ixb]-fx)/rx;
+          var w2=dx*dx+dy*dy;
+          if(w2>=1) continue; // 楕円footprintの外
+          var recessAmt=depth*(1-w2); // 中心で最大depth、footprint縁でゼロになる凹み量
+          var base=rowOff+ixb*strideX;
+          // この列(ixb,iyb)の現在の最前面(+z側、front方向)の表面位置を探す。
+          var surfIz=-1;
+          for(var izs=nz-1; izs>=0; izs--){ if(field[base+izs]>0){ surfIz=izs; break; } }
+          if(surfIz<0) continue; // この列にまだ何も彫られていない(頭部シルエット外)
+          var zSurf=mz[surfIz];
+          var izLo=Math.max(0, Math.floor((zSurf-recessAmt-mzMin)/(mzMax-mzMin)*(nz-1)));
+          for(var izb=izLo; izb<=surfIz; izb++){
+            var t=(zSurf-mz[izb])/recessAmt; // 0(元の表面)→1(凹みの底)
+            var val=-t;
+            var idx=base+izb;
+            if(val<field[idx]) field[idx]=val;
+          }
         }
       }
-    }
+    });
   }
 
   // ---- 3) 疑似SDFフィールドを彫る(ローカルbbox最適化) ----
@@ -894,7 +904,7 @@ function carveRegion(opts){
       }
     }
   }
-  if(opts.faceSculpt) applyNoseBump(field, ownerField, opts.faceSculpt);
+  if(opts.faceSculpt) applyEyeSocketRecess(field, opts.faceSculpt);
   return field;
   }
   var field = carveSdfField();

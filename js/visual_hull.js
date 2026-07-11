@@ -74,16 +74,19 @@ function buildBodyCarveOpts(opts){
     // 値まで下げる。
     minFragFrac: 0.001,
   };
-  // ★2026-07-11追加(顔の立体感対応): noseランドマークがあり、face_sculptが
-  // 無効化されていなければ、彫刻済みの頭部表面へ局所的な鼻の突起を加算する
-  // (js/carving.jsのapplyNoseBump参照)。landmarkが無い旧プロジェクトは
-  // 何も変わらない(faceSculpt:nullでapplyNoseBump自体がスキップされる)。
-  if(gp.face_sculpt!==false && opts.faceNose){
+  // ★2026-07-11追加(顔の立体感対応): eye_L/eye_Rランドマークがあり、
+  // face_sculptが無効化されていなければ、彫刻済みの頭部表面へ局所的な目窩の
+  // 凹みを彫る(js/carving.jsのapplyEyeSocketRecess参照)。目窩はfront/back/
+  // sideどのシルエット輪郭にも現れない内部形状のため、凹ませても輪郭(=元
+  // イラストの実測データ)とは矛盾しない。landmarkが無い旧プロジェクトは
+  // 何も変わらない(faceSculpt:nullでapplyEyeSocketRecess自体がスキップ
+  // される)。
+  if(gp.face_sculpt!==false && (opts.faceEyeL || opts.faceEyeR)){
     carveOpts.faceSculpt = {
-      nose: opts.faceNose,
-      noseDepth: gp.nose_bump_depth,
-      noseRadiusX: gp.nose_bump_radius_x,
-      noseRadiusY: gp.nose_bump_radius_y,
+      eyeL: opts.faceEyeL, eyeR: opts.faceEyeR,
+      eyeSocketDepth: gp.eye_socket_depth,
+      eyeSocketRadiusX: gp.eye_socket_radius_x,
+      eyeSocketRadiusY: gp.eye_socket_radius_y,
     };
   }
   return {mxBounds:mxBounds, myBounds:myBounds, mzBounds:mzBounds, carveOpts:carveOpts};

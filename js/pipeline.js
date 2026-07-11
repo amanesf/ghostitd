@@ -35,10 +35,13 @@ function buildDerivedLandmarks(points, analysis, derivedBase){
     var el=points['elbow_'+s];
     if(el) d['elbow_'+s+'_mx']=MX(el[0]);
   });
-  // ★2026-07-11追加(顔の立体感対応): noseランドマーク(px)をmodel座標へ変換
-  // し、js/carving.jsのapplyNoseBumpが鼻の突起を彫る中心点として使う。
-  var nosePx=points['nose'];
-  if(nosePx) d.face_nose=[MX(nosePx[0]), MY(nosePx[1]), 0.0];
+  // ★2026-07-11追加(顔の立体感対応): eye_L/eye_Rランドマーク(px)をmodel座標
+  // へ変換し、js/carving.jsのapplyEyeSocketRecessが目窩の凹みを彫る中心点
+  // として使う。
+  ['L','R'].forEach(function(s){
+    var ep=points['eye_'+s];
+    if(ep) d['face_eye_'+s]=[MX(ep[0]), MY(ep[1]), 0.0];
+  });
   function meanV(keys){
     var vals = keys.map(function(k){return points[k];}).filter(Boolean).map(function(p){return V(p[1]);});
     return vals.length ? vals.reduce(function(a,b){return a+b;},0)/vals.length : undefined;
@@ -302,7 +305,7 @@ async function runCarvingStages(state, report){
     faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
     frontCont:null, backCont:null, sideCont:null,
     SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
-    pivots:pivots, gp:gp, faceNose:LM.face_nose,
+    pivots:pivots, gp:gp, faceEyeL:LM.face_eye_L, faceEyeR:LM.face_eye_R,
   });
 
   var accBuilt = [];

@@ -71,14 +71,15 @@ var DEFAULT_GEN_PARAMS = {
   // ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面)画像用のズレ補正。
   // 意味・既定値ともside_offset_x/yと同じ(js/accessories.jsのcurSideOffsetX/Y参照)。
   leftside_offset_x: 0, leftside_offset_y: 0,
-  // ★2026-07-11追加(顔の立体感対応): 頭部も他の部位と同じ「行ごとのスーパー
-  // 楕円断面」でしか彫っていなかったため、鼻筋の立体感が側面シルエットの
-  // 行単位の値にしか依存せず出なかった(js/carving.jsのapplyNoseBump参照)。
-  // nose landmarkを中心に、彫刻済みの表面から局所的に盛り上げるドーム状の
-  // 突起を加算する。face_sculpt=falseで無効化できる(landmarkが無い場合も
-  // 自動的にスキップされる)。
+  // ★2026-07-11追加(顔の立体感対応): 目窩(眼球が収まる凹み)はfront/back/side
+  // どのシルエット輪郭にも現れない内部形状のため、彫刻済みの頭部表面から
+  // 局所的に凹ませても輪郭(=元イラストの実測データ)とは矛盾しない
+  // (js/carving.jsのapplyEyeSocketRecess参照)。鼻は中心線上にあり側面画像の
+  // 実測奥行きが既に出ているため、独自の突起を足すと側面イラストと食い違う
+  // ことが判明し、対象にしないことにした(ユーザー指摘)。
+  // face_sculpt=falseで無効化できる(landmarkが無い場合も自動的にスキップされる)。
   face_sculpt: true,
-  nose_bump_depth: 0.012, nose_bump_radius_x: 0.018, nose_bump_radius_y: 0.028,
+  eye_socket_depth: 0.008, eye_socket_radius_x: 0.022, eye_socket_radius_y: 0.018,
 };
 P3D.DEFAULT_GEN_PARAMS = DEFAULT_GEN_PARAMS;
 
@@ -625,13 +626,19 @@ var LM=[
  // 未使用(将来、表情/顔パーツ位置合わせ等で使う可能性があるための先行追加)。
  // 未使用のため彫刻結果には影響しないが、マーク済みの位置として保存・表示は
  // される(landmark_tool.htmlのplaceAll()が自動配置の粗い初期値を置く)。
+ // ★2026-07-11: 顔の立体感対応でこの2点を実際に使うようにした
+ // (js/pipeline.jsのbuildDerivedLandmarksでmodel座標に変換され、
+ // js/carving.jsのapplyEyeSocketRecessが彫刻済みの頭部表面へ局所的な
+ // 目窩の凹みを彫るのに使う)。
+ // ★2026-07-11(検討の結果、鼻には使わないことにした): 当初は同じ仕組みで
+ // 鼻先ランドマークを追加し突起を加算していたが、鼻は顔の中心線上にあり、
+ // side(側面)画像のその高さの行スキャンから既に実測の奥行きが出ている
+ // (ユーザー指摘)。そこへ独自パラメータの突起を追加で盛ると、側面の実測値
+ // (=実際の側面イラスト)と食い違う奥行きになってしまう。目窩はどの
+ // ビュー(front/back/side)のシルエット輪郭にも現れない内部の凹みなので、
+ // 追加しても輪郭とは矛盾しない(このため目窩だけ採用した)。
  {k:"eye_L",jp:"目L",g:"face",desc:"左目(画面に向かって左側)の中心"},
  {k:"eye_R",jp:"目R",g:"face",desc:"右目(画面に向かって右側)の中心"},
- // ★2026-07-11追加: 顔の立体感対応(ユーザー指摘「顔がのっぺりしている」)。
- // js/pipeline.jsのbuildDerivedLandmarksでmodel座標に変換され、
- // js/carving.jsのapplyNoseBumpが彫刻済みの頭部表面へ局所的なドーム状の
- // 突起を加算するのに使う(唯一、彫刻結果に実際に使われるランドマーク)。
- {k:"nose",jp:"鼻",g:"face",desc:"鼻先(鼻筋が一番高く盛り上がる点)"},
  {k:"mouth_L",jp:"口角L",g:"face",desc:"口の左端(画面に向かって左側の口角)"},
  {k:"mouth_R",jp:"口角R",g:"face",desc:"口の右端(画面に向かって右側の口角)"},
  {k:"clavicle_L",jp:"鎖骨L",g:"torso",desc:"鎖骨(首の付け根と肩の間、体の中心寄り。肩関節そのものではない)"},
@@ -737,7 +744,6 @@ function placeAllLandmarks(A){
   var headH=yOf(hb)-ytop;
   var eyeHw=A.shoulder_hw*0.28, mouthHw=A.shoulder_hw*0.12;
   P.eye_L=[cx-eyeHw, ytop+headH*0.46];P.eye_R=[cx+eyeHw, ytop+headH*0.46];
-  P.nose=[cx, ytop+headH*0.64];
   P.mouth_L=[cx-mouthHw, ytop+headH*0.82];P.mouth_R=[cx+mouthHw, ytop+headH*0.82];
   var shY=yOf(A.shoulder_v);
   P.shoulder_L=[cx-A.shoulder_hw,shY];P.shoulder_R=[cx+A.shoulder_hw,shY];
