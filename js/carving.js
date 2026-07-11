@@ -440,6 +440,66 @@ function labelConnectedComponents(mask, W, H){
 P3D.buildCombinedFrontRaster = buildCombinedFrontRaster;
 P3D.labelConnectedComponents = labelConnectedComponents;
 
+// ★2026-07-11追加(ユーザー指摘「パーツ内部にまで隙間だらけ」対応の実測調査で
+// 判明): 同一アクセサリー(例: 左ツインテール)の中で、絵柄上は1本の続いた
+// 房なのに、交差して見える箇所(手前の房が奥の房を隠す描き方)で数px〜十数px
+// 幅の実際の背景色の隙間が色分けマップに残っていることが、実サンプル画像の
+// 検証(front colormap上で連結成分を数える)で確認できた。この隙間は
+// labelConnectedComponents(8連結)にとっては「本当に別の塊」に見えるため、
+// carveRegionのtrack判定で別トラック(=奥行きを別々に測る)に分かれ、3D化
+// すると絵では気にならなかった数pxの隙間がそのまま立体的な溝になって見える
+// (体とアクセサリーの境目の隙間とは別の、同一パーツ内部の分断)。
+// dilate→erode(モルフォロジー closing、正方形構造要素の分離可能な箱型実装)で
+// track判定用のラスタだけを閉じ、この程度の細い隙間を「同じ房」として扱える
+// ようにする(実測値は彫刻に使うfa/ba自体には手を加えない、あくまで
+// どの塊を同じtrackとみなすかの判定だけに使う)。
+function dilateMask(mask, w, h, r){
+  if(!(r>0)) return mask;
+  var tmp=new Uint8Array(w*h);
+  for(var y=0;y<h;y++){
+    var rowOff=y*w;
+    for(var x=0;x<w;x++){
+      var v=0, xlo=Math.max(0,x-r), xhi=Math.min(w-1,x+r);
+      for(var xx=xlo; xx<=xhi && !v; xx++){ if(mask[rowOff+xx]) v=1; }
+      tmp[rowOff+x]=v;
+    }
+  }
+  var out=new Uint8Array(w*h);
+  for(var x2=0;x2<w;x2++){
+    for(var y2=0;y2<h;y2++){
+      var v2=0, ylo=Math.max(0,y2-r), yhi=Math.min(h-1,y2+r);
+      for(var yy=ylo; yy<=yhi && !v2; yy++){ if(tmp[yy*w+x2]) v2=1; }
+      out[y2*w+x2]=v2;
+    }
+  }
+  return out;
+}
+function erodeMask(mask, w, h, r){
+  if(!(r>0)) return mask;
+  var tmp=new Uint8Array(w*h);
+  for(var y=0;y<h;y++){
+    var rowOff=y*w;
+    for(var x=0;x<w;x++){
+      var v=1, xlo=Math.max(0,x-r), xhi=Math.min(w-1,x+r);
+      for(var xx=xlo; xx<=xhi && v; xx++){ if(!mask[rowOff+xx]) v=0; }
+      tmp[rowOff+x]=v;
+    }
+  }
+  var out=new Uint8Array(w*h);
+  for(var x2=0;x2<w;x2++){
+    for(var y2=0;y2<h;y2++){
+      var v2=1, ylo=Math.max(0,y2-r), yhi=Math.min(h-1,y2+r);
+      for(var yy=ylo; yy<=yhi && v2; yy++){ if(!mask[yy*w+x2]) v2=0; }
+      out[y2*w+x2]=v2;
+    }
+  }
+  return out;
+}
+function morphCloseMask(mask, w, h, r){
+  return (r>0) ? erodeMask(dilateMask(mask,w,h,r), w, h, r) : mask;
+}
+P3D.morphCloseMask = morphCloseMask;
+
 // linspace(min,max,n)相当(n>=2前提、Python np.linspaceと同じ: 端点を含みn-1等分)
 function linspace(a,b,n){
   var out=new Float64Array(n);
@@ -504,6 +564,10 @@ function carveRegion(opts){
   // 連結成分ラベリングに置き換えたことで不要になった(位相的に繋がっている
   // かどうかで判定するため、行数ベースの許容ギャップという概念自体が無い)。
   var vox=opts.vox, trackWin=opts.trackWin;
+  // ★2026-07-11追加: 房どうしが交差して見える描き方(手前の房が奥の房を隠す)
+  // で色分けマップに残る数px〜十数px幅の隙間を、track判定(連結成分ラベリング)
+  // の前にモルフォロジーclosingで埋めるための半径(px)。0で無効(従来通り)。
+  var trackGapClosePx=opts.trackGapClosePx||0;
   var psqHead=opts.psqHead, psqTorso=opts.psqTorso, psqLegs=opts.psqLegs;
   var psqArms=opts.psqArms, psqHands=opts.psqHands;
   var neckY=opts.neckY, hipsY=opts.hipsY;
@@ -567,8 +631,9 @@ function carveRegion(opts){
   // 接近すると別の房のtrackを誤って繋いでしまっていた。front∪back合成
   // ラスタの連結成分ラベリング(labelConnectedComponents、画像全体に対する
   // 厳密な位相判定)でtrackを決めることで、この誤結合を構造的に排除する。
-  var trackLabels = labelConnectedComponents(
-    buildCombinedFrontRaster(fa, ba, faW, faH, backOffsetX, backOffsetY), faW, faH);
+  var combinedRaster = buildCombinedFrontRaster(fa, ba, faW, faH, backOffsetX, backOffsetY);
+  var labelRaster = trackGapClosePx>0 ? morphCloseMask(combinedRaster, faW, faH, trackGapClosePx) : combinedRaster;
+  var trackLabels = labelConnectedComponents(labelRaster, faW, faH);
   function buildWidthTracks(){
     var tracksByLabel=new Map(); // label -> {rows:[],cx:[],hw:[]}
     var fallbackSeq=0;
