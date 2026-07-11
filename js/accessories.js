@@ -141,9 +141,15 @@ function buildAccessoryCarveOptsList(opts){
 
     var faAcc = (mask.front && mask.front.alpha) ? mask.front.alpha : new Uint8Array(faW*faH);
     var baAcc = (mask.back && mask.back.alpha) ? mask.back.alpha : new Uint8Array(faW*faH);
-    var saAcc;
+    // ★2026-07-11: gp.subpixel_edges有効時、js/pipeline.jsがmask[view].contに
+    // 最近傍色分類のサブピクセル境界指標(P3D.boundaryContForCandidate)を
+    // 載せている(体側と同じ仕組み、js/visual_hull.jsのbuildBodyCarveOpts参照)。
+    var faContAcc = (mask.front && mask.front.cont) ? mask.front.cont : null;
+    var baContAcc = (mask.back && mask.back.cont) ? mask.back.cont : null;
+    var saAcc, saContAcc=null;
     if(sideMask && sideMask.alpha){
       saAcc = sideMask.alpha;
+      saContAcc = sideMask.cont || null;
     }else{
       var sx0=curSIDE_REF+mzMin*SCALE+curSideOffsetX, sx1=curSIDE_REF+mzMax*SCALE+curSideOffsetX;
       var sy0=curSYTOP+(1.0-myMax)*(curSYBOT-curSYTOP)+curSideOffsetY, sy1=curSYTOP+(1.0-myMin)*(curSYBOT-curSYTOP)+curSideOffsetY;
@@ -152,7 +158,8 @@ function buildAccessoryCarveOptsList(opts){
 
     var carveOpts = {
       fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:curSAW, saH:curSAH,
-      faCont: null, baCont: null, saCont: null,
+      faCont: faContAcc, baCont: baContAcc, saCont: saContAcc,
+      whiteThr: 0,
       SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:curSYTOP, SYBOT:curSYBOT, SIDE_REF:curSIDE_REF,
       backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:curSideOffsetX, sideOffsetY:curSideOffsetY,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],

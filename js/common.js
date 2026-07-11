@@ -70,9 +70,24 @@ var DEFAULT_GEN_PARAMS = {
   arm_circle: true, arm_tol: 0.06, arm_max_hw: 0.2,
   hand_extrude: true, hand_depth: 0.01, hand_max_hw: 0.1, hand_len: 0.25,
   alpha_dilate: 9,
-  // ★2026-07-09: 全身のシルエットも色分けマップ+色許容誤差方式に統一した
-  // (js/pipeline.jsのrunCarvingStages参照)。body(体=黒)の色許容誤差。
-  body_color_tolerance: 12,
+  // ★2026-07-11追加(切り抜き精度向上、point3): にじみ(bleedEdges)の起点を
+  // 輪郭ぎりぎり(0)ではなく、この分だけ内側へ侵食した「安全な内部色」から
+  // 取るようにする(元イラストの黒い縁取りストロークをにじみが外側へ延長して
+  // 太らせてしまう不具合の対策)。0で従来通り輪郭ぎりぎりから。
+  bleed_inset_px: 2,
+  // ★2026-07-09: 全身のシルエットも色分けマップ由来の抽出方式に統一した
+  // (js/pipeline.jsのrunCarvingStages参照)。
+  // ★2026-07-11: body_color_tolerance(体色=黒との色許容誤差)は最近傍色分類
+  // (P3D.classifySilhouetteRaw)への置き換えに伴い廃止した(体・全アクセサリー
+  // 色を候補とした分類のみで境界が確定的に決まるため、tolerance自体が不要)。
+  // ★2026-07-11追加: 体シルエットの行スキャン(front/back/side幅・奥行き測定)
+  // で、最近傍色分類の境界をサブピクセル補間する(P3D.boundaryContForCandidate、
+  // js/carving.jsのcarveRegion内faCont/baCont/saCont参照)。旧・輝度しきい値
+  // ベースのサブピクセル補正(findRunsSubpixel)は色分けマップに適用すると境界が
+  // 暴れる不具合があったため撤回した実績があるが、これは色分類そのものに
+  // 対応した別方式のため、様子を見て問題があればfalseで無効化できるように
+  // トグルとして残す。
+  subpixel_edges: true,
   kb_per_face: 200,
   // ★2026-07-05: 背面/側面写真はそれぞれ別に撮影/作画されるため、前面基準の
   // CX/SCALE/YBOTをそのまま流用(鏡像)する彫り出し/テクスチャ変換に、
@@ -297,37 +312,18 @@ function hexToRgb(hex){
 }
 P3D.hexToRgb = hexToRgb;
 
-// ctx: CanvasRenderingContext2D(色分けマップ画像が描画済み), w,h: サイズ,
-// targetColorHex: 抽出したい色("#rrggbb"), toleranceOpt: 色距離許容誤差
-// (デフォルト40。アンチエイリアス境界のにじみを吸収するため、RGB各成分の
-// 差の二乗和のルート=ユークリッド距離で判定する)。
-// 戻り値: Uint8Array(w*h)、1=対象色の画素(連結成分フィルタ前の生の判定)。
-// ★2026-07-09: body(体=黒)もaccessoryと同じ色分けマップ+色許容誤差方式で
-// 抽出するようになったため(loadAlphaFromColormap参照)、色距離判定部分を
-// extractMaskFromColormapから切り出して共通化した。
-function colorRegionRawMask(ctx, w, h, targetColorHex, toleranceOpt){
-  var tol = (toleranceOpt===undefined || toleranceOpt===null) ? 12 : toleranceOpt;
-  var target = hexToRgb(targetColorHex);
-  var id = ctx.getImageData(0,0,w,h);
-  var data = id.data;
-  var raw = new Uint8Array(w*h);
-  var tol2 = tol*tol;
-  for(var i=0,p=0; i<data.length; i+=4,p++){
-    var dr=data[i]-target[0], dg=data[i+1]-target[1], db=data[i+2]-target[2];
-    if(dr*dr+dg*dg+db*db <= tol2) raw[p]=1;
-  }
-  return raw;
-}
-P3D.colorRegionRawMask = colorRegionRawMask;
-
+// ★2026-07-11: 各色を独立にEuclidean色距離+tolerance判定するcolorRegionRawMask/
+// extractMaskFromColormap/loadAlphaFromColormap(旧方式)は、最近傍色分類
+// (classifySilhouetteRaw、下記)への置き換えに伴い呼び出し元が無くなったため
+// 削除した。単一色の判定結果組み立て部分(bbox算出+マスクcanvas化)は
+// packRawMaskToResultとして残し、新方式からも共通利用する。
+//
 // 戻り値: {maskDataUrl, bbox:[x0,y0,x1,y1](ピクセル座標、y0<y1)} | null
 // (該当色の画素が1つも無ければnull)。一定面積以上の連結成分を全てOR合成して
 // 採用する(GHOST_SCANNER_PLAN.md「運用面の修正6点・②」。以前は最大成分1つ
 // だけを採用しており、同一色の領域が複数の孤立した塊に分かれるケースで
 // 小さい方が失われていた)。
-function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAreaPxOpt){
-  var raw = colorRegionRawMask(ctx, w, h, targetColorHex, toleranceOpt);
-  var comp = significantComponentsMask(raw, w, h, minAreaPxOpt);
+function packRawMaskToResult(comp, w, h){
   var x0=w, x1=-1, y0=h, y1=-1, any=false;
   for(var y=0;y<h;y++){
     for(var x=0;x<w;x++){
@@ -350,123 +346,141 @@ function extractMaskFromColormap(ctx, w, h, targetColorHex, toleranceOpt, minAre
   mctx.putImageData(mid,0,0);
   return { maskDataUrl: maskCanvas.toDataURL("image/png"), bbox:[x0,y0,x1+1,y1+1] };
 }
-P3D.extractMaskFromColormap = extractMaskFromColormap;
+P3D.packRawMaskToResult = packRawMaskToResult;
 
-// ---- 体(全身)のシルエット抽出: 色分けマップの「黒(体色)」方式 ----
-// ★2026-07-09: 一度は「白背景でなければ全て体」(白との色距離)方式にしていた
-// (マフラーが首を・スカートが腰を覆う行でも体シルエットが途切れないように
-// するため)。しかしこの方式だと体の彫刻(visual hull)がアクセサリーの
-// 見た目の幅まで体として彫ってしまい(体がスカート/マフラーの形に膨らむ)、
-// 生成モデルにおいて全身がアクセサリー領域を含んだ不自然な形状になる不具合が
-// あった。
-// ★2026-07-10: 体は色分けマップの黒(体色)のみと一致する画素だけを対象にする
-// 方式に戻した。マフラー/スカートで覆われた行では体シルエットが途切れ、
-// visual hullが頭部/脚を独立した閉曲面として彫ることがあるが、この分断自体は
-// 許容する(js/carving.jsのdropSmallFragments/computeNormalsFixWindingを
-// 連結成分単位で処理するよう修正済み。js/visual_hull.jsのminFragFrac参照)。
-// ctx,w,h: 色分けマップが描画済みのcanvas context、toleranceOpt: 黒との
-// 色許容誤差(既定12)。
-// 戻り値: Uint8Array(w*h)、1=体のシルエット(穴埋め・ノイズ除去済み)。
-function loadAlphaFromColormap(ctx, w, h, toleranceOpt){
-  var raw = colorRegionRawMask(ctx, w, h, "#000000", toleranceOpt);
-  var alpha = significantComponentsMask(raw, w, h);
-  alpha = fillHoles(alpha, w, h);
-  return alpha;
-}
-P3D.loadAlphaFromColormap = loadAlphaFromColormap;
-
-// ---- 色分けマップの境界ギャップ埋め ----
-// ★2026-07-10(ユーザー指摘「隙間は仕組みの問題では」への対応): 体・各
-// アクセサリーは、それぞれ独立に「その色との距離がtolerance以内か」で
-// 判定される(colorRegionRawMask)。境界には単純な1〜2pxのアンチエイリアス
-// だけでなく、AI生成の色分けマップにありがちな数px〜十数px幅の陰影
-// (グラデーション)が乗っていることがあり、この幅の画素は体色からも
-// 隣接アクセサリー色からもtolerance外になって「どちらの判定にも入らない」
-// 実データの穴になる(実測: スカートと体の境目で約11px幅、1024px画像中)。
-// 3D彫刻はこの穴をそのまま「何も無い」として彫るため、パーツ境界に本物の
-// 隙間が空く。彫刻方式(統合彫刻)をいくら変えても、入力データ自体に穴が
-// あれば埋まらない。
-//
-// 対策: 「未確定画素の連なりが、両端とも既に確定した領域に接している(=2つの
-// 既知パーツに挟まれている)」場合だけを本物の境界ギャップとみなして埋める。
-// 埋める際は、そのpx自身の実際の色が最も近い候補色の領域に割り当てる。
-// ★重要: 最初の実装は「確定領域から未確定画素へ四方に拡張する」単純な
-// 多始点BFSだったが、これだと体/アクセサリーの外側の本物の背景との境目
-// (片側にしか確定領域が無い)まで拡張距離の上限いっぱいまで食い込み、
-// キャラクター全体が輪郭に沿って一回り膨らむ深刻な副作用があった
-// (実測: front画像で確定画素が15%→28%まで増加、境界だけでなく外周全体が
-// 膨張していた)。両端(上下 or 左右)とも確定領域に接している連なりだけを
-// 埋める「橋渡し」判定にすることで、片側が本物の背景(確定領域が無い)である
-// 外周は絶対に対象にならないようにした(背景を候補色に含める必要も無くなった)。
-//
-// regions: [{targetRgb:[r,g,b], alpha:Uint8Array(w*h)}, ...] (体・各アクセサリー)
-// colormapCtx,w,h: 色分けマップのcanvas context・サイズ
-// maxGapPx: 橋渡しとみなす未確定連なりの最大幅/高さ(既定30)
-// 副作用: 各regionのalphaを直接書き換える(埋めた分を1に立てる)。戻り値なし。
-function fillColorGaps(regions, colormapCtx, w, h, maxGapPx){
-  maxGapPx = (maxGapPx===undefined) ? 30 : maxGapPx;
-  var data = colormapCtx.getImageData(0,0,w,h).data;
+// ---- 最近傍色分類によるマスク抽出(2026-07-11) ----
+// ★2026-07-10までの体(全身)シルエット抽出は、色分けマップの黒(体色)のみと
+// 一致する画素だけを対象にする方式(loadAlphaFromColormap、廃止済み)だった。
+// マフラー/スカートで覆われた行では体シルエットが途切れ、visual hullが頭部/
+// 脚を独立した閉曲面として彫ることがあるが、この分断自体は許容する
+// (js/carving.jsのdropSmallFragments/computeNormalsFixWindingを連結成分単位で
+// 処理するよう修正済み。js/visual_hull.jsのminFragFrac参照)。
+// 体・各アクセサリーをそれぞれ独立に「その色との距離がtolerance以内か」で
+// 判定する従来方式(colorRegionRawMask、廃止済み)は、境界の陰影(グラデー
+// ション)幅がtoleranceを超えると「どちらの判定にも入らない未確定画素」を生み、
+// fillColorGaps(廃止済み)で事後に埋める必要があった。色分けマップは本来、体・各
+// アクセサリー・背景をそれぞれ単色フラットで塗り分けている(のはず)なので、
+// 各画素を「既知の色候補のうちどれに一番近いか」で分類(最近傍色分類=
+// 単純なボロノイ分割)すれば、必ずいずれか1つの候補に確定的に割り当たり、
+// 未確定画素の帯そのものが原理的に発生しない(tolerance/fillColorGaps不要)。
+// candidates: [[r,g,b], ...] 全候補色。背景を含めないと、体/アクセサリーの
+// 実際には無い背景領域まで最寄りの色として割り当てられ、シルエットが輪郭の
+// 外側へ膨張してしまうため、呼び出し元は必ず背景色を候補に含めること。
+// 戻り値: Int32Array(w*h)、各画素が最も近い候補のindex。
+function classifyColorsNearest(ctx, w, h, candidates){
+  var id = ctx.getImageData(0,0,w,h);
+  var data = id.data;
   var n = w*h;
-  var owner = new Int32Array(n).fill(-1);
-  for(var r=0;r<regions.length;r++){
-    var a = regions[r].alpha;
-    for(var p=0;p<n;p++){ if(a[p]) owner[p]=r; }
-  }
-  function nearestRegion(p){
-    var px=data[p*4], py=data[p*4+1], pz=data[p*4+2];
-    var bestR=-1, bestD=Infinity;
-    for(var r2=0;r2<regions.length;r2++){
-      var tc=regions[r2].targetRgb;
-      var dr=px-tc[0], dg=py-tc[1], db=pz-tc[2];
+  var labels = new Int32Array(n);
+  var nc = candidates.length;
+  for(var i=0,p=0; i<data.length; i+=4,p++){
+    var r=data[i], g=data[i+1], b=data[i+2];
+    var bestI=0, bestD=Infinity;
+    for(var c=0;c<nc;c++){
+      var tc=candidates[c];
+      var dr=r-tc[0], dg=g-tc[1], db=b-tc[2];
       var dd=dr*dr+dg*dg+db*db;
-      if(dd<bestD){ bestD=dd; bestR=r2; }
+      if(dd<bestD){ bestD=dd; bestI=c; }
     }
-    return bestR;
+    labels[p]=bestI;
   }
-  function fillRun(pixels){
-    for(var i=0;i<pixels.length;i++){
-      var p=pixels[i];
-      if(owner[p]>=0) continue; // 別方向のスキャンで既に埋まっていることがある
-      var r=nearestRegion(p);
-      owner[p]=r; regions[r].alpha[p]=1;
-    }
-  }
-  // 横方向の橋渡し: 各行を左から右へ走査し、未確定の連なりの両端が確定画素
-  // (行内、または画像端でない)なら橋渡しとみなして埋める。
-  for(var y=0;y<h;y++){
-    var rowOff=y*w, x=0;
-    while(x<w){
-      if(owner[rowOff+x]>=0){ x++; continue; }
-      var start=x;
-      while(x<w && owner[rowOff+x]<0) x++;
-      var end=x; // 未確定連なりは[start,end)
-      var leftOk = start>0 && owner[rowOff+start-1]>=0;
-      var rightOk = end<w && owner[rowOff+end]>=0;
-      if(leftOk && rightOk && (end-start)<=maxGapPx){
-        var pixels=[]; for(var xx=start;xx<end;xx++) pixels.push(rowOff+xx);
-        fillRun(pixels);
-      }
-    }
-  }
-  // 縦方向の橋渡し: 横方向スキャンで拾えない(境界が縦向きの)ギャップ用に、
-  // 各列を上から下へ走査して同様の判定を行う。
-  for(var x2=0;x2<w;x2++){
-    var y2=0;
-    while(y2<h){
-      if(owner[y2*w+x2]>=0){ y2++; continue; }
-      var start2=y2;
-      while(y2<h && owner[y2*w+x2]<0) y2++;
-      var end2=y2;
-      var topOk = start2>0 && owner[(start2-1)*w+x2]>=0;
-      var botOk = end2<h && owner[end2*w+x2]>=0;
-      if(topOk && botOk && (end2-start2)<=maxGapPx){
-        var pixels2=[]; for(var yy=start2;yy<end2;yy++) pixels2.push(yy*w+x2);
-        fillRun(pixels2);
-      }
-    }
-  }
+  return labels;
 }
-P3D.fillColorGaps = fillColorGaps;
+P3D.classifyColorsNearest = classifyColorsNearest;
+
+// classifyColorsNearestの戻り値からidx番の候補のみを1とする2値マスクを作る。
+function maskFromLabels(labels, idx){
+  var n=labels.length, out=new Uint8Array(n);
+  for(var i=0;i<n;i++) out[i] = (labels[i]===idx) ? 1 : 0;
+  return out;
+}
+P3D.maskFromLabels = maskFromLabels;
+
+// 体色(既定黒)+全アクセサリー色を1回の最近傍分類で一括抽出する(体と
+// アクセサリーが同じ分類結果から導かれるため、境界が構造的に一致し隙間が
+// 生じない)。背景("#ffffff")を候補0として自動的に含める。
+// accessoryColorHexes: ["#rrggbb", ...] (体以外の全アクセサリーの色。この
+// ビューで使われていない色を含めても、単にどの画素からも選ばれないだけで
+// 実害は無い)
+// 戻り値: {bodyRaw:Uint8Array, accRaw:[Uint8Array,...]}
+// (significantComponentsMask適用前の生マスク。呼び出し元がminAreaPxで仕上げる)
+function classifySilhouetteRaw(ctx, w, h, bodyColorHex, accessoryColorHexes){
+  bodyColorHex = bodyColorHex || "#000000";
+  accessoryColorHexes = accessoryColorHexes || [];
+  var candidates = [hexToRgb("#ffffff"), hexToRgb(bodyColorHex)].concat(
+    accessoryColorHexes.map(hexToRgb));
+  var labels = classifyColorsNearest(ctx, w, h, candidates);
+  var bodyRaw = maskFromLabels(labels, 1);
+  var accRaw = accessoryColorHexes.map(function(_, i){ return maskFromLabels(labels, i+2); });
+  return {bodyRaw:bodyRaw, accRaw:accRaw};
+}
+P3D.classifySilhouetteRaw = classifySilhouetteRaw;
+
+// ---- 最近傍色分類のサブピクセル境界補正(2026-07-11) ----
+// 旧subpixelEdge/findRunsSubpixel(js/common.js冒頭)は「1個の連続値(輝度等)が
+// 固定しきい値を跨ぐ点」を線形補間するもので、白背景の写真専用だった
+// (colormap由来の2値マスクに適用すると境界が暴れることが分かり撤回済み、
+// 上部のコメント参照)。ここでは色分けマップの最近傍色分類そのものに
+// 素直に対応するサブピクセル指標を作る: 画素pについて
+//   cont[p] = (own候補以外で最も近い候補までの距離) - (own候補までの距離)
+// と定義すると、cont>0はpがown候補側(内側)、cont<0は他候補側(外側)、
+// cont=0がちょうど最近傍色分類の境界(ボロノイ境界)と一致する。境界の
+// アンチエイリアス画素は前後2色の単純な線形混合(pixel=(1-t)*own+t*other、
+// t=0でown、t=1でother)である前提を置くと、cont(t)=(1-2t)*|other-own|に
+// なりt=0.5(混合率半々)でちょうどcont=0を通るため、findRunsSubpixelの
+// 「thr=0を跨ぐ点を線形補間する」という既存の仕組みにそのまま載せられる
+// (subpixelEdge(cont,iIn,iOut,thr=0)呼び出し側がwhiteThr:0を渡す)。
+// candidates: classifyColorsNearestと同じ候補配列。ownIdx: この領域の候補index。
+// 戻り値: Float32Array(w*h)。
+function boundaryContForCandidate(ctx, w, h, candidates, ownIdx){
+  var id = ctx.getImageData(0,0,w,h);
+  var data = id.data;
+  var n = w*h;
+  var out = new Float32Array(n);
+  var nc = candidates.length;
+  var own = candidates[ownIdx];
+  for(var i=0,p=0; i<data.length; i+=4,p++){
+    var r=data[i], g=data[i+1], b=data[i+2];
+    var dr0=r-own[0], dg0=g-own[1], db0=b-own[2];
+    var distOwn = Math.sqrt(dr0*dr0+dg0*dg0+db0*db0);
+    var distOther = Infinity;
+    for(var c=0;c<nc;c++){
+      if(c===ownIdx) continue;
+      var tc=candidates[c];
+      var dr=r-tc[0], dg=g-tc[1], db=b-tc[2];
+      var dd=Math.sqrt(dr*dr+dg*dg+db*db);
+      if(dd<distOther) distOther=dd;
+    }
+    out[p] = distOther - distOwn;
+  }
+  return out;
+}
+P3D.boundaryContForCandidate = boundaryContForCandidate;
+
+// classifySilhouetteRawと対になる、体+全アクセサリーのサブピクセル境界指標
+// (boundaryContForCandidate)を同じ候補構成で一括算出する。
+// 戻り値: {bodyCont:Float32Array, accCont:[Float32Array,...]}
+function classifySilhouetteCont(ctx, w, h, bodyColorHex, accessoryColorHexes){
+  bodyColorHex = bodyColorHex || "#000000";
+  accessoryColorHexes = accessoryColorHexes || [];
+  var candidates = [hexToRgb("#ffffff"), hexToRgb(bodyColorHex)].concat(
+    accessoryColorHexes.map(hexToRgb));
+  var bodyCont = boundaryContForCandidate(ctx, w, h, candidates, 1);
+  var accCont = accessoryColorHexes.map(function(_, i){ return boundaryContForCandidate(ctx, w, h, candidates, i+2); });
+  return {bodyCont:bodyCont, accCont:accCont};
+}
+P3D.classifySilhouetteCont = classifySilhouetteCont;
+
+// flipAlphaHorizontalの型非依存版(Float32Array等、任意のTypedArrayに使える)。
+function flipArrayHorizontal(arr, w, h){
+  var out = new arr.constructor(w*h);
+  for(var y=0;y<h;y++){
+    var row=y*w;
+    for(var x=0;x<w;x++){ out[row+(w-1-x)] = arr[row+x]; }
+  }
+  return out;
+}
+P3D.flipArrayHorizontal = flipArrayHorizontal;
 
 // alpha(Uint8Array(w*h)、1=前景)からピクセルbbox([x0,y0,x1,y1]、x1/y1は
 // 排他的な右下)を求める。前景画素が無ければnull。
@@ -521,18 +535,50 @@ function loadMaskAlphaAsync(maskDataUrl, w, h){
 }
 P3D.loadMaskAlphaAsync = loadMaskAlphaAsync;
 
+// 4連結の1px単純侵食をr回繰り返す(bleedEdgesの境界インセット用)。
+function erode4N(mask, w, h, r){
+  var m = mask;
+  for(var it=0; it<r; it++){
+    var next=new Uint8Array(w*h);
+    for(var y=0;y<h;y++){
+      for(var x=0;x<w;x++){
+        var idx=y*w+x;
+        if(!m[idx]){ next[idx]=0; continue; }
+        var ok=1;
+        if(x>0 && !m[idx-1]) ok=0;
+        if(ok && x<w-1 && !m[idx+1]) ok=0;
+        if(ok && y>0 && !m[idx-w]) ok=0;
+        if(ok && y<h-1 && !m[idx+w]) ok=0;
+        next[idx]=ok;
+      }
+    }
+    m = next;
+  }
+  return m;
+}
+
 // ---- 縁の色にじみ(prep.stage_bleedのJS移植) ----
 // 透明画素を最も近い不透明画素のRGBで埋め(distance_transform_edtのindices相当を
 // 多元BFSで代用)、アルファをalphaDilate回だけ膨張させる。
+// ★2026-07-11追加(切り抜き精度向上、point3): 元イラストは輪郭を黒い縁取り
+// ストロークで描くことが多く、にじみの起点(BFSのシード)を輪郭ぎりぎりの
+// 画素(=縁取りストロークそのもの)にすると、外側ににじませた分だけ縁取りが
+// 太って見える不具合があった。bleedInsetPxで指定した分だけalphaを内側に
+// 侵食(erode4N)した「安全な内部色」だけをシードにすることで、にじみが
+// 縁取りの色ではなく本来の内部の塗り色を外側へ延長するようにする(実際に
+// 見えている前景画素自体の色は書き換えない、あくまでにじみの「起点」だけの
+// 変更)。bleedInsetPx=0なら従来通り輪郭ぎりぎりの画素をそのままシードにする。
 // 戻り値: 新しいImageData(w,h) と同サイズのUint8ClampedArray rgba。
-function bleedEdges(rgba, w, h, alpha, alphaDilate){
+function bleedEdges(rgba, w, h, alpha, alphaDilate, bleedInsetPx){
   alphaDilate = (alphaDilate===undefined) ? 9 : alphaDilate;
+  bleedInsetPx = (bleedInsetPx===undefined || bleedInsetPx===null) ? 0 : bleedInsetPx;
   var n=w*h;
+  var seedAlpha = bleedInsetPx>0 ? erode4N(alpha, w, h, bleedInsetPx) : alpha;
   var nearestIdx=new Int32Array(n).fill(-1);
   var dist=new Int32Array(n).fill(-1);
   var visited=new Uint8Array(n);
   var queue=[]; var qh=0;
-  for(var i=0;i<n;i++){ if(alpha[i]){ nearestIdx[i]=i; dist[i]=0; visited[i]=1; queue.push(i); } }
+  for(var i=0;i<n;i++){ if(seedAlpha[i]){ nearestIdx[i]=i; dist[i]=0; visited[i]=1; queue.push(i); } }
   // ★2026-07-05: 以前はキャンバス全域まで最近傍色を無制限に伝播していたため、
   // Tポーズの袖・脚等にある細かい帯模様(リストバンド等)の色が背景の遠くまで
   // 直線的なボロノイ境界として伸び、輪郭からわずかにはみ出た頂点(髪の房・
@@ -556,9 +602,16 @@ function bleedEdges(rgba, w, h, alpha, alphaDilate){
   }
   var outRgba=new Uint8ClampedArray(n*4);
   for(var i2=0;i2<n;i2++){
+    var o=i2*4;
+    if(alpha[i2]){
+      // 実際に見えている前景画素は、シードから外れていても実ピクセルの
+      // 絵柄自体をそのまま使う(にじみの起点変更は外側への延長にのみ影響する)。
+      outRgba[o]=rgba[o]; outRgba[o+1]=rgba[o+1]; outRgba[o+2]=rgba[o+2]; outRgba[o+3]=255;
+      continue;
+    }
     var farOrUnreached = (nearestIdx[i2]<0) || (dist[i2]>BLEED_MAX_DIST);
     var src2 = farOrUnreached ? i2 : nearestIdx[i2];
-    var so=src2*4, o=i2*4;
+    var so=src2*4;
     outRgba[o]=rgba[so]; outRgba[o+1]=rgba[so+1]; outRgba[o+2]=rgba[so+2]; outRgba[o+3]=255;
   }
   // アルファ膨張(iterations回、4連結の単純膨張。ndimage.binary_dilationの既定=4連結相当)

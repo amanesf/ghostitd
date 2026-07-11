@@ -97,7 +97,7 @@ P3D.buildDerivedLandmarks = buildDerivedLandmarks;
  *   imgs: {front:{el,w,h}, side:{...}, back:{...}}  (landmark_tool.htmlのimgs)
  *   colormaps: {front:{canvas,ctx,w,h}, side:{...}, leftSide:{...}, back:{...}}
  *     (landmark_tool.htmlのcolormaps。体・アクセサリーとも色分けマップ由来の
- *     色許容誤差方式でシルエットを抽出するため必須)
+ *     最近傍色分類方式でシルエットを抽出するため必須)
  *   points, analysis: landmark_tool.htmlの同名変数
  *   deriveFromPoints: function(points,analysis)->derivedBase (呼び出し元の関数をそのまま渡す)
  *   accessories: landmark_tool.htmlのaccessories配列
@@ -131,61 +131,51 @@ async function runCarvingStages(state, report){
     sizes[v] = {w:w,h:h};
   });
   // ★2026-07-09/10: 全身のシルエットも色分けマップから抽出するようにした
-  // (以前は素の写真に白背景しきい値(white_thr)を掛けていた)。体色(黒)と
-  // 一致する画素だけを体とみなす方式(P3D.loadAlphaFromColormap参照)のため、
-  // マフラーが首を・スカートが腰を覆う行では体シルエットが分断され、
-  // visual hullが頭部/脚を胴体から独立した閉曲面として彫ることがあるが、
-  // これは許容する(js/visual_hull.jsのminFragFrac、js/carving.jsの
+  // (以前は素の写真に白背景しきい値(white_thr)を掛けていた)。
+  // ★2026-07-11(切り抜き精度向上、ユーザー指摘「色分けマップも本来輪郭は
+  // キレイなはず」対応): 体・各アクセサリーをそれぞれ独立に「その色との距離が
+  // tolerance以内か」で判定する旧方式(P3D.loadAlphaFromColormap+
+  // gp.body_color_tolerance)は、境界の陰影(グラデーション)幅がtoleranceを
+  // 超えると「どちらの判定にも入らない未確定画素」を生み、以前は
+  // P3D.fillColorGapsで事後に橋渡し修復していた。ここを体+全アクセサリー色を
+  // 候補とした最近傍色分類(P3D.classifySilhouetteRaw、js/common.js参照)に
+  // 置き換えることで、各画素が必ずいずれか1つの候補に確定的に割り当たり、
+  // 未確定画素の帯そのものが原理的に発生しなくなる(tolerance/
+  // fillColorGaps不要)。アクセサリー側のマスク(a.mask[v].alpha)は
+  // landmark_tool.htmlの自動マスクタブで既に同じ分類方式により体と矛盾しない
+  // 境界で抽出済み(バイナリのmaskDataUrlとしてJSONに埋め込み済み)のため、
+  // ここでは体のシルエットだけをこの分類から取り出せばよく、以前のような
+  // 生成時点でのアクセサリー側bbox再計算(隙間の橋渡し)は不要になった。
+  // マフラーが首を・スカートが腰を覆う行では体シルエットが分断され、visual
+  // hullが頭部/脚を胴体から独立した閉曲面として彫ることがあるが、これは
+  // 許容する(js/visual_hull.jsのminFragFrac、js/carving.jsの
   // dropSmallFragments/computeNormalsFixWinding参照)。
+  var accsWithColor = (state.accessories||[]).filter(function(a){ return a.color; });
+  var accessoryColors = accsWithColor.map(function(a){ return a.color; });
+  // ★2026-07-11追加(切り抜き精度向上、point2): 最近傍色分類の境界は必ず
+  // どこかの画素で起きるが、その画素そのものはアンチエイリアスで前後2色が
+  // 混ざった中間色なので、行スキャン(front/back/side幅・奥行き測定)が
+  // その画素をそのまま整数pxの境界として使うと1px単位の量子化誤差が乗る。
+  // gp.subpixel_edgesが有効なら、境界のサブピクセル位置(P3D.classifySilhouetteCont、
+  // js/common.js参照)も体・全アクセサリーのシルエットと同時に算出し、
+  // carveRegionの行スキャンに渡す(体はjs/visual_hull.jsのbuildBodyCarveOpts、
+  // アクセサリーはjs/accessories.jsのbuildAccessoryCarveOptsList経由。
+  // アクセサリー側はmask[v].alphaと同じ場所にmask[v].contとして載せる)。
+  var contFull={};
   views.forEach(function(v){
     var cm = state.colormaps && state.colormaps[v];
     if(!cm) throw new Error("色分けマップ("+v+")が見つかりません。front/side/backの3面とも色分けマップが必要です(ゴーストスキャナーで生成/アップロードしてから引き継いでください)。");
-    alphaFull[v] = P3D.loadAlphaFromColormap(cm.ctx, cm.w, cm.h, gp.body_color_tolerance);
+    var raw = P3D.classifySilhouetteRaw(cm.ctx, cm.w, cm.h, "#000000", accessoryColors);
+    var alpha = P3D.significantComponentsMask(raw.bodyRaw, cm.w, cm.h);
+    alphaFull[v] = P3D.fillHoles(alpha, cm.w, cm.h);
+    if(gp.subpixel_edges){
+      var contRes = P3D.classifySilhouetteCont(cm.ctx, cm.w, cm.h, "#000000", accessoryColors);
+      contFull[v] = contRes.bodyCont;
+      accsWithColor.forEach(function(a, idx){
+        if(a.mask && a.mask[v]) a.mask[v].cont = contRes.accCont[idx];
+      });
+    }
   });
-  await tick();
-
-  // ★2026-07-10(ユーザー指摘「隙間は仕組みの問題では」への対応): 体・各
-  // アクセサリーは、それぞれ独立に「その色との距離がtolerance以内か」で
-  // 判定される。境界には数px〜十数px幅の陰影(グラデーション)が乗っている
-  // ことがあり、その幅の画素はどちらの判定にも入らない実データの穴になる
-  // (実測: スカートと体の境目で約11px幅)。彫刻はこの穴をそのまま「何も無い」
-  // として扱うため、パーツ境界に本物の隙間が空く。統合彫刻(体+アクセサリーを
-  // 1つのフィールドで彫る仕組み)を変えても、入力データ自体の穴は埋まらない。
-  // ここで体・全アクセサリーを候補として、2つの確定領域に挟まれた未確定画素
-  // だけを「そのpx自身の実際の色が一番近い候補」に割り当てる(P3D.fillColorGaps。
-  // 片側が本物の背景の外周は対象にならない、詳細は同関数のコメント参照)。
-  // これによりmask.bboxも変わりうるため、アクセサリーのbboxも実データから
-  // 引き直す。
-  if(state.accessories && state.accessories.length){
-    var earlyMaskLoads=[];
-    state.accessories.forEach(function(a){
-      if(!a.mask) return;
-      ["front","back","side"].forEach(function(v){
-        var m=a.mask[v];
-        if(!m || !m.maskDataUrl || m.alpha) return;
-        var sz = (v==='side') ? sizes.side : sizes.front;
-        earlyMaskLoads.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, sz.w, sz.h).then(function(alpha){ m.alpha=alpha; }));
-      });
-    });
-    if(earlyMaskLoads.length) await Promise.all(earlyMaskLoads);
-    views.forEach(function(v){
-      var cm = state.colormaps[v];
-      var regions = [{targetRgb:[0,0,0], alpha:alphaFull[v]}];
-      var accForView = [];
-      state.accessories.forEach(function(a){
-        var m = a.mask && a.mask[v];
-        if(!m || !m.alpha || !a.color) return;
-        regions.push({targetRgb: P3D.hexToRgb(a.color), alpha:m.alpha});
-        accForView.push({a:a, m:m});
-      });
-      if(!accForView.length) return; // このviewにアクセサリーが無ければ体単独なので隙間は生じない
-      P3D.fillColorGaps(regions, cm.ctx, cm.w, cm.h);
-      accForView.forEach(function(o){
-        var newBbox = P3D.bboxFromAlpha(o.m.alpha, cm.w, cm.h);
-        if(newBbox) o.m.bbox = newBbox;
-      });
-    });
-  }
   await tick();
 
   // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)は「体(alphaFull、色分け
@@ -218,7 +208,7 @@ async function runCarvingStages(state, report){
   report("bleed(縁の色にじみ)");
   var bledRgba={};
   views.forEach(function(v){
-    bledRgba[v] = P3D.bleedEdges(rgbaFull[v], sizes[v].w, sizes[v].h, bleedFgAlpha[v], gp.alpha_dilate);
+    bledRgba[v] = P3D.bleedEdges(rgbaFull[v], sizes[v].w, sizes[v].h, bleedFgAlpha[v], gp.alpha_dilate, gp.bleed_inset_px);
   });
   function toCanvas(rgba,w,h){
     var c=document.createElement('canvas'); c.width=w; c.height=h;
@@ -260,12 +250,21 @@ async function runCarvingStages(state, report){
   if(state.imgs.leftSide && state.colormaps.leftSide){
     var lImg = state.imgs.leftSide.el, lW = state.imgs.leftSide.w, lH = state.imgs.leftSide.h;
     var lCm = state.colormaps.leftSide;
-    var lAlpha = P3D.loadAlphaFromColormap(lCm.ctx, lCm.w, lCm.h, gp.body_color_tolerance);
+    var lRaw = P3D.classifySilhouetteRaw(lCm.ctx, lCm.w, lCm.h, "#000000", accessoryColors);
+    var lAlpha = P3D.fillHoles(P3D.significantComponentsMask(lRaw.bodyRaw, lCm.w, lCm.h), lCm.w, lCm.h);
     var lAlphaFlipped = P3D.flipAlphaHorizontal(lAlpha, lW, lH);
     var lBounds = P3D.boolBounds(lAlphaFlipped, lW, lH);
     var lCore = P3D.stageCore(lAlphaFlipped, lW, lH, lBounds[0], lBounds[1]);
     leftSide = { w:lW, h:lH, SYTOP:lBounds[0], SYBOT:lBounds[1], SIDE_REF:lCore.SIDE_REF };
     console.log("  profile(leftSide): SYTOP",lBounds[0],"SYBOT",lBounds[1],"SIDE_REF",lCore.SIDE_REF);
+    // ★2026-07-11: leftSideを使う非対称アクセサリーにもサブピクセル境界指標を
+    // 用意する(反転座標系のためalphaと同じくP3D.flipArrayHorizontalで反転する)。
+    if(gp.subpixel_edges){
+      var lContRes = P3D.classifySilhouetteCont(lCm.ctx, lCm.w, lCm.h, "#000000", accessoryColors);
+      accsWithColor.forEach(function(a, idx){
+        if(a.mask && a.mask.leftSide) a.mask.leftSide.cont = P3D.flipArrayHorizontal(lContRes.accCont[idx], lW, lH);
+      });
+    }
   }
   await tick();
 
@@ -303,7 +302,7 @@ async function runCarvingStages(state, report){
   var bodyBuilt = P3D.buildBodyCarveOpts({
     frontAlpha:frontAlpha, backAlpha:backAlpha, sideAlpha:sideAlpha,
     faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
-    frontCont:null, backCont:null, sideCont:null,
+    frontCont:contFull.front||null, backCont:contFull.back||null, sideCont:contFull.side||null,
     SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
     pivots:pivots, gp:gp, faceEyeL:LM.face_eye_L, faceEyeR:LM.face_eye_R,
   });
@@ -335,11 +334,10 @@ async function runCarvingStages(state, report){
       // キャリブレーション(上記leftSide変数)と同じ水平反転を適用してから
       // alpha/bboxを格納する(反転後の座標系はside用の変換式とそのまま
       // 揃うため、accessories.js側はside/leftSideを区別なく同じ式で扱える)。
-      // ★2026-07-10: front/back/sideには境界ギャップ埋め(P3D.fillColorGaps、
-      // 上のearlyMaskLoads直後を参照)を適用したが、leftSideは反転座標系な上
-      // 個別accessoryごとに非同期で読み込まれるため未対応(既知の残課題。
-      // leftSideを使う非対称アクセサリーが体/他アクセサリーと隣接する境界には
-      // 同様のギャップが残りうる)。
+      // ★2026-07-11: 体・アクセサリー双方が最近傍色分類(P3D.classifySilhouetteRaw)
+      // で抽出されるようになったため、front/back/side/leftSideいずれの境界も
+      // 構造的に隙間が発生しなくなった(旧・境界ギャップ埋め(fillColorGaps)は
+      // 不要になり削除済み)。
       var mls=a.mask.leftSide;
       if(leftSide && mls && mls.maskDataUrl && !mls.alpha){
         maskLoads.push(P3D.loadMaskAlphaAsync(mls.maskDataUrl, leftSide.w, leftSide.h).then(function(alpha){

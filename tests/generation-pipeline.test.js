@@ -59,9 +59,24 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 効かなくなり、新しい既定値(target_verts:10000)が使われるようになった
 // (=間引きが弱まり高精細になった)。body-only/with-accessoryとも彫刻
 // 結果(=GLB)が変わり、ハッシュを更新した。
+// ★2026-07-11(切り抜き精度向上): 色分けマップの体色/アクセサリー色をそれぞれ
+// 独立に固定色許容誤差(tolerance)で判定していた方式(P3D.colorRegionRawMask/
+// loadAlphaFromColormap/extractMaskFromColormap、body_color_tolerance/
+// colorTolerance)を、体+全アクセサリー色+背景を候補とした最近傍色分類
+// (P3D.classifySilhouetteRaw)に置き換えた(js/common.js/js/pipeline.js参照)。
+// あわせて、その分類境界のアンチエイリアス帯をサブピクセル補間する仕組み
+// (P3D.boundaryContForCandidate、gen_params.subpixel_edges)を追加し、体の
+// 行スキャン(front/back/side)に適用した。どちらも彫刻の入力(輪郭の位置)が
+// 変わるため、body-only/with-accessoryとも彫刻結果(=GLB)が変わり、ハッシュを
+// 更新した。
+// ★2026-07-11(にじみの起点修正): bleedEdges(縁の色にじみ)が輪郭ぎりぎりの
+// 画素(元イラストの黒い縁取りストロークになりがち)を起点に外側へにじませて
+// いたため、縁取りが太って見える問題があった。gen_params.bleed_inset_px分
+// だけ内側の「安全な内部色」を起点にするよう変更した(js/common.jsの
+// bleedEdges参照)。テクスチャの焼き込み結果が変わるため、ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 635916,
-  sha256: "83c24c6b1644e8fa638a635fd590238c6e4fb25141f219fdaff6710bf95b10f1",
+  byteLength: 647408,
+  sha256: "0ac739f25720abc809118e234de26205c518291368084754741ede8d5898d47c",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -85,9 +100,12 @@ const EXPECTED_BODY_ONLY = {
 // (js/common.jsのP3D.fillColorGaps参照)。2つの確定領域に挟まれた未確定
 // 画素だけを最近傍色で埋める修正によりwith-accessory側の彫刻結果が変わり、
 // ハッシュを更新した(body-onlyはアクセサリーが無く対象外のため不変)。
+// ★2026-07-11: 上記(切り抜き精度向上/にじみの起点修正)と同じ変更により
+// with-accessory側も彫刻結果・テクスチャ焼き込み結果が変わり、ハッシュを
+// 更新した。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 834072,
-  sha256: "577e3c31bd5d8f0af19015962c1576ec6bb53524f22b6f36f8d6922fcc486a11",
+  byteLength: 776848,
+  sha256: "f0a3eb0448c733b92950ca6b01c6ba24fa41b86c76349658325b967fd7fdaf82",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

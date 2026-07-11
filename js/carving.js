@@ -370,7 +370,7 @@ P3D.laplacianSmoothPreserveExtent = laplacianSmoothPreserveExtent;
 // 面法線から頂点法線を再計算し、符号付き体積で外向きか判定して巻きを補正する。
 // ★2026-07-10: 全身シルエットの黒(体色)一致判定により、体が複数の独立した
 // 閉曲面(頭部/胴体/脚等)に分かれることがある(js/pipeline.js/js/common.js
-// のloadAlphaFromColormap参照)。以前は符号付き体積をメッシュ全体で1回だけ
+// のclassifySilhouetteRaw参照)。以前は符号付き体積をメッシュ全体で1回だけ
 // 計算していたため、最大の成分(胴体)の符号に引きずられ、marching cubesが
 // たまたま逆巻きで生成した小さい成分(頭部等)の法線が直らないまま裏返り、
 // バックフェイスカリングでその部分が透けて見える(または消えて見える)

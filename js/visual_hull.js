@@ -48,10 +48,14 @@ function buildBodyCarveOpts(opts){
   var carveOpts = {
     fa: opts.frontAlpha, ba: opts.backAlpha, sa: opts.sideAlpha,
     faW: opts.faW, faH: opts.faH, saW: opts.saW, saH: opts.saH,
-    // ★2026-07-09: 全身のシルエットが色分けマップ由来(既にくっきりした2値)に
-    // なったため、白背景しきい値による写真の明度を使ったサブピクセル境界
-    // 補正は行わない(js/pipeline.jsから常にnullが渡される)。
+    // ★2026-07-11: gp.subpixel_edges有効時、js/pipeline.jsが最近傍色分類の
+    // ボロノイ境界に対応するサブピクセル指標(P3D.boundaryContForCandidate)を
+    // frontCont/backCont/sideContとして渡す(無効時・face_sculpt等の後方互換
+    // 呼び出しではnull、carveRegion側は従来通りCommon.findRunsで整数px境界を
+    // 使う)。旧・白背景しきい値ベースのサブピクセル補正(輝度専用)とは別の
+    // 仕組みのため、whiteThrは0(cont=0がちょうど分類境界)を明示する。
     faCont: opts.frontCont, baCont: opts.backCont, saCont: opts.sideCont,
+    whiteThr: 0,
     SCALE: opts.SCALE, CX: opts.CX, YBOT: opts.YBOT, SYTOP: opts.SYTOP, SYBOT: opts.SYBOT, SIDE_REF: opts.SIDE_REF,
     backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
     sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
