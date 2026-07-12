@@ -9,16 +9,20 @@ var P3D = global.P3D = global.P3D || {};
 // ---- モデル生成パラメータの既定値 ----
 // Python版(pipeline_lib/common.py)はbody_vox=0.002/body_target_verts=50000だが、
 // ブラウザ版はvox解像度に応じたraw頂点数がJSの素朴なmarching cubesループの
-// 速度に直結し、かつ間引き(three.js SimplifyModifier)が数万頂点を大きく超える
-// メッシュで不安定になる(実機ベンチマークで確認: 27,818頂点は成功、280,386頂点
-// では内部エラー)。そのため3DtoolJS版はbody_voxを粗め(0.005)にし、大抵の
-// キャラクターでraw頂点数がtarget_verts以下に収まる(=間引き自体が不要になる)
-// ことを狙う既定値にしていたが(2026-07-04)、その後ファイルサイズ/軽量性を
-// 優先する方針に変更し、body_target_verts/acc_target_vertsは大きく引き下げて
-// 積極的に間引く既定値にしている(2026-07-06)。
-// 高解像度で試したい場合は「パラメータ」タブから引き上げられる(その場合は
-// carving.jsのSIMPLIFY_SAFE_LIMITを超えるとquadric decimationの代わりに
-// 頂点クラスタリングにフォールバックする)。
+// 速度に直結する。そのため3DtoolJS版はbody_voxを粗め(0.005)にし、大抵の
+// キャラクターでraw頂点数を抑えることを狙う既定値にしていたが(2026-07-04)、
+// その後ファイルサイズ/軽量性を優先する方針に変更し、body_target_verts/
+// acc_target_vertsは大きく引き下げて積極的に間引く既定値にしている
+// (2026-07-06)。
+// ★2026-07-12(SIMPLIFY_DECIMATE_PLAN.md): three.js SimplifyModifierが
+// 大規模メッシュ(数万頂点超)で"Cannot read properties of undefined
+// (reading 'hasVertex')"を投げて不安定になる不具合の根本原因(mergeVertices
+// 後に残る縮退三角形を除外していなかったこと)を修正し、頂点数によらず常に
+// SimplifyModifierを使うようにした(js/carving.jsのdecimateMesh参照、
+// gridClusterDecimateは例外発生時のみの最終フォールバックになった)。これに
+// 伴い、間引きの設定も「目標頂点数を決め打ちする」方式から「間引きの強さ
+// (0〜1、内部でSimplifyModifierの許容誤差maxCostに変換する)を指定し、結果の
+// 頂点数は表示するだけ」という誤差ベースの方式に変更した。
 var DEFAULT_GEN_PARAMS = {
   body_vox: 0.003,
   // ★2026-07-10: 体+全アクセサリーを1つの共有ボクセルグリッドで統合彫刻する
@@ -37,7 +41,14 @@ var DEFAULT_GEN_PARAMS = {
   // body_decimate/acc_decimateとbody_target_verts/acc_target_vertsを
   // それぞれ1本の値に統合した(ユーザー承認済み。パーツ別の強弱調整は
   // 失われるトレードオフ)。
-  decimate: true, target_verts: 10000,
+  // ★2026-07-12: target_verts(目標頂点数)をdecimate_strength(間引きの強さ、
+  // 0〜1)に置き換えた(js/carving.jsのstrengthToMaxCost参照)。0.85は、体単体
+  // (生彫刻84,076頂点)の実測でstrengthToMaxCostが旧既定値(target_verts=
+  // 10000)とほぼ同じ結果頂点数(実測11,394)になる値。体+全アクセサリー
+  // 統合メッシュ(163,982頂点)では同じ0.85でも旧既定値より頂点数が多く残る
+  // (誤差ベースになったことで、体より細いアクセサリーが道連れで過度に
+  // 削られなくなったため。SIMPLIFY_DECIMATE_PLAN.mdの発端そのものの改善)。
+  decimate: true, decimate_strength: 0.85,
   // ★2026-07-06: 断面スーパー楕円の指数はこれまで全身共通(psq_hull)の1個
   // だったが、部位ごとに理想的な丸み/角ばりが異なる(頭は卵型に近く丸め、
   // 腕は円筒に近いほど自然、手は厚み一定の板に近いため角を立たせたい等)

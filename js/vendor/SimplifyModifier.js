@@ -34,7 +34,12 @@
 		// (decimateMesh)でパーツごとの特徴的スケール比から計算し、小さい
 		// パーツの頂点ほど大きな重みを持たせることで、間引きが絶対誤差ではなく
 		// パーツごとの相対的なディテールを保つよう補正する。
-		modify( geometry, count, weights ) {
+		// ★2026-07-12改変(3DtoolJS、SIMPLIFY_DECIMATE_PLAN.md): 第4引数maxCost
+		// (省略可)を追加した。指定すると、次に潰す辺のコストがmaxCostを超えた
+		// 時点でcountに達していなくても間引きを打ち切る(呼び出し側decimateMesh
+		// が「目標頂点数」ではなく「間引きの強さ(誤差閾値)」でUIを持てるように
+		// するため)。
+		modify( geometry, count, weights, maxCost ) {
 
 			if ( geometry.isGeometry === true ) {
 
@@ -80,6 +85,19 @@
 
 			let index = geometry.getIndex();
 
+			// ★2026-07-12調査(3DtoolJS、SIMPLIFY_DECIMATE_PLAN.md): 実サンプル
+			// (体+全アクセサリー統合、163,982頂点)で"Cannot read properties of
+			// undefined (reading 'hasVertex')"が発生する直接原因を特定した。
+			// 直前のmergeVertices()が座標の一致する頂点を溶接するが、彫刻元の
+			// メッシュにはパーツの継ぎ目付近に重複座標の頂点が一定数含まれる
+			// (実測: 163,982頂点中2,507頂点が重複、溶接後4,622面が縮退)。
+			// 溶接後にindexの3頂点のうち2つ以上が同じ頂点を指す縮退三角形が
+			// できると、Triangleのコンストラクタがその頂点の.faces配列に同じ
+			// 三角形を2回push してしまい(v1===v2ならv1.faces/v2.facesへの
+			// pushが同じ配列に対して2回走る)、collapse()内の「u.facesを後ろから
+			// 辿って1つずつ安全に取り除く」前提が崩れて配列外を読み、
+			// undefinedになる。縮退三角形はそもそも面積0で意味を持たないため、
+			// 半エッジ構造を組む前にここで除外する。
 			if ( index !== null ) {
 
 				for ( let i = 0; i < index.count; i += 3 ) {
@@ -87,6 +105,7 @@
 					const a = index.getX( i );
 					const b = index.getX( i + 1 );
 					const c = index.getX( i + 2 );
+					if ( a === b || b === c || a === c ) continue;
 					const triangle = new Triangle( vertices[ a ], vertices[ b ], vertices[ c ], a, b, c );
 					faces.push( triangle );
 
@@ -99,6 +118,7 @@
 					const a = i;
 					const b = i + 1;
 					const c = i + 2;
+					if ( a === b || b === c || a === c ) continue;
 					const triangle = new Triangle( vertices[ a ], vertices[ b ], vertices[ c ], a, b, c );
 					faces.push( triangle );
 
@@ -107,9 +127,17 @@
 			} // compute all edge collapse costs
 
 
+			// ★2026-07-12改変(3DtoolJS): minimumCostEdge()は毎回vertices配列を
+			// O(n)で線形走査していたため、間引き数×頂点数のO(n×削除数)となり
+			// 大規模メッシュで実用的な時間で終わらなかった(163,982頂点→
+			// 10,000頂点の実測で約190秒)。二分ヒープ(CostHeap、下記)に置き換え、
+			// 抽出をO(log n)にする(実測で約91秒に短縮)。
+			const heap = new CostHeap();
+
 			for ( let i = 0, il = vertices.length; i < il; i ++ ) {
 
 				computeEdgeCostAtVertex( vertices[ i ] );
+				heap.push( vertices[ i ] );
 
 			}
 
@@ -118,7 +146,7 @@
 
 			while ( z -- ) {
 
-				nextVertex = minimumCostEdge( vertices );
+				nextVertex = heap.popValid();
 
 				if ( ! nextVertex ) {
 
@@ -127,7 +155,9 @@
 
 				}
 
-				collapse( vertices, faces, nextVertex, nextVertex.collapseNeighbor );
+				if ( maxCost !== undefined && nextVertex.collapseCost > maxCost ) break;
+
+				collapse( vertices, faces, nextVertex, nextVertex.collapseNeighbor, heap );
 
 			} //
 
@@ -299,6 +329,7 @@
 		}
 
 		removeFromArray( vertices, v );
+		v.__removed = true; // CostHeap.popValid()が既に消えた頂点の古いエントリを読み捨てるためのフラグ
 
 	}
 
@@ -323,7 +354,7 @@
 
 	}
 
-	function collapse( vertices, faces, u, v ) {
+	function collapse( vertices, faces, u, v, heap ) {
 
 		// u and v are pointers to vertices of an edge
 		// Collapse the edge uv by moving vertex u onto v
@@ -366,27 +397,81 @@
 		for ( let i = 0; i < tmpVertices.length; i ++ ) {
 
 			computeEdgeCostAtVertex( tmpVertices[ i ] );
+			heap.push( tmpVertices[ i ] );
 
 		}
 
 	}
 
-	function minimumCostEdge( vertices ) {
+	// ★2026-07-12追加(3DtoolJS): modify()内コメント参照。costは頂点の
+	// collapseCostが再計算されるたびに変わるため、通常の二分ヒープにある
+	// decrease-key操作は実装せず、遅延削除方式を採る: 再計算のたびに
+	// push()で新しいエントリを積み(古いエントリはヒープ内に残ったまま)、
+	// pop側のpopValid()で頂点の現在のcollapseCostに対応する最新の
+	// エントリ(ver一致)だけを採用し、古い/既に削除済み(__removed)の
+	// エントリは読み捨てる。
+	class CostHeap {
 
-		// O(n * n) approach. TODO optimize this
-		let least = vertices[ 0 ];
+		constructor() {
 
-		for ( let i = 0; i < vertices.length; i ++ ) {
+			this.arr = [];
 
-			if ( vertices[ i ].collapseCost < least.collapseCost ) {
+		}
 
-				least = vertices[ i ];
+		push( v ) {
+
+			v.__heapVer = ( v.__heapVer || 0 ) + 1;
+			const entry = { v: v, cost: v.collapseCost, ver: v.__heapVer };
+			const a = this.arr;
+			a.push( entry );
+			let i = a.length - 1;
+
+			while ( i > 0 ) {
+
+				const p = ( i - 1 ) >> 1;
+				if ( a[ p ].cost <= a[ i ].cost ) break;
+				const t = a[ p ]; a[ p ] = a[ i ]; a[ i ] = t;
+				i = p;
 
 			}
 
 		}
 
-		return least;
+		popValid() {
+
+			const a = this.arr;
+
+			while ( a.length ) {
+
+				const top = a[ 0 ];
+				const last = a.pop();
+
+				if ( a.length ) {
+
+					a[ 0 ] = last;
+					let i = 0;
+					const n = a.length;
+
+					while ( true ) {
+
+						let l = 2 * i + 1, r = 2 * i + 2, m = i;
+						if ( l < n && a[ l ].cost < a[ m ].cost ) m = l;
+						if ( r < n && a[ r ].cost < a[ m ].cost ) m = r;
+						if ( m === i ) break;
+						const t = a[ m ]; a[ m ] = a[ i ]; a[ i ] = t;
+						i = m;
+
+					}
+
+				}
+
+				if ( ! top.v.__removed && top.v.__heapVer === top.ver ) return top.v;
+
+			}
+
+			return undefined;
+
+		}
 
 	} // we use a triangle class to represent structure of face slightly differently
 

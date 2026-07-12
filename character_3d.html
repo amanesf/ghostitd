@@ -629,6 +629,15 @@ let liveSeamSmoothIters=null, liveColorGradWidth=null, liveColorGradStrength=nul
 // 不使用フラグ)もビューアでライブ編集できるようにする(landmark_tool.htmlの
 // 「境目角度」タブと同じBONE_GROUPS/seamRowHtmlパターンを移植)。
 let liveSeamAngles=null, liveSeamNoSide=null;
+// ★2026-07-12(SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」): 間引きの設定が
+// 「目標頂点数を指定する」方式から「強さ(誤差閾値)を指定し、結果の頂点数は
+// 表示するだけ」方式になったのに伴い、直近のfinishFromIntermediate()実行で
+// 実際に間引かれた後の頂点数を保持しておく(パネルの読み取り専用表示用)。
+let liveDecimatedVertCount=null;
+function updateDecimatedVertCount(){
+  var dec = currentPackage && currentPackage._stageCache && currentPackage._stageCache.decimated;
+  if(dec) liveDecimatedVertCount = dec.V.length/3;
+}
 document.getElementById('err').textContent='';
 (async function(){
   try{
@@ -644,6 +653,7 @@ document.getElementById('err').textContent='';
       document.getElementById('err').textContent='モデルを構築中…';
       const glb = await P3D.finishFromIntermediate(pkg, currentLiveParams(),
         (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
+      updateDecimatedVertCount();
       // ★構築成功後に初めてIndexedDBの中間パッケージを消費する。失敗時に先に
       // 消してしまうと、失敗の原因を直さないままページを再読込しても二度と
       // 復元できなくなる(以前はfinishFromIntermediate呼び出し前にclearしていた)。
@@ -682,7 +692,12 @@ const GEN_PARAM_TIERS=[
   ]},
   {tier:"Tier2(生メッシュキャッシュ利用)", items:[
     {key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
-    {key:"target_verts", label:"間引き後目標頂点数(体+アクセサリー合計)", min:1000,max:300000,step:1000,unit:"頂点"},
+    // ★2026-07-12(SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」): 「目標頂点数を
+    // 決め打ちする」方式は、メッシュの実際の複雑さを無視した勘の設定になり
+    // やすいため、「間引きの強さ(誤差閾値)を指定し、結果の頂点数は表示だけ」
+    // という誤差ベースの方式に変更した(js/carving.jsのstrengthToMaxCost参照)。
+    {key:"decimate_strength", label:"間引きの強さ(体+アクセサリー共通)", min:0,max:1,step:0.01,unit:""},
+    {key:"__decimatedVertCount", label:"間引き後頂点数(体+アクセサリー合計、結果表示のみ)", type:"readonly"},
   ]},
   {tier:"Tier3(生メッシュ+画像キャッシュ利用)", items:[
     {key:"__seamSmoothIters", label:"継ぎ目の平滑化回数", min:0,max:30,step:1,unit:"回"},
@@ -699,6 +714,7 @@ function genParamGet(key){
   if(key==="__seamSmoothIters") return liveSeamSmoothIters;
   if(key==="__colorGradWidth") return liveColorGradWidth;
   if(key==="__colorGradStrength") return liveColorGradStrength;
+  if(key==="__decimatedVertCount") return (liveDecimatedVertCount==null) ? "-" : liveDecimatedVertCount;
   return liveGP[key];
 }
 function genParamSet(key,val){
@@ -718,6 +734,10 @@ function renderGenParamsPanel(){
       if(it.type==="checkbox"){
         body='<div class="prow" style="justify-content:space-between">'+
           '<span>'+it.label+'</span><input type="checkbox" data-gkey="'+it.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px"></div>';
+        return '<div class="pitem">'+body+'</div>';
+      }else if(it.type==="readonly"){
+        body='<div class="prow" style="justify-content:space-between">'+
+          '<span>'+it.label+'</span><span data-gkey-readonly="'+it.key+'">'+cur+'</span></div>';
         return '<div class="pitem">'+body+'</div>';
       }else{
         body='<div class="prow">'+
@@ -912,6 +932,12 @@ async function doGenRecompute(){
     statusEl.textContent='更新中…';
     const glb=await P3D.finishFromIntermediate(currentPackage, currentLiveParams(),
       (label)=>{ statusEl.textContent='更新中: '+label; });
+    updateDecimatedVertCount();
+    // ★フルre-render(renderGenParamsPanel())ではなく該当spanだけ書き換える。
+    // doGenRecompute()はスライダー操作中にデバウンス経由で呼ばれるため、
+    // innerHTMLを丸ごと差し替えると操作中の要素のフォーカスが失われる。
+    const decCountEl=document.querySelector('[data-gkey-readonly="__decimatedVertCount"]');
+    if(decCountEl) decCountEl.textContent=genParamGet("__decimatedVertCount");
     lastModelBuf=glb;
     loadGLB(glb, undefined, false, true); // keepView=true: 視点を維持したまま差し替え
     statusEl.textContent='';

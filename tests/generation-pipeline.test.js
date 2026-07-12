@@ -119,9 +119,22 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // パーツごとに個別処理しているわけではない(js/pipeline.js参照)。
 // body-only/with-accessoryとも彫刻結果は不変だがテクスチャ焼き込み結果が
 // 変わるため、ハッシュを更新した。
+// ★2026-07-12(SIMPLIFY_DECIMATE_PLAN.md): js/vendor/SimplifyModifier.jsが
+// 大規模メッシュで"Cannot read properties of undefined (reading 'hasVertex')"
+// を投げて不安定になる不具合の根本原因(mergeVertices後に残る縮退三角形を
+// 半エッジ構造の構築前に除外していなかったこと)を修正し、頂点数によらず
+// 常にSimplifyModifierを使うようにした(gridClusterDecimateは例外発生時のみの
+// フォールバックに変更)。あわせて間引きの設定を「目標頂点数(target_verts)」
+// から「間引きの強さ(decimate_strength、0〜1、内部でSimplifyModifierの
+// 許容誤差maxCostに変換)」に変更した(js/carving.js参照)。既定値0.85は
+// 体単体でほぼ旧target_verts=10000相当の頂点数になるよう調整したが、
+// 誤差ベースの曲率考慮アルゴリズムに変わったこと自体で彫刻結果(頂点分布)が
+// 変わるため、body-only/with-accessoryともファイルサイズ・ハッシュが変わった
+// (with-accessory側はアクセサリーが体に道連れで過度に削られなくなった分、
+// より大きく変化している。SIMPLIFY_DECIMATE_PLAN.mdの発端そのものの改善)。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 618580,
-  sha256: "7e68c333bfb434a1dbcda31a0fa1054c2330921e786e8d832975852e1c34606d",
+  byteLength: 1337360,
+  sha256: "6dcf87fcce92e4e48742572c2ba0273560101fa3955842db80f4af4c4f981eb3",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -184,9 +197,20 @@ const EXPECTED_BODY_ONLY = {
 // で求めた専用のセルサイズで間引くよう変更した(境目を凍結しないと、体側と
 // アクセサリー側でグリッドの縮尺が食い違い、房が扇状に歪む重大な副作用が
 // 実機で確認された)。ファイルサイズは相応に増える(816608→1406364バイト)。
+// ★2026-07-12(SIMPLIFY_DECIMATE_PLAN.md、上のEXPECTED_BODY_ONLYコメント参照):
+// 上記のgridClusterDecimate側の複雑化(境目凍結・パーツ別セルサイズ)は、
+// SimplifyModifier自体の根本原因(縮退三角形)を修正して常時SimplifyModifierを
+// 使うようにしたことで発動頻度が下がり複雑さに見合わなくなったため撤去し、
+// 単一セルサイズの元の方式に戻した(gridClusterDecimateは例外発生時のみの
+// フォールバックに専念)。実サンプル(163,982頂点)でSimplifyModifierが完走・
+// 結果メッシュも健全であることを実機確認済み。間引きの設定を「目標頂点数」
+// から「間引きの強さ(0〜1の誤差ベース)」に変更したことで、体より細い
+// アクセサリーが体に道連れで過度に削られなくなり(本計画の発端だった
+// 「ツインテールの造形が粗い」不具合そのものの解決)、ファイルサイズは
+// 大きく増えた(1406364→2816216バイト)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1406364,
-  sha256: "26c5430c66b2fc207efbe7ac23a60684cc86be4afa8b54da44da0f9412c8621e",
+  byteLength: 2816216,
+  sha256: "65ca0fae96cc18dd4a7e9c25aac2c34a007e57fa6f7dd0fc488863b22e085658",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

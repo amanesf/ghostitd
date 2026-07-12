@@ -479,7 +479,7 @@ P3D.runToIntermediate = runToIntermediate;
  *
  * ★フェーズ2追加課題6の対応(段階的キャッシュ): どのパラメータ層(Tier1〜3)が
  * 実際に変わったかに応じて、変化のなかった段の再計算を省略する。
- *   1. decimate段: decimate/target_verts(Tier2)にのみ依存。統合メッシュに
+ *   1. decimate段: decimate/decimate_strength(Tier2)にのみ依存。統合メッシュに
  *      間引きのみ適用(owner配列も追従)。
  *   2. mesh_finish段(平滑化+パーツ分割+スキニング): 1の出力 + smooth_iters/
  *      rigid_soft_width(Tier1)に依存。
@@ -494,7 +494,7 @@ P3D.runToIntermediate = runToIntermediate;
 function decimateStage(inter, gp){
   var V=inter.raw_unified.V, F=inter.raw_unified.F, owner=inter.raw_unified.owner;
   if(gp.decimate){
-    var d=P3D.decimateMesh(V,F,gp.target_verts,owner);
+    var d=P3D.decimateMesh(V,F,gp.decimate_strength,owner);
     V=d.V; F=d.F; owner=d.owner;
   }
   return {V:V, F:F, owner:owner};
@@ -554,7 +554,7 @@ async function finishFromIntermediate(inter, opts, onProgress){
   var cache = inter._stageCache || (inter._stageCache = {});
   function sig(o){ return JSON.stringify(o); }
 
-  var decSig = sig({d:gp.decimate, tv:gp.target_verts});
+  var decSig = sig({d:gp.decimate, ds:gp.decimate_strength});
   var decimated;
   if(cache.decSig===decSig && cache.decimated){
     decimated = cache.decimated;

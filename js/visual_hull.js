@@ -136,18 +136,20 @@ function stageVisualHull(opts){
 P3D.stageVisualHull = stageVisualHull;
 
 // ★フェーズ1: rawV/rawF(彫刻直後・平滑化/間引き前)にgen_paramsのsmooth_iters/
-// decimate/target_vertsを適用して最終メッシュ(法線計算前)を作る。
+// decimate/decimate_strengthを適用して最終メッシュ(法線計算前)を作る。
 // character_3d.htmlのビューア側でキャッシュ済みrawV/rawFを再彫刻せずにこの関数
 // だけ呼び直せば、平滑化/間引きパラメータを即時反映できる(フェーズ2で使用)。
 // ★2026-07-10以降、体+アクセサリー統合彫刻(js/pipeline.jsのrunCarvingStages)
 // からは呼ばれなくなった後方互換用(stageVisualHull内でのみ使用)。
 // ★2026-07-11: gen_paramsのbody_smooth_iters/body_decimate/body_target_vertsが
 // smooth_iters/decimate/target_vertsに統合されたのに合わせて参照名を更新。
+// ★2026-07-12: target_vertsがdecimate_strengthに置き換わったのに合わせて
+// 参照名を更新(js/carving.jsのdecimateMesh参照)。
 function finishBodyMesh(rawV, rawF, gp){
   var V=rawV, F=rawF;
   if(gp.smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.smooth_iters);
   if(gp.decimate){
-    var dec=P3D.decimateMesh(V,F,gp.target_verts);
+    var dec=P3D.decimateMesh(V,F,gp.decimate_strength);
     V=dec.V; F=dec.F;
   }
   return {V:V, F:F};

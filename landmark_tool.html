@@ -496,8 +496,9 @@ const PARAM_META=[
   desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
 ];
 // ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): smooth_iters/
-// rigid_soft_width/kb_per_face(Tier1)、decimate/target_verts(Tier2、
-// ★2026-07-11: 体+アクセサリー別だったbody_*/acc_*を統合)は、生成後の
+// rigid_soft_width/kb_per_face(Tier1)、decimate/decimate_strength(Tier2、
+// ★2026-07-11: 体+アクセサリー別だったbody_*/acc_*を統合。
+// ★2026-07-12: target_vertsをdecimate_strengthに置き換え)は、生成後の
 // character_3d.html(ビューア)側で彫刻をやり直さずライブ編集できるように
 // なったため、このPARAM_META(生成前の設定パネル)からは編集UIを削除した。
 // ただしgenParams自体(DEFAULT_GEN_PARAMSの値)は従来通りbuildJson()経由で

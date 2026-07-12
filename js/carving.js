@@ -108,104 +108,56 @@ P3D.dropSmallFragments = dropSmallFragments;
 // 頂点間引き(carving.py _decimate相当)。Python版はtrimesh+fast_simplification
 // のquadric error decimationを使うが、ブラウザ版はthree.js examples付属の
 // SimplifyModifier(同じくquadric error簡略化のedge collapse実装)を使う。
-// ★2026-07-04(実機ベンチマークで判明): SimplifyModifier(three.js r128)は
-// 頂点数が数万を大きく超える巨大メッシュ(実測: 27,818頂点は成功、280,386頂点は
-// 内部で"Cannot read properties of undefined (reading 'hasVertex')"を投げて失敗)
-// で不安定になる。失敗時にそのまま間引かずに返すと、ファイルが非常に重くなり
-// 目的(軽量化)を果たせないため、SIMPLIFY_SAFE_LIMITを超える場合や
-// SimplifyModifier自体が例外を投げた場合は、頂点クラスタリング法
-// (gridClusterDecimate、半エッジ構造に依存しないため巨大メッシュでも壊れない)
-// にフォールバックする。
-// ★2026-07-11(体+アクセサリー統合間引き対応のベンチマーク): パーツ分割を
-// 間引き後まで遅らせたことで、体+全アクセサリーの合計頂点数がこの閾値と
-// 比較されるようになった(以前はパーツごとに独立だったため、重い
-// アクセサリー1つだけが道連れになっていた)。実サンプル(7アクセサリー全部
-// 乗せ)で実測したところ合計163,254頂点で、SIMPLIFY_SAFE_LIMITを試しに
-// 200,000まで上げてもSimplifyModifier自体が同じ"hasVertex"例外で失敗する
-// (280,386頂点の失敗例と同種の限界に達している)ことを確認済み。閾値を
-// 上げても救えず、失敗までの試行時間(実測約90秒)を無駄にするだけなので
-// 60000のまま据え置く。体単体の生彫刻頂点数(実測80,238)も既にこの閾値を
-// 超えており、統合前から体はgridClusterDecimateへ落ちていたケースのため、
-// 体+全アクセサリー統合による新たな退行ではない(アクセサリー単体では
-// 高品質決着していたものが道連れになる可能性はあるが、フォールバック自体は
-// 安全に機能する)。
-var SIMPLIFY_SAFE_LIMIT = 60000;
+// ★2026-07-04〜07-12の経緯(SIMPLIFY_DECIMATE_PLAN.md参照): SimplifyModifierは
+// 頂点数が数万を大きく超える巨大メッシュで"Cannot read properties of
+// undefined (reading 'hasVertex')"を投げて不安定になる不具合があり、体+全
+// アクセサリー統合メッシュ(実測163,982頂点)は常にgridClusterDecimate(曲率を
+// 見ない機械的な頂点クラスタリング)にフォールバックしていた。2026-07-12、
+// js/vendor/SimplifyModifier.jsのクラッシュの直接原因(mergeVertices後に残る
+// 縮退三角形を半エッジ構造の構築前に除外していなかったこと)を実サンプルの
+// ログ計測で特定・修正し、あわせてminimumCostEdgeの二分ヒープ化(O(n)→
+// O(log n))で実用的な速度にした(163,982頂点→10,000頂点相当の間引きが
+// 約190秒→約95秒に短縮)。実機で163,982頂点の完走・結果メッシュの健全性
+// (縮退三角形/NaN無し)を確認したため、頂点数によるフォールバック
+// (旧SIMPLIFY_SAFE_LIMIT)を廃止し、SimplifyModifierを常に試す唯一の間引き
+// 経路にした。gridClusterDecimateは「万一SimplifyModifierが例外を投げた
+// 場合」だけの最終フォールバックとして残す。
 
-// 頂点クラスタリングによる間引き(Rossignac&Borrel方式の簡易版)。バウンディング
-// ボックスを立方体グリッドに分割し、同じセルに落ちる頂点をその重心1点に
-// まとめる。quadric error decimationよりは形状精度が落ちるが、edge collapseの
-// ような複雑な半エッジ構造を作らないため、頂点数に関わらず必ず動作する。
-// ★2026-07-11追加(体+アクセサリー統合間引き対応、ユーザー指摘「パーツ分割の
-// タイミングが早すぎる」対応): owner(頂点ごとの所属パーツID、Int32Array)を
-// 渡すと、同じセルに集約される頂点群の多数決(同数ならownerId昇順を優先する
-// 決定的なタイブレーク)でセルの代表ownerを決め、間引き後の頂点にも
-// owner配列を付けて返す(未指定時は従来通り{V,F}のみ)。
-// ★2026-07-12追加(ユーザー指摘「ツインテールの造形が粗い」対応、実機で
-// SIMPLIFY_SAFE_LIMIT超過によりこの関数が実際に使われるケースで確認):
-// cellSizeは体全体のbbox表面積とtargetVerts(体+全アクセサリー合計)から
-// 一律に決まるため、体よりずっと細いアクセサリー(房状の髪飾り等)では
-// セルが相対的に大きすぎ、房の断面が数セルに丸ごと吸収されて粗い/穴の
-// 空いた形状になっていた。
-// ★試行錯誤の経緯: 最初はowner別にcellSize自体を縮める方式を試したが、
-// パーツの境目(体側とアクセサリー側で有効グリッドの縮尺が食い違う)で
-// セル対応がズレ、房が扇状に歪む重大な副作用が出た(実機確認)。次に
-// アクセサリーを一切クラスタリングしない(生のまま)方式を試したが、今度は
-// ファイルサイズが数倍〜十倍近くに膨れ上がり実用的でなかった。
-// 最終的に採用した方式: (1)パーツの境目の頂点(隣接面が別ownerを含む頂点)
-// だけは絶対にクラスタリングしない(位置そのまま凍結)ことで境目のズレを
-// 構造的に防ぎ、(2)境目以外の頂点は各ownerごとに「自分のbbox表面積÷
-// (targetVertsをrawの頂点数比で配分した目標頂点数)」で求めた自分専用の
-// セルサイズでクラスタリングする(体だけの単一グリッドだった以前の方式を
-// 全owner共通の一般化した式に置き換えただけで、体の結果はほぼ変わらない)。
-// これにより、細いパーツは自分の小さいbboxに見合った細かいグリッドで
-// 間引かれ、かつ境目は凍結されているため隣のパーツとズレようがない。
+// 頂点クラスタリングによる間引き(Rossignac&Borrel方式の簡易版、非常時の
+// フォールバック専用)。バウンディングボックスを立方体グリッドに分割し、
+// 同じセルに落ちる頂点をその重心1点にまとめる。quadric error decimationより
+// 形状精度が落ちるが、edge collapseのような複雑な半エッジ構造を作らないため
+// 頂点数に関わらず必ず動作する。
+// ★2026-07-11〜12: 体+アクセサリー統合間引きでこの関数が主経路になっていた
+// 間、パーツの境目凍結・パーツ別セルサイズという複雑化を行っていた(コミット
+// 33feffd)。2026-07-12にSimplifyModifier側の根本原因を修正して唯一の主経路に
+// 戻したことで、この関数はSimplifyModifierが例外を投げた場合だけの非常時
+// フォールバックに戻ったため、発動頻度の低さに複雑化の維持コストが見合わなく
+// なり、単一セルサイズの元の方式に戻した(ユーザー承認済み、
+// SIMPLIFY_DECIMATE_PLAN.md「5. gridClusterDecimateの扱い」参照)。
+// owner(頂点ごとの所属パーツID、Int32Array)を渡すと、同じセルに集約される
+// 頂点群の多数決(同数ならownerId昇順を優先する決定的なタイブレーク)でセルの
+// 代表ownerを決め、間引き後の頂点にもowner配列を付けて返す(未指定時は従来
+// 通り{V,F}のみ)。
 function gridClusterDecimate(V, F, targetVerts, owner){
   var n = V.length/3;
-  var isBoundary = owner ? new Uint8Array(n) : null;
-  if(owner){
-    var nf0 = F.length/3;
-    for(var f0=0; f0<nf0; f0++){
-      var a0=F[f0*3], b0=F[f0*3+1], c0=F[f0*3+2];
-      var oa=owner[a0], ob=owner[b0], oc=owner[c0];
-      if(!(oa===ob && ob===oc)){ isBoundary[a0]=1; isBoundary[b0]=1; isBoundary[c0]=1; }
-    }
-  }
-  // owner別のbbox・頂点数(境目頂点も含めて計測する。含めないと細く短い
-  // アクセサリーでbboxが不当に小さく見積もられるため)。
-  var bboxByOwner = new Map(), countByOwner = new Map();
+  var lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
   for(var i=0;i<n;i++){
-    var oid = owner ? owner[i] : 0;
-    var bb = bboxByOwner.get(oid);
-    var x=V[i*3],y=V[i*3+1],z=V[i*3+2];
-    if(!bb){ bb=[x,x,y,y,z,z]; bboxByOwner.set(oid,bb); countByOwner.set(oid,0); }
-    else{
-      if(x<bb[0])bb[0]=x; if(x>bb[1])bb[1]=x;
-      if(y<bb[2])bb[2]=y; if(y>bb[3])bb[3]=y;
-      if(z<bb[4])bb[4]=z; if(z>bb[5])bb[5]=z;
-    }
-    countByOwner.set(oid, countByOwner.get(oid)+1);
+    for(var a=0;a<3;a++){ var x=V[i*3+a]; if(x<lo[a])lo[a]=x; if(x>hi[a])hi[a]=x; }
   }
-  var cellSizeByOwner = new Map();
-  bboxByOwner.forEach(function(bb, oid){
-    var dx=Math.max(bb[1]-bb[0],1e-6), dy=Math.max(bb[3]-bb[2],1e-6), dz=Math.max(bb[5]-bb[4],1e-6);
-    var surfaceArea = 2*(dx*dy+dy*dz+dz*dx);
-    var ownerTarget = Math.max(4, targetVerts * countByOwner.get(oid)/n);
-    var cs = Math.sqrt(surfaceArea/ownerTarget);
-    if(!isFinite(cs) || cs<=0) cs = Math.max(dx,dy,dz)/64;
-    cellSizeByOwner.set(oid, cs);
-  });
+  var dx=Math.max(hi[0]-lo[0],1e-6), dy=Math.max(hi[1]-lo[1],1e-6), dz=Math.max(hi[2]-lo[2],1e-6);
+  var surfaceArea = 2*(dx*dy+dy*dz+dz*dx);
+  var cs = Math.sqrt(surfaceArea/Math.max(4,targetVerts));
+  if(!isFinite(cs) || cs<=0) cs = Math.max(dx,dy,dz)/64;
 
-  function cellKey(x,y,z,oid){
-    var bb=bboxByOwner.get(oid), cs=cellSizeByOwner.get(oid);
-    var ix=Math.floor((x-bb[0])/cs), iy=Math.floor((y-bb[2])/cs), iz=Math.floor((z-bb[4])/cs);
-    return oid+"_"+ix+","+iy+","+iz;
+  function cellKey(x,y,z){
+    var ix=Math.floor((x-lo[0])/cs), iy=Math.floor((y-lo[1])/cs), iz=Math.floor((z-lo[2])/cs);
+    return ix+","+iy+","+iz;
   }
   var cellMap = new Map();
   for(var v=0;v<n;v++){
-    var oidv = owner ? owner[v] : 0;
     var x2=V[v*3],y2=V[v*3+1],z2=V[v*3+2];
-    // 境目の頂点は他のどの頂点とも統合しない(位置そのまま=頂点固有キー)。
-    var key = (isBoundary && isBoundary[v]) ? ("bnd"+v) : cellKey(x2,y2,z2,oidv);
+    var key = cellKey(x2,y2,z2);
     var c = cellMap.get(key);
     if(!c){ c={sx:0,sy:0,sz:0,count:0,idx:-1,ownerVotes:owner?new Map():null}; cellMap.set(key,c); }
     c.sx+=x2; c.sy+=y2; c.sz+=z2; c.count++;
@@ -227,9 +179,7 @@ function gridClusterDecimate(V, F, targetVerts, owner){
   });
   var remap = new Int32Array(n);
   for(var v3=0;v3<n;v3++){
-    var oid3 = owner ? owner[v3] : 0;
-    var key3 = (isBoundary && isBoundary[v3]) ? ("bnd"+v3) : cellKey(V[v3*3],V[v3*3+1],V[v3*3+2],oid3);
-    remap[v3] = cellMap.get(key3).idx;
+    remap[v3] = cellMap.get(cellKey(V[v3*3],V[v3*3+1],V[v3*3+2])).idx;
   }
   var nf = F.length/3;
   var newFArr = [];
@@ -298,16 +248,21 @@ function computeOwnerScaleWeights(V, F, owner){
 // marching cubes直後の入力は重複座標を持たない=1頂点1ownerが保証されている)
 // ため、座標一致だけで曖昧さ無くownerを復元できる(nearest-neighbor探索は
 // 不要)。
-function simplifyModifierDecimate(V, F, targetVerts, owner){
+// ★2026-07-12改変: targetVerts(目標頂点数)ではなくmaxCost(許容誤差の上限、
+// js/vendor/SimplifyModifier.jsのcomputeEdgeCollapseCostと同じスケール)を
+// 受け取るように変更した(SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」)。
+// countは間引きが際限なく続かないための安全上限であって目標ではない
+// (実際にどこで止まるかはmaxCostが決める)。
+function simplifyModifierDecimate(V, F, maxCost, owner){
+  if(!(maxCost>0)) return owner ? {V:V,F:F,owner:owner} : {V:V,F:F};
   var geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(V), 3));
   geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(F), 1));
   var curVerts = V.length/3;
-  var removeCount = Math.max(0, curVerts - targetVerts);
-  if(removeCount<=0) return owner ? {V:V,F:F,owner:owner} : {V:V,F:F};
+  var safeCount = Math.max(0, curVerts-4); // 安全上限。実際の停止点はmaxCostが決める
   var modifier = new THREE.SimplifyModifier();
   var ownerWeights = computeOwnerScaleWeights(V, F, owner);
-  var simplified = modifier.modify(geo, removeCount, ownerWeights);
+  var simplified = modifier.modify(geo, safeCount, ownerWeights, maxCost);
   var pos = simplified.attributes.position.array;
   var idxAttr = simplified.index;
   var nTri, rawF;
@@ -355,32 +310,66 @@ function simplifyModifierDecimate(V, F, targetVerts, owner){
   return {V:V2, F:newF, owner:newOwner};
 }
 
-// V:Float32Array(N*3), F:Uint32Array(M*3), targetVerts: 目標頂点数,
+// モデル全体のバウンディングボックス対角線長。「間引きの強さ」を絶対誤差では
+// なくモデルの大きさに対する相対値に変換するための基準スケール(体格差の
+// 異なるキャラクターで同じ強さ設定の効き方が変わらないようにする、
+// SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」参照)。
+function meshBBoxDiag(V){
+  var n=V.length/3;
+  var lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
+  for(var i=0;i<n;i++){
+    for(var a=0;a<3;a++){ var x=V[i*3+a]; if(x<lo[a])lo[a]=x; if(x>hi[a])hi[a]=x; }
+  }
+  return Math.hypot(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]);
+}
+
+// 「間引きの強さ」(0〜1)→SimplifyModifierのmaxCostへの変換。実サンプル
+// (体+全アクセサリー統合、163,982頂点)でcollapseCostの実測分布(間引き
+// 開始直後は約diag×1.4e-6、94%間引いた時点で約diag×2.4e-3)を基に、
+// 指数的にmaxCostが増えるようにした(strength=0でほぼ無効化、strength=1で
+// このサンプルなら約95%間引く強い設定になる)。
+var DECIMATE_STRENGTH_EXP_MIN = -6, DECIMATE_STRENGTH_EXP_RANGE = 3.5;
+function strengthToMaxCost(strength, V){
+  var s = Math.min(1, Math.max(0, strength||0));
+  if(s<=0) return 0;
+  var diag = meshBBoxDiag(V);
+  return diag * Math.pow(10, DECIMATE_STRENGTH_EXP_MIN + DECIMATE_STRENGTH_EXP_RANGE*s);
+}
+P3D.strengthToMaxCost = strengthToMaxCost;
+
+// gridClusterDecimate(非常時フォールバック)はセルサイズ方式のため誤差閾値を
+// 直接扱えない。「強さ」から目安の目標頂点数を作る簡易な換算式を別途用意する
+// (フォールバックは非常時のみ発動する想定のため、strengthToMaxCostほど
+// 厳密な対応関係は求めない)。
+function strengthToFallbackTargetVerts(strength, curVerts){
+  var s = Math.min(1, Math.max(0, strength||0));
+  var t = Math.round(curVerts * Math.pow(1-s, 2));
+  return Math.max(500, Math.min(curVerts, t));
+}
+
+// V:Float32Array(N*3), F:Uint32Array(M*3), strength: 間引きの強さ(0〜1、
+// 0で間引き無効/1で最も強く間引く。SimplifyModifierのmaxCostに変換して使う。
+// SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」参照)。
 // owner: 省略可、Int32Array(N) 頂点ごとの所属パーツID
-// 戻り値: {V,F}(ownerを渡した場合は{V,F,owner}、必ず何らかの方法で間引く。
-// SimplifyModifierが使えない/失敗する/メッシュが巨大すぎる場合は
-// gridClusterDecimateにフォールバックする)
+// 戻り値: {V,F}(ownerを渡した場合は{V,F,owner}。SimplifyModifierが例外を
+// 投げた場合のみgridClusterDecimateにフォールバックする)
 // ★2026-07-11追加: ownerを通すことで、体+全アクセサリーを1つの連続した
 // メッシュのまま間引ける(パーツ分割はこの後の平滑化まで終えてから行う。
 // js/pipeline.jsのdecimateStage/meshFinishStage参照)。
-function decimateMesh(V, F, targetVerts, owner){
-  var targetFaces = Math.max(targetVerts*2, 4);
-  var curFaces = F.length/3;
-  if(curFaces <= targetFaces) return owner ? {V:V, F:F, owner:owner} : {V:V, F:F};
+function decimateMesh(V, F, strength, owner){
+  if(!(strength>0)) return owner ? {V:V, F:F, owner:owner} : {V:V, F:F};
   var curVerts = V.length/3;
-  var canUseSimplify = (typeof THREE !== "undefined" && THREE.SimplifyModifier && curVerts <= SIMPLIFY_SAFE_LIMIT);
-  if(canUseSimplify){
+  if(typeof THREE !== "undefined" && THREE.SimplifyModifier){
     try{
-      return simplifyModifierDecimate(V, F, targetVerts, owner);
+      var maxCost = strengthToMaxCost(strength, V);
+      return simplifyModifierDecimate(V, F, maxCost, owner);
     }catch(e){
       console.warn("  decimateMesh: SimplifyModifierに失敗、頂点クラスタリングにフォールバックします:", e);
     }
-  }else if(typeof THREE === "undefined" || !THREE.SimplifyModifier){
-    console.warn("  decimateMesh: THREE.SimplifyModifier未読み込み、頂点クラスタリングを使用します");
   }else{
-    console.log("  decimateMesh: メッシュが大きい(頂点数"+curVerts+" > "+SIMPLIFY_SAFE_LIMIT+")ため、頂点クラスタリングで間引きます");
+    console.warn("  decimateMesh: THREE.SimplifyModifier未読み込み、頂点クラスタリングを使用します");
   }
-  return gridClusterDecimate(V, F, targetVerts, owner);
+  return gridClusterDecimate(V, F, strengthToFallbackTargetVerts(strength, curVerts), owner);
 }
 P3D.decimateMesh = decimateMesh;
 
