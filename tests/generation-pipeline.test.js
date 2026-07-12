@@ -104,9 +104,24 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 効かなかったため不採用、詳細はjs/carving.jsのコメント参照)。体単体でも
 // 該当行があり彫刻結果が変わるため、body-only/with-accessoryともハッシュを
 // 更新した。
+// ★2026-07-12(ユーザー指摘「内側のピクセルを拡張するのがうまく動いていない」
+// 対応): bleedEdges(js/common.js)は、bleedInsetPxで指定した分だけ内側に
+// 侵食した「安全な内部色」をにじみの起点(シード)にしていたが、実際に見えて
+// いる前景画素(輪郭ぎりぎりの縁取りストローク画素を含む)は侵食の有無に
+// 関わらず常に実ピクセルの絵柄そのままを使う仕様だった。このため
+// bleedInsetPxをいくら大きくしても縁取りストローク自体は書き換わらず、
+// 「内側のピクセル拡張が効いているように見えない」原因になっていた
+// (ユーザー指摘「輪郭から拡張するんじゃなくて内側から拡張」)。侵食後も
+// シードとして生き残った画素だけを実ピクセルとして保護し、それ以外
+// (輪郭ぎりぎりの縁取りストローク画素+実背景画素)は全て最寄りの安全な
+// 内部色で上書きするよう変更した(bleedInsetPx=0なら従来通り変化なし)。
+// bleedFgAlpha(体+全アクセサリーの和集合)全体に対する一様な処理であり、
+// パーツごとに個別処理しているわけではない(js/pipeline.js参照)。
+// body-only/with-accessoryとも彫刻結果は不変だがテクスチャ焼き込み結果が
+// 変わるため、ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 653052,
-  sha256: "b5219a2f5c1e4a53b08124ccbd76b181ba6a2eacaa7a4f1794a804994438abf1",
+  byteLength: 618580,
+  sha256: "7e68c333bfb434a1dbcda31a0fa1054c2330921e786e8d832975852e1c34606d",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -152,8 +167,8 @@ const EXPECTED_BODY_ONLY = {
 // 焼き込み結果が大きく変わるため、ハッシュを更新した(body-onlyはアクセサ
 // リーが無く対象外のため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 866496,
-  sha256: "19f40910adc9fbbff05b883f5014ceed2faa7873f71c908ebcf0c172b5c20a63",
+  byteLength: 823272,
+  sha256: "f7829042222f65af565677a98f797078170a6c488f1bfb4f58f2a7fc95b49aea",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

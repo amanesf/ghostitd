@@ -624,10 +624,18 @@ function restoreErodedThinComponents(alpha, eroded, w, h){
 // ストロークで描くことが多く、にじみの起点(BFSのシード)を輪郭ぎりぎりの
 // 画素(=縁取りストロークそのもの)にすると、外側ににじませた分だけ縁取りが
 // 太って見える不具合があった。bleedInsetPxで指定した分だけalphaを内側に
-// 侵食(erode4N)した「安全な内部色」だけをシードにすることで、にじみが
-// 縁取りの色ではなく本来の内部の塗り色を外側へ延長するようにする(実際に
-// 見えている前景画素自体の色は書き換えない、あくまでにじみの「起点」だけの
-// 変更)。bleedInsetPx=0なら従来通り輪郭ぎりぎりの画素をそのままシードにする。
+// 侵食(erode4N)した「安全な内部色」だけをシードにする。
+// ★2026-07-12修正(ユーザー指摘「輪郭から拡張するんじゃなくて内側から拡張」):
+// 当初は「実際に見えている前景画素(縁取りストローク自体を含む)は書き換えない」
+// 仕様にしていたが、これだとbleedInsetPxをいくら大きくしても縁取りストローク
+// 自体はそのまま残り、にじみが効いて見えなかった(ユーザーが「内側のピクセル
+// 拡張がうまく動いていない」と報告した根本原因)。侵食後もシードとして生き
+// 残った(=輪郭からbleedInsetPxより内側にある)画素だけを「実ピクセルのまま」
+// 保護し、それ以外(輪郭ぎりぎりの縁取りストローク画素+実背景画素)は全て
+// BFSで求めた最寄りの安全な内部色で上書きする。これにより縁取りストローク
+// そのものが内部の塗り色に置き換わり、文字通り「内側から外側へ拡張」した
+// 見た目になる。bleedInsetPx=0ならseedAlpha=alphaなので従来通り(輪郭ぎりぎり
+// の画素がそのまま=書き換えなし)。
 // 戻り値: 新しいImageData(w,h) と同サイズのUint8ClampedArray rgba。
 function bleedEdges(rgba, w, h, alpha, alphaDilate, bleedInsetPx){
   alphaDilate = (alphaDilate===undefined) ? 9 : alphaDilate;
@@ -667,12 +675,15 @@ function bleedEdges(rgba, w, h, alpha, alphaDilate, bleedInsetPx){
   var outRgba=new Uint8ClampedArray(n*4);
   for(var i2=0;i2<n;i2++){
     var o=i2*4;
-    if(alpha[i2]){
-      // 実際に見えている前景画素は、シードから外れていても実ピクセルの
-      // 絵柄自体をそのまま使う(にじみの起点変更は外側への延長にのみ影響する)。
+    if(seedAlpha[i2]){
+      // 侵食後もシードとして生き残った(=輪郭からbleedInsetPxより内側にある)
+      // 画素だけは実ピクセルの絵柄自体をそのまま使う。
       outRgba[o]=rgba[o]; outRgba[o+1]=rgba[o+1]; outRgba[o+2]=rgba[o+2]; outRgba[o+3]=255;
       continue;
     }
+    // それ以外(輪郭ぎりぎりの縁取りストローク画素+実背景画素)は、最寄りの
+    // 安全な内部色で上書きする(bleedInsetPx=0ならseedAlpha=alphaなので、
+    // ここへは実背景画素しか来ず従来通り)。
     var farOrUnreached = (nearestIdx[i2]<0) || (dist[i2]>BLEED_MAX_DIST);
     var src2 = farOrUnreached ? i2 : nearestIdx[i2];
     var so=src2*4;
