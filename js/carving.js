@@ -140,30 +140,72 @@ var SIMPLIFY_SAFE_LIMIT = 60000;
 // 渡すと、同じセルに集約される頂点群の多数決(同数ならownerId昇順を優先する
 // 決定的なタイブレーク)でセルの代表ownerを決め、間引き後の頂点にも
 // owner配列を付けて返す(未指定時は従来通り{V,F}のみ)。
+// ★2026-07-12追加(ユーザー指摘「ツインテールの造形が粗い」対応、実機で
+// SIMPLIFY_SAFE_LIMIT超過によりこの関数が実際に使われるケースで確認):
+// cellSizeは体全体のbbox表面積とtargetVerts(体+全アクセサリー合計)から
+// 一律に決まるため、体よりずっと細いアクセサリー(房状の髪飾り等)では
+// セルが相対的に大きすぎ、房の断面が数セルに丸ごと吸収されて粗い/穴の
+// 空いた形状になっていた。
+// ★試行錯誤の経緯: 最初はowner別にcellSize自体を縮める方式を試したが、
+// パーツの境目(体側とアクセサリー側で有効グリッドの縮尺が食い違う)で
+// セル対応がズレ、房が扇状に歪む重大な副作用が出た(実機確認)。次に
+// アクセサリーを一切クラスタリングしない(生のまま)方式を試したが、今度は
+// ファイルサイズが数倍〜十倍近くに膨れ上がり実用的でなかった。
+// 最終的に採用した方式: (1)パーツの境目の頂点(隣接面が別ownerを含む頂点)
+// だけは絶対にクラスタリングしない(位置そのまま凍結)ことで境目のズレを
+// 構造的に防ぎ、(2)境目以外の頂点は各ownerごとに「自分のbbox表面積÷
+// (targetVertsをrawの頂点数比で配分した目標頂点数)」で求めた自分専用の
+// セルサイズでクラスタリングする(体だけの単一グリッドだった以前の方式を
+// 全owner共通の一般化した式に置き換えただけで、体の結果はほぼ変わらない)。
+// これにより、細いパーツは自分の小さいbboxに見合った細かいグリッドで
+// 間引かれ、かつ境目は凍結されているため隣のパーツとズレようがない。
 function gridClusterDecimate(V, F, targetVerts, owner){
   var n = V.length/3;
-  var minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-  for(var i=0;i<n;i++){
-    var x=V[i*3],y=V[i*3+1],z=V[i*3+2];
-    if(x<minX)minX=x; if(x>maxX)maxX=x;
-    if(y<minY)minY=y; if(y>maxY)maxY=y;
-    if(z<minZ)minZ=z; if(z>maxZ)maxZ=z;
+  var isBoundary = owner ? new Uint8Array(n) : null;
+  if(owner){
+    var nf0 = F.length/3;
+    for(var f0=0; f0<nf0; f0++){
+      var a0=F[f0*3], b0=F[f0*3+1], c0=F[f0*3+2];
+      var oa=owner[a0], ob=owner[b0], oc=owner[c0];
+      if(!(oa===ob && ob===oc)){ isBoundary[a0]=1; isBoundary[b0]=1; isBoundary[c0]=1; }
+    }
   }
-  var dx=Math.max(maxX-minX,1e-6), dy=Math.max(maxY-minY,1e-6), dz=Math.max(maxZ-minZ,1e-6);
-  // 頂点はメッシュの表面上に分布する(体積ではなく面積に比例)ため、bboxの表面積
-  // から目標頂点数に見合うセルサイズを見積もる。
-  var surfaceArea = 2*(dx*dy+dy*dz+dz*dx);
-  var cellSize = Math.sqrt(surfaceArea / Math.max(targetVerts,1));
-  if(!isFinite(cellSize) || cellSize<=0) cellSize = Math.max(dx,dy,dz)/64;
+  // owner別のbbox・頂点数(境目頂点も含めて計測する。含めないと細く短い
+  // アクセサリーでbboxが不当に小さく見積もられるため)。
+  var bboxByOwner = new Map(), countByOwner = new Map();
+  for(var i=0;i<n;i++){
+    var oid = owner ? owner[i] : 0;
+    var bb = bboxByOwner.get(oid);
+    var x=V[i*3],y=V[i*3+1],z=V[i*3+2];
+    if(!bb){ bb=[x,x,y,y,z,z]; bboxByOwner.set(oid,bb); countByOwner.set(oid,0); }
+    else{
+      if(x<bb[0])bb[0]=x; if(x>bb[1])bb[1]=x;
+      if(y<bb[2])bb[2]=y; if(y>bb[3])bb[3]=y;
+      if(z<bb[4])bb[4]=z; if(z>bb[5])bb[5]=z;
+    }
+    countByOwner.set(oid, countByOwner.get(oid)+1);
+  }
+  var cellSizeByOwner = new Map();
+  bboxByOwner.forEach(function(bb, oid){
+    var dx=Math.max(bb[1]-bb[0],1e-6), dy=Math.max(bb[3]-bb[2],1e-6), dz=Math.max(bb[5]-bb[4],1e-6);
+    var surfaceArea = 2*(dx*dy+dy*dz+dz*dx);
+    var ownerTarget = Math.max(4, targetVerts * countByOwner.get(oid)/n);
+    var cs = Math.sqrt(surfaceArea/ownerTarget);
+    if(!isFinite(cs) || cs<=0) cs = Math.max(dx,dy,dz)/64;
+    cellSizeByOwner.set(oid, cs);
+  });
 
-  function cellKey(x,y,z){
-    var ix=Math.floor((x-minX)/cellSize), iy=Math.floor((y-minY)/cellSize), iz=Math.floor((z-minZ)/cellSize);
-    return ix+","+iy+","+iz;
+  function cellKey(x,y,z,oid){
+    var bb=bboxByOwner.get(oid), cs=cellSizeByOwner.get(oid);
+    var ix=Math.floor((x-bb[0])/cs), iy=Math.floor((y-bb[2])/cs), iz=Math.floor((z-bb[4])/cs);
+    return oid+"_"+ix+","+iy+","+iz;
   }
   var cellMap = new Map();
   for(var v=0;v<n;v++){
+    var oidv = owner ? owner[v] : 0;
     var x2=V[v*3],y2=V[v*3+1],z2=V[v*3+2];
-    var key = cellKey(x2,y2,z2);
+    // 境目の頂点は他のどの頂点とも統合しない(位置そのまま=頂点固有キー)。
+    var key = (isBoundary && isBoundary[v]) ? ("bnd"+v) : cellKey(x2,y2,z2,oidv);
     var c = cellMap.get(key);
     if(!c){ c={sx:0,sy:0,sz:0,count:0,idx:-1,ownerVotes:owner?new Map():null}; cellMap.set(key,c); }
     c.sx+=x2; c.sy+=y2; c.sz+=z2; c.count++;
@@ -185,7 +227,9 @@ function gridClusterDecimate(V, F, targetVerts, owner){
   });
   var remap = new Int32Array(n);
   for(var v3=0;v3<n;v3++){
-    remap[v3] = cellMap.get(cellKey(V[v3*3],V[v3*3+1],V[v3*3+2])).idx;
+    var oid3 = owner ? owner[v3] : 0;
+    var key3 = (isBoundary && isBoundary[v3]) ? ("bnd"+v3) : cellKey(V[v3*3],V[v3*3+1],V[v3*3+2],oid3);
+    remap[v3] = cellMap.get(key3).idx;
   }
   var nf = F.length/3;
   var newFArr = [];
@@ -202,6 +246,53 @@ P3D.gridClusterDecimate = gridClusterDecimate;
 //投げる(呼び出し元decimateMesh()がgridClusterDecimateにフォールバックする)。
 // ★2026-07-11追加(体+アクセサリー統合間引き対応): owner(頂点ごとの所属
 // パーツID)を渡すと間引き後の頂点にもowner配列を付けて返す。
+// ★2026-07-12追加(ユーザー指摘「ツインテールの造形が粗い、間引き前は綺麗
+// だった」対応): 体+全アクセサリーを1つのメッシュとして一括で間引くと、
+// 体よりずっと細いパーツ(房状の髪飾り等)が不釣り合いに粗くなる/穴が空く。
+// 当初は「パーツ内部の辺の平均長」を相対スケールの目安にしようとしたが、
+// この彫刻パイプラインは全パーツを同じボクセルグリッド(marching cubes)から
+// 抽出するため、辺の長さはボクセルサイズにほぼ比例し、パーツの太さとは
+// 無関係にどのパーツでもほぼ同じ値になってしまい、指標として機能しなかった
+// (実測: 体と各アクセサリーの重みがどれも1.0〜1.04程度にしかならず、効果が
+// 出なかった)。実際に効くのは「パーツ自身のバウンディングボックスの最小
+// 辺」(=断面の細さの目安、房のように細長い形状ならこれが断面の太さに
+// 近い)を体のそれと比較する方法で、細いパーツほど大きな重みになる。
+var OWNER_WEIGHT_CAP = 12;
+function computeOwnerScaleWeights(V, F, owner){
+  if(!owner) return null;
+  var minB=new Map(), maxB=new Map(); // ownerId -> [minX,minY,minZ]/[maxX,maxY,maxZ]
+  var n=V.length/3;
+  for(var i=0;i<n;i++){
+    var oid=owner[i], x=V[i*3], y=V[i*3+1], z=V[i*3+2];
+    var mn=minB.get(oid), mx=maxB.get(oid);
+    if(!mn){ mn=[x,y,z]; minB.set(oid,mn); mx=[x,y,z]; maxB.set(oid,mx); }
+    else{
+      if(x<mn[0])mn[0]=x; if(y<mn[1])mn[1]=y; if(z<mn[2])mn[2]=z;
+      if(x>mx[0])mx[0]=x; if(y>mx[1])mx[1]=y; if(z>mx[2])mx[2]=z;
+    }
+  }
+  function minExtent(oid){
+    var mn=minB.get(oid), mx=maxB.get(oid);
+    return Math.min(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]);
+  }
+  var bodyExtent = minB.has(0) ? minExtent(0) : null;
+  if(!bodyExtent){
+    // 体(owner=0)の頂点が無い(通常起こらない)場合は全パーツ中の最大値で代用する。
+    bodyExtent = 0;
+    minB.forEach(function(_,oid){ bodyExtent=Math.max(bodyExtent, minExtent(oid)); });
+    if(!(bodyExtent>0)) bodyExtent=1;
+  }
+  var weightByOwner=new Map();
+  minB.forEach(function(_,oid){
+    var ext = minExtent(oid);
+    var w = ext>0 ? bodyExtent/ext : OWNER_WEIGHT_CAP;
+    weightByOwner.set(oid, Math.max(1, Math.min(OWNER_WEIGHT_CAP, w)));
+  });
+  var weights=new Float32Array(n);
+  for(var i2=0;i2<n;i2++) weights[i2]=weightByOwner.get(owner[i2])||1;
+  return weights;
+}
+
 // js/vendor/SimplifyModifier.jsのcollapse()は頂点位置を一切ブレンドせず、
 // 生き残る頂点は必ず入力頂点のいずれかと完全に同じ座標になる(統合彫刻の
 // marching cubes直後の入力は重複座標を持たない=1頂点1ownerが保証されている)
@@ -215,7 +306,8 @@ function simplifyModifierDecimate(V, F, targetVerts, owner){
   var removeCount = Math.max(0, curVerts - targetVerts);
   if(removeCount<=0) return owner ? {V:V,F:F,owner:owner} : {V:V,F:F};
   var modifier = new THREE.SimplifyModifier();
-  var simplified = modifier.modify(geo, removeCount);
+  var ownerWeights = computeOwnerScaleWeights(V, F, owner);
+  var simplified = modifier.modify(geo, removeCount, ownerWeights);
   var pos = simplified.attributes.position.array;
   var idxAttr = simplified.index;
   var nTri, rawF;

@@ -23,7 +23,18 @@
 
 		}
 
-		modify( geometry, count ) {
+		// ★2026-07-12改変(3DtoolJS): 第3引数weights(Float32Array、geometryの
+		// 元の頂点順に対応、省略時は全て1)を追加した。標準のcomputeEdgeCollapseCost
+		// は辺の絶対長×曲率のみで判定するため、体+全アクセサリーを1つの
+		// メッシュとして間引く運用(js/carving.jsのdecimateMesh参照)では、体より
+		// 絶対的に小さい/細いアクセサリー(例: 房状の髪飾り)の辺が「短い=安い」と
+		// 判定されて優先的に潰され、体側がほとんど手つかずのまま先に丸ごと
+		// 単純化されてしまう不具合があった(ユーザー指摘「ツインテールの造形が
+		// 粗い」「間引き前は綺麗だった」で原因特定)。weightsは呼び出し側
+		// (decimateMesh)でパーツごとの特徴的スケール比から計算し、小さい
+		// パーツの頂点ほど大きな重みを持たせることで、間引きが絶対誤差ではなく
+		// パーツごとの相対的なディテールを保つよう補正する。
+		modify( geometry, count, weights ) {
 
 			if ( geometry.isGeometry === true ) {
 
@@ -41,6 +52,12 @@
 
 			}
 
+			if ( weights ) {
+
+				geometry.setAttribute( 'weight', new THREE.Float32BufferAttribute( weights, 1 ) );
+
+			}
+
 			geometry = THREE.BufferGeometryUtils.mergeVertices( geometry ); //
 			// put data of original geometry in different data structures
 			//
@@ -49,11 +66,13 @@
 			const faces = []; // add vertices
 
 			const positionAttribute = geometry.getAttribute( 'position' );
+			const weightAttribute = geometry.getAttribute( 'weight' );
 
 			for ( let i = 0; i < positionAttribute.count; i ++ ) {
 
 				const v = new THREE.Vector3().fromBufferAttribute( positionAttribute, i );
 				const vertex = new Vertex( v, i );
+				if ( weightAttribute ) vertex.weight = weightAttribute.getX( i );
 				vertices.push( vertex );
 
 			} // add faces
@@ -209,7 +228,10 @@
 
 		}
 
-		const amt = edgelength * curvature + borders;
+		// ★2026-07-12改変(3DtoolJS): u/vのweight(既定1)を掛けて、絶対的な辺長
+		// だけでなく呼び出し側が指定したパーツ相対スケールも考慮する。
+		// 境界(u/vで別パーツ)の辺は、より保護したい側(大きいweight)を優先する。
+		const amt = edgelength * curvature * Math.max( u.weight, v.weight ) + borders;
 		return amt;
 
 	}
@@ -444,6 +466,7 @@
 
 			this.position = v;
 			this.id = id; // old index id
+			this.weight = 1; // ★2026-07-12改変(3DtoolJS): computeEdgeCollapseCost参照
 
 			this.faces = []; // faces vertex is connected
 

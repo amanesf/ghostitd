@@ -173,9 +173,20 @@ const EXPECTED_BODY_ONLY = {
 // =2に設定した(以前は全アクセサリーが共通のpsq_acc=5を使っていた)。彫刻結果
 // が変わるため、with-accessoryのハッシュを更新した(body-onlyはアクセサリー
 // を含まないため不変)。
+// ★2026-07-12(ユーザー指摘「ツインテールの造形が粗い/穴が空く」対応):
+// js/carving.jsのgridClusterDecimate(SIMPLIFY_SAFE_LIMIT超過時のフォールバック、
+// 実サンプルはこちらの経路を通る)は、体全体のbbox表面積から一律のセルサイズを
+// 決めていたため、体よりずっと細いアクセサリー(房状の髪飾り等)の断面が
+// 数セルに丸ごと吸収され、粗い/穴の空いた形状になっていた(ユーザーが生データ
+// [間引き前]は綺麗であることを確認し、間引き段階が原因と特定)。パーツの境目の
+// 頂点(隣接面が別ownerを含む頂点)は絶対にクラスタリングせず凍結し、それ以外は
+// 各ownerが自分自身のbbox表面積÷(targetVertsを頂点数比で配分した目標頂点数)
+// で求めた専用のセルサイズで間引くよう変更した(境目を凍結しないと、体側と
+// アクセサリー側でグリッドの縮尺が食い違い、房が扇状に歪む重大な副作用が
+// 実機で確認された)。ファイルサイズは相応に増える(816608→1406364バイト)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 816608,
-  sha256: "eee902471557f68175b7b7375146fd35154eced1eff849541b987dd752c1dd91",
+  byteLength: 1406364,
+  sha256: "26c5430c66b2fc207efbe7ac23a60684cc86be4afa8b54da44da0f9412c8621e",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
