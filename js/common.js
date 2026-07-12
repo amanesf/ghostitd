@@ -143,6 +143,15 @@ var DEFAULT_GEN_PARAMS = {
   // face_sculpt=falseで無効化できる(landmarkが無い場合も自動的にスキップされる)。
   face_sculpt: true,
   eye_socket_depth: 0.008, eye_socket_radius_x: 0.022, eye_socket_radius_y: 0.018,
+  // ★2026-07-12追加(ユーザー指摘「45度から見たらパーツ間隙間が開く」対応):
+  // 体+全アクセサリーは1つの共有ボクセルグリッドへ統合彫刻されるが、各パーツの
+  // フィールドはそのパーツ自身のfront/side/back画像だけから独立に作られるため、
+  // 前後側面3方向どの投影でも輪郭が一致して見えても、その間の斜め方向には
+  // 「どちらのパーツの表面も届いていない」隙間が実際にできることがある
+  // (js/carving.jsのcarveSdfField/carveUnifiedRegions参照)。owner_blendを
+  // ONにすると、パーツ境界で競合するボクセルだけをsmooth-maxでなだらかに
+  // 橋渡しして隙間を埋める(品質改善のため既定ON、face_sculpt等と同方針)。
+  owner_blend: true, owner_blend_strength: 0.4,
 };
 P3D.DEFAULT_GEN_PARAMS = DEFAULT_GEN_PARAMS;
 

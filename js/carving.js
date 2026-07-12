@@ -1030,6 +1030,9 @@ function carveRegion(opts){
   var sharedField = accumulate ? accumulate.field : null;
   var sharedOwnerField = accumulate ? accumulate.ownerField : null;
   var ownerId = accumulate ? accumulate.ownerId : 0;
+  // ★2026-07-12追加(パーツ境界のなじませ、owner_blend機能): 0ならcombineは
+  // 従来通りの単純max(下記コメント参照)。P3D.OWNER_BLEND_K_MAX参照。
+  var seamBlendK = accumulate ? (accumulate.seamBlendK||0) : 0;
   function carveSdfField(){
   var field = sharedField || new Float32Array(ny*nx*nz).fill(-1.0);
   var ownerField = sharedOwnerField;
@@ -1134,7 +1137,31 @@ function carveRegion(opts){
           }
           var val=1.0-(exVal+ez);
           var idx=base+iz;
-          if(val>field[idx]){ field[idx]=val; if(ownerField) ownerField[idx]=ownerId; }
+          // ★2026-07-12追加(パーツ境界のなじませ、owner_blend機能):
+          // front/side/back画像はパーツごとに独立にフィールドを作るため、
+          // 3方向どの投影でも輪郭は一致して見えても斜め方向には「どちらの
+          // パーツの表面も届いていない(両方負)」隙間が実際にでき得る
+          // (詳細はSIMPLIFY_DECIMATE_PLAN.md後の45度視点隙間の調査参照)。
+          // 異なるパーツ同士が競合するセル(ownerField[idx]がこのパーツと
+          // 異なる)に限り、単純max(force winner-take-all)の代わりに
+          // polynomial smooth-max(Inigo Quilezのsmooth-min/maxを符号反転、
+          // val>0=inside系のため)で橋渡しする。hは2値の差がseamBlendK未満
+          // の時だけ0より大きくなり、かつどちらか一方が自分の表面から
+          // seamBlendK以内にある場合のみ発動するため、無関係な離れたパーツ
+          // 同士が偶然近い値を持つケースには影響しない。同一パーツ内の
+          // 複数奥行き帯(前髪が顔の手前にある等)はownerが一致するため
+          // 常にelse分岐(従来通りの単純max)を通り、意図的な奥行きの
+          // 分離が損なわれることはない。
+          var prevVal=field[idx];
+          if(seamBlendK>0 && ownerField && ownerField[idx]!==-1 && ownerField[idx]!==ownerId
+             && Math.max(val,prevVal)>-seamBlendK){
+            var h=Math.max(seamBlendK-Math.abs(val-prevVal), 0.0)/seamBlendK;
+            var blended=Math.max(val,prevVal)+h*h*seamBlendK*0.25;
+            if(val>prevVal){ field[idx]=blended; ownerField[idx]=ownerId; }
+            else if(blended>prevVal){ field[idx]=blended; } // ownerは既存の勝者のまま
+          }else{
+            if(val>prevVal){ field[idx]=val; if(ownerField) ownerField[idx]=ownerId; }
+          }
         }
       }
     }
@@ -1193,17 +1220,25 @@ P3D.carveRegion = carveRegion;
  *   (呼び出し側で対応表を持つこと)。
  * sharedGrid: buildGrid()の戻り値(体+全アクセサリーの外接範囲で作ったもの)
  * minFragFrac: dropSmallFragmentsの閾値(未指定時0.05)
+ * ownerBlendStrength: 省略可(0〜1)。パーツ境界のなじませ(owner_blend機能)
+ *   の強さ。0または省略時は従来通りの単純max-combine(carveSdfField参照)。
  * 戻り値: {V,F,owner} (owner: Int32Array、頂点ごとのownerId) または
  *   null(彫れなかった場合)
  */
-function carveUnifiedRegions(regions, sharedGrid, minFragFrac){
+// ★2026-07-12追加: ownerBlendStrength(0〜1)→carveSdfFieldのsmooth-max
+// ブレンド半径seamBlendKへの校正定数。val(=1-(exVal+ez))は表面付近で
+// おおよそ-1〜1の無次元スケールになるため、その一部を橋渡し半径として使う。
+// 実サンプル(7アクセサリー全部乗せ)を45度視点で目視確認して校正した値。
+var OWNER_BLEND_K_MAX = 0.4;
+function carveUnifiedRegions(regions, sharedGrid, minFragFrac, ownerBlendStrength){
   var nx=sharedGrid.nx, ny=sharedGrid.ny, nz=sharedGrid.nz;
   var field = new Float32Array(ny*nx*nz).fill(-1.0);
   var ownerField = new Int32Array(ny*nx*nz).fill(-1);
+  var seamBlendK = (ownerBlendStrength>0) ? ownerBlendStrength*OWNER_BLEND_K_MAX : 0;
   regions.forEach(function(r){
     var opts = Object.assign({}, r.opts, {
       grid: sharedGrid,
-      accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId},
+      accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId, seamBlendK:seamBlendK},
     });
     carveRegion(opts);
   });

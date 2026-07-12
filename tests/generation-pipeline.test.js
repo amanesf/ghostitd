@@ -208,9 +208,21 @@ const EXPECTED_BODY_ONLY = {
 // アクセサリーが体に道連れで過度に削られなくなり(本計画の発端だった
 // 「ツインテールの造形が粗い」不具合そのものの解決)、ファイルサイズは
 // 大きく増えた(1406364→2816216バイト)。
+// ★2026-07-12(ユーザー指摘「45度からみたらパーツ間隙間が開く」対応、
+// owner_blend機能追加): 体+全アクセサリーの統合彫刻は各パーツのフィールドを
+// そのパーツ自身のfront/side/back画像だけから独立に作るため、3方向どの
+// 投影でも輪郭が一致して見えても斜め方向には「どちらのパーツの表面も
+// 届いていない」隙間ができることがあった。パーツ境界で競合するボクセルに
+// 限り、単純max-combineの代わりにpolynomial smooth-max(SDFベースCSGの
+// smooth union)でなだらかに橋渡しする機能を追加し、既定ONにした
+// (js/carving.jsのcarveSdfField/carveUnifiedRegions、gen_paramsの
+// owner_blend/owner_blend_strength参照)。同一パーツ内の奥行き帯(前髪が
+// 顔の手前にある等)には影響しない設計のため、実測での変化はごく僅か
+// (163,982頂点中34頂点、実測)。body-onlyはアクセサリーが無くパーツ境界
+// そのものが存在しないため完全に不変(ハッシュ同一を確認済み)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 2816216,
-  sha256: "65ca0fae96cc18dd4a7e9c25aac2c34a007e57fa6f7dd0fc488863b22e085658",
+  byteLength: 2817776,
+  sha256: "f950c48aacfe679a1e7dcb9fe20747a1b9ee38ae61f565e16a0a4840039693a3",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

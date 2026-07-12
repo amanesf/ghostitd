@@ -460,6 +460,18 @@ const PARAM_META=[
   desc:"目窩の凹みの左右方向の広がり(このランドマークからの楕円形footprintの半径)。face_sculptがONの時のみ有効。"},
  {group:"顔の彫刻", key:"eye_socket_radius_y", label:"目窩の縦幅", type:"number", min:0.005, max:0.05, step:0.001, unit:"(model単位)",
   desc:"目窩の凹みの上下方向の広がり(このランドマークからの楕円形footprintの半径)。face_sculptがONの時のみ有効。"},
+ // ★2026-07-12追加(ユーザー指摘「45度から見たらパーツ間隙間が開く」対応):
+ // 体+全アクセサリーは1つの共有グリッドへ統合彫刻されるが、各パーツの
+ // フィールドはそのパーツ自身のfront/side/back画像だけから独立に作られる
+ // ため、3方向どの投影でも輪郭が一致して見えても斜め方向には「どちらの
+ // パーツの表面も届いていない」隙間ができることがある(js/carving.jsの
+ // carveSdfField/carveUnifiedRegions参照)。彫刻(marching cubes)そのものに
+ // 関わる設定のため、character_3d.htmlのライブ編集パネルではなく生成前の
+ // ここ(PARAM_META)にのみ置く。
+ {group:"パーツ境界", key:"owner_blend", label:"パーツ境界をなじませる", type:"checkbox",
+  desc:"体とアクセサリー(髪飾り・スカート等)が接する境目は、front/side/back 3方向の投影だけでは実際には僅かに離れてしまうことがあり、正面/側面/背面からは見えないが斜めから見ると隙間が空くことがある。ONにすると、境界を挟んで隣接する2パーツのフィールド値が近い(=互いに僅かに届いていないだけ)箇所を数学的になだらかに橋渡しして埋める(画像に描かれていない情報を捏造するのではなく、両パーツの実測データが示す傾向から補間する)。"},
+ {group:"パーツ境界", key:"owner_blend_strength", label:"パーツ境界のなじませ強さ", type:"number", min:0, max:1, step:0.05, unit:"",
+  desc:"境界のブレンド半径。大きいほど広い範囲・大きい隙間まで埋まるが、意図的な境目(生え際と地肌など)まで丸まりやすくなる。owner_blendがONの時のみ有効。"},
  {group:"ノイズ・ガタつき対策", key:"track_win", label:"横方向のノイズ平滑化幅", type:"number", min:1, max:31, step:2, unit:"行",
   desc:"幅方向(front/back)のセグメント測定に適用する。大きくすると測定ノイズは減るが細かい起伏も均されて鈍る。小さくすると細部の形状は残るがノイズによる凸凹が出やすい。※奥行き(side計測)には適用されない(顎先のような数行の突出が消えるため)。"},
  {group:"ノイズ・ガタつき対策", key:"track_gap_close_px", label:"房の分断を埋める幅", type:"number", min:0, max:20, step:1, unit:"px",

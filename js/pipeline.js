@@ -404,7 +404,11 @@ async function runCarvingStages(state, report){
   var sharedGrid = P3D.buildGrid(unionBounds[0], unionBounds[1], unionBounds[2], gp.body_vox);
   var regions = [{ownerId:0, opts:bodyBuilt.carveOpts}].concat(
     accBuilt.map(function(a,i){ return {ownerId:i+1, opts:a.carveOpts}; }));
-  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001);
+  // ★2026-07-12追加(パーツ境界のなじませ、owner_blend機能): 3方向投影
+  // だけでは埋まらない斜め視点でのパーツ間の隙間をなじませる強さ
+  // (js/carving.jsのcarveUnifiedRegions/carveSdfField参照)。
+  var ownerBlendStrength = gp.owner_blend ? (gp.owner_blend_strength||0) : 0;
+  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, ownerBlendStrength);
   if(!unified) throw new Error("visual_hull+accessories: carving produced an empty mesh");
   console.log("  carveUnifiedRegions: total verts", unified.V.length/3, "faces", unified.F.length/3);
 
