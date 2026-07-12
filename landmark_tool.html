@@ -759,15 +759,22 @@ let currentSampleId="default"; // サンプルモード時、SAMPLESのどのid�
 // 一元化した(2箇所で文字列リテラルを重複定義すると食い違いの元になるため)。
 const NORMAL_SESSION_KEY=P3D.NORMAL_SESSION_KEY;
 const SAMPLE_SESSION_KEY=P3D.SAMPLE_SESSION_KEY;
+// ★2026-07-11バグ修正(重大): buildJson()はfront/side/back/leftSideの実画像+
+// 色分けマップを丸ごとbase64で埋め込むため、そのままlocalStorageに保存すると
+// キャラクター1体分でも数MB超でQuotaExceededErrorになり、保存自体が毎回
+// (無言で)失敗していた(ユーザー指摘「ビューアから戻ると設定値が消える」)。
+// P3D.stripHeavyFieldsForSessionSave(js/common.js)で画像・色分けマップを
+// 除いた軽量な差分だけを保存する(画像は通常モードならsaveNormalSessionImages
+// 経由のIndexedDB、サンプルモードなら同梱の固定アセットから別途復元する)。
 function saveNormalSession(){
-  try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(buildJson())); }
+  try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(P3D.stripHeavyFieldsForSessionSave(buildJson()))); }
   catch(e){ console.warn("セッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
 }
 // ★サンプルが複数になったため、保存キーはサンプルidごとに分ける(単一キーの
 // ままだと、サンプル1で編集後にサンプル2に切り替えた際、サンプル2の画像に
 // サンプル1のランドマーク編集内容が誤って復元されてしまう)。
 function saveSampleSession(){
-  try{ localStorage.setItem(SAMPLE_SESSION_KEY+":"+currentSampleId, JSON.stringify(buildJson())); }
+  try{ localStorage.setItem(SAMPLE_SESSION_KEY+":"+currentSampleId, JSON.stringify(P3D.stripHeavyFieldsForSessionSave(buildJson()))); }
   catch(e){ console.warn("サンプルセッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
 }
 function imageElementToBlob(imgEl,w,h){
@@ -782,6 +789,14 @@ async function saveNormalSessionImages(){
   for(const slot of ["front","side","back"]){
     const im=imgs[slot];
     if(im) blobs[slot]=await imageElementToBlob(im.el,im.w,im.h);
+  }
+  // ★2026-07-11追加: 色分けマップは通常モードではユーザー自身が用意した
+  // データ(サンプルモードのような同梱の固定アセットではない)なので、
+  // buildJson()側(localStorage、stripHeavyFieldsForSessionSaveで除外済み)
+  // ではなくここで画像本体と同様にIndexedDBへBlobとして保存する。
+  for(const slot of ["front","side","leftSide","back"]){
+    const cm=colormaps[slot];
+    if(cm) blobs["colormap_"+slot]=await new Promise(res=>cm.canvas.toBlob(res,"image/png"));
   }
   try{ await P3D.saveNormalSessionImages(blobs); }
   catch(e){ console.warn("画像セッション保存に失敗しました:", e); setMsg("画像の自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
@@ -1824,40 +1839,52 @@ $("automaskVisNoneBtn").onclick=()=>setAllAutomaskVisible(false);
       el.src=URL.createObjectURL(blob);
     });
   }
+  // ★2026-07-11追加: 通常モードの色分けマップ復元(saveNormalSessionImagesで
+  // 一緒に保存したBlob)をcolormaps[view]のオフスクリーンcanvasへ読み込む
+  // (loadColormapFromDataUrlのBlob版)。blobが無い(この修正より前の保存分、
+  // または元々leftSideが無いキャラ)場合は何もせずスキップする。
+  function loadColormapBlobIntoSlot(view,blob){
+    return new Promise(function(res,rej){
+      if(!blob){ res(); return; }
+      var el=new Image();
+      el.onload=function(){
+        var c=document.createElement("canvas"); c.width=el.naturalWidth; c.height=el.naturalHeight;
+        var ctx=c.getContext("2d"); ctx.drawImage(el,0,0);
+        colormaps[view]={canvas:c,ctx:ctx,w:c.width,h:c.height};
+        res();
+      };
+      el.onerror=function(){rej(new Error("色分けマップの読込に失敗しました: "+view));};
+      el.src=URL.createObjectURL(blob);
+    });
+  }
   // ★2026-07-09(UIレビュー): サンプルも画像込みの1つのJSONファイル
   // (landmarksFile)から読み込む形に統一した(以前はimagesDir配下の
   // front/side/back.pngを個別fetchし、その後で別途JSONを読んでいた。
   // 画像読み込み経路が通常モード/スキャナー引き継ぎ/サンプルモードでバラバラ
   // だったことの一因)。
+  // ★2026-07-11(バグ修正): 以前は保存済みセッションJSON自体に画像・色分け
+  // マップも埋め込んだままlocalStorageに保存しようとしており、
+  // QuotaExceededErrorで保存自体が毎回(無言で)失敗していた(ユーザー指摘
+  // 「ビューアから戻ると設定値が消える」)。画像・色分けマップは常に同梱の
+  // landmarksFile(初期状態、決定的なデータ)から読み込み、保存済みJSON
+  // (stripHeavyFieldsForSessionSaveで画像・色分けマップを除いた軽量な差分)は
+  // その上からapplyLoadedJson()でランドマーク/設定値等だけを上書きする
+  // 2段階に分けた(旧・色分けマップ必須化以前の形式を破棄する特別扱いは、
+  // 画像・色分けマップを保存済みJSON側に依存しなくなったことで不要になった)。
   function loadSampleImages(){
     const sample=currentSample();
     currentSampleId=sample.id;
-    // ★2026-07-07: サンプルモードも自動保存の対象になったため、前回
-    // サンプルモードで編集した内容(ランドマーク/パラメータ/アクセサリー等)
-    // があればそれを復元する(保存済みJSONにも画像は同様に埋め込まれている)。
-    // 保存が無ければ同梱のlandmarksFile(画像込み、初期状態)を読み込む。
-    let savedRaw=null;
-    try{ savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY+":"+sample.id); }catch(e){}
-    if(savedRaw){
-      try{
-        const savedJson=JSON.parse(savedRaw);
-        // ★2026-07-09: colormaps必須化より前に保存されたセッションは色分け
-        // マップを持たず、それを復元すると自動マスクタブの個別スライダーが
-        // 出ない・生成が失敗する(state.colormaps[v]がnullで例外)といった
-        // 分かりにくい壊れ方をする。旧形式のセッションは復元せず、破棄して
-        // 同梱の(色分けマップ込みの)初期状態を読み込み直す。
-        if(!savedJson.colormaps || !savedJson.colormaps.front || !savedJson.colormaps.side || !savedJson.colormaps.back){
-          console.warn("保存済みサンプルセッションは色分けマップを持たない旧形式のため破棄し、初期状態を読み込みます。");
-          try{ localStorage.removeItem(SAMPLE_SESSION_KEY+":"+sample.id); }catch(_e){}
-        }else{
-          return bootstrapFromJson(savedJson).then(function(ok){
-            if(!ok) throw new Error("saved sample session is missing embedded images");
-          });
-        }
-      }catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
-    }
+    let savedJson=null;
+    try{
+      const savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY+":"+sample.id);
+      if(savedRaw) savedJson=JSON.parse(savedRaw);
+    }catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
     return fetch(sample.landmarksFile).then(function(r){ if(!r.ok)throw 0; return r.json(); })
-      .then(function(d){ return bootstrapFromJson(d); });
+      .then(function(d){ return bootstrapFromJson(d); })
+      .then(function(ok){
+        if(ok && savedJson) applyLoadedJson(savedJson);
+        return ok;
+      });
   }
   // 「前回の続き」が選べるかどうかを、保存済みJSON(localStorage)+画像本体
   // (IndexedDB)の両方が実際に揃っているかで判定する。片方だけ残っている
@@ -1925,6 +1952,10 @@ $("automaskVisNoneBtn").onclick=()=>setAllAutomaskVisible(false);
       const blobs=await P3D.loadNormalSessionImages();
       await Promise.all(["front","side","back"].map(function(slot){
         return loadImageBlobIntoSlot(slot,blobs[slot]);
+      }));
+      colormaps={front:null,side:null,leftSide:null,back:null};
+      await Promise.all(["front","side","leftSide","back"].map(function(view){
+        return loadColormapBlobIntoSlot(view, blobs["colormap_"+view]);
       }));
       runAnalyze();syncViewBtns();
       applyLoadedJson(JSON.parse(raw));

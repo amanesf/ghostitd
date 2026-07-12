@@ -1087,10 +1087,19 @@ document.getElementById('download').onclick=()=>{
 // (P3D.sessionStorageKey、js/common.js)へ書き戻してから遷移する。
 // currentPackageが無い(直接ビューアを開いた/ビューア専用サンプルを見ている
 // 等、ジェネレータ側に対応するセッションが元々存在しないケース)場合は何もしない。
+// ★2026-07-11バグ修正(重大): currentPackage.landmarks_jsonはジェネレータの
+// buildJson()スナップショットそのもので、front/side/back/leftSideの実画像+
+// 色分けマップを丸ごとbase64で含んでいる。そのままlocalStorageへ書き戻すと
+// QuotaExceededErrorで保存自体が毎回(無言で)失敗し、「戻る」で行き来すると
+// 設定値が消える不具合の原因になっていた(ユーザー指摘)。
+// P3D.stripHeavyFieldsForSessionSave(js/common.js)で画像・色分けマップを
+// 除いてから書き戻す(ジェネレータ側は画像・色分けマップを自前の経路
+// (サンプルの固定アセット/通常モードのIndexedDB)から復元できるため不要)。
 function saveLiveSettingsToGeneratorSession(){
   if(!currentPackage || !currentPackage.landmarks_json || !currentPackage.session_mode) return;
   try{
-    const json=Object.assign({}, currentPackage.landmarks_json, {
+    const stripped=P3D.stripHeavyFieldsForSessionSave(currentPackage.landmarks_json);
+    const json=Object.assign({}, stripped, {
       gen_params: Object.assign({}, liveGP),
       seam_angles: Object.assign({}, liveSeamAngles),
       seam_no_side: Object.assign({}, liveSeamNoSide),

@@ -900,6 +900,37 @@ P3D.sessionStorageKey=function(mode, sampleId){
   return mode==="sample" ? (P3D.SAMPLE_SESSION_KEY+":"+sampleId) : P3D.NORMAL_SESSION_KEY;
 };
 
+// ★2026-07-11追加(ユーザー指摘「ビューアからジェネレータへ戻ると設定値が
+// 消える」への対応): landmark_tool.htmlのbuildJson()はfront/side/back/
+// leftSideの実画像+色分けマップを丸ごとbase64で埋め込むため、この自動保存
+// (localStorage、quotaは通常5〜10MB程度)にそのまま使うと、キャラクター1体分
+// でも数MB超になりQuotaExceededErrorで保存自体が毎回失敗していた
+// (呼び出し元がcatchで握りつぶすため、画面には「自動保存に失敗しました」
+// としか出ず気づきにくい)。サンプルモードの画像・色分けマップは同梱の
+// 固定アセットから、通常モードの画像・色分けマップは別途IndexedDB
+// (P3D.saveNormalSessionImages、landmark_tool.html参照)から、それぞれ
+// 再取得できるため、この自動保存にはランドマーク/設定値等の軽量な差分だけ
+// 残せばよい。character_3d.html(ビューア)の書き戻し(ジェネレータと同じ
+// キーへ上書き保存)にも同じ理由で使う。
+// json: buildJson()相当のオブジェクト。破壊せず新しいオブジェクトを返す。
+function stripHeavyFieldsForSessionSave(json){
+  var out = Object.assign({}, json);
+  var strippedImage = {};
+  ["front","side","back","leftSide"].forEach(function(v){
+    var src = json.image && json.image[v];
+    if(!src){ strippedImage[v]=null; return; }
+    var meta = {w:src.w, h:src.h};
+    if(src.ytop!==undefined) meta.ytop=src.ytop;
+    if(src.ybot!==undefined) meta.ybot=src.ybot;
+    if(src.cx!==undefined) meta.cx=src.cx;
+    strippedImage[v]=meta;
+  });
+  out.image = strippedImage;
+  delete out.colormaps;
+  return out;
+}
+P3D.stripHeavyFieldsForSessionSave = stripHeavyFieldsForSessionSave;
+
 document.addEventListener('pointerdown', function(e){
   var el = e.target;
   if(!el || el.tagName!=='INPUT' || el.type!=='range') return;
