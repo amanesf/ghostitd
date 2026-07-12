@@ -452,8 +452,6 @@ const PARAM_META=[
   desc:"肩→肘→手首の円形断面(arm_circle有効時)に使う指数。左右対称なので左右で共通の1個の値。2に近いほど円形に近く自然な腕になる。"},
  {group:"断面の丸み具合", key:"psq_hands", label:"手の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
- {group:"断面の丸み具合", key:"psq_acc", label:"アクセサリーの断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
-  desc:"髪・帽子・スカート等、個別に彫り出すアクセサリーの断面形状。意味はpsq_torsoと同じ。"},
  {group:"顔の彫刻", key:"face_sculpt", label:"目窩を彫る", type:"checkbox",
   desc:"ONだと「目L」「目R」ランドマークを中心に、彫刻済みの頭部表面へ局所的な凹みを彫る(front/back/sideどのシルエット輪郭にも現れない内部形状なので、輪郭=元イラストの実測データとは矛盾しない)。頭部は他の部位と同じ行ごとの断面で彫るため、OFFのままだとのっぺりした顔になりやすい。"},
  {group:"顔の彫刻", key:"eye_socket_depth", label:"目窩の深さ", type:"number", min:0, max:0.03, step:0.001, unit:"(model単位)",
@@ -566,24 +564,23 @@ function paramGroupChanged(g){
 // 一切影響しない3D彫刻専用パラメータなので、こちらの設定値タブ(断面の丸み具合
 // グループ)へ移動した。PARAM_METAは1キー=1パラメータのフラットな配列だが、
 // これはアクセサリーごとに複数値を持つため、同グループの末尾に特別に追加描画する。
+// ★2026-07-12(ユーザー指摘「まとめて設定は意味がない」): アクセサリーごとに
+// 理想的な丸みが違うのが前提なので、全体共通の「まとめて設定」(旧psq_acc)と
+// 「個別設定」チェックボックスの二段構えをやめ、各アクセサリーが常に自分自身の
+// psq値を持つ単純な形にした(スライダーは常に有効、チェックボックスは無し)。
 function renderPsqAccessoryOverridesHtml(){
   if(!accessories.length) return "";
   const rows=accessories.map((a,idx)=>{
-    const useCustomPsq=(a.psq!==undefined && a.psq!==null);
-    const psqVal=useCustomPsq?a.psq:genParams.psq_acc;
+    const psqVal=(a.psq!==undefined && a.psq!==null)?a.psq:2;
     return '<div class="acform" style="margin-bottom:6px">'+
-      '<label style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
-      '<span style="color:var(--txt);font-size:12px">'+(a.name||"(無名)")+'</span>'+
-      '<span style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px;white-space:nowrap">'+
-      '<input type="checkbox" class="psqAccUse" data-i="'+idx+'" '+(useCustomPsq?"checked":"")+'> 個別設定</span>'+
-      '</label>'+
-      '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">'+
-      '<input type="range" class="psqAccSlider" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" '+(useCustomPsq?"":"disabled")+' style="flex:1">'+
-      '<input type="number" class="psqAccNum" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" '+(useCustomPsq?"":"disabled")+' style="width:70px">'+
+      '<div style="color:var(--txt);font-size:12px;margin-bottom:4px">'+(a.name||"(無名)")+'</div>'+
+      '<div style="display:flex;align-items:center;gap:6px">'+
+      '<input type="range" class="psqAccSlider" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" style="flex:1">'+
+      '<input type="number" class="psqAccNum" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" style="width:70px">'+
       '</div></div>';
   }).join("");
   return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
-    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の断面の丸み(未設定時は上の「アクセサリーの断面の丸み」を使用)</div>'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の断面の丸み</div>'+
     rows+'</div>';
 }
 function buildParamsPanelHtml(){
@@ -695,27 +692,11 @@ function wireParamsPanelEvents(el){
     if(sl)sl.value=n;
     if(num)num.value=n;
   }
-  [].forEach.call(el.querySelectorAll(".psqAccUse"),cb=>{
-    cb.onchange=()=>{
-      const i=+cb.dataset.i;
-      const sl=el.querySelector('.psqAccSlider[data-i="'+i+'"]');
-      const num=el.querySelector('.psqAccNum[data-i="'+i+'"]');
-      if(cb.checked){
-        accessories[i].psq=parseFloat((sl&&sl.value)||genParams.psq_acc);
-      }else{
-        accessories[i].psq=null;
-        if(sl)sl.value=genParams.psq_acc;
-        if(num)num.value=genParams.psq_acc;
-      }
-      if(sl)sl.disabled=!cb.checked;
-      if(num)num.disabled=!cb.checked;
-    };
-  });
   [].forEach.call(el.querySelectorAll(".psqAccSlider"),sl=>{
     sl.oninput=()=>{ setAccessoryPsq(+sl.dataset.i, parseFloat(sl.value)); };
   });
   [].forEach.call(el.querySelectorAll(".psqAccNum"),num=>{
-    num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||genParams.psq_acc); };
+    num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||2); };
   });
 }
 function renderParamsPanel(){
@@ -1249,7 +1230,7 @@ function buildJson(){
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:null};
+        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
@@ -1304,7 +1285,7 @@ function applyLoadedJson(d){
   accessories=(d.accessories||[]).map(a=>{
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
       color:a.color||null,
-      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:null};
+      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -1696,7 +1677,7 @@ $("generateBtn").onclick=async()=>{
         // (P3D.fillColorGaps)が「このアクセサリーの登録色」を必要とするため
         // ここでも渡すようにした(無いとギャップ埋めが常にスキップされ無効化する)。
         const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:null};
+          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
         // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
         // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
         // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による

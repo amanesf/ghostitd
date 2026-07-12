@@ -108,7 +108,10 @@ function buildAccessoryCarveOptsList(opts){
     var name = acc.name || 'accessory';
     var mode = acc.mode || 'rigid';
     var bones = acc.bones || [];
-    var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : gp.psq_acc;
+    // ★2026-07-12: 全アクセサリー共通の「まとめて設定」(gp.psq_acc)は廃止した
+    // (各アクセサリーは必ず個別のpsq値を持つ)。ここでの2は、それでも欠けて
+    // いた場合(壊れた/旧形式JSON等)に備えた安全側フォールバックに過ぎない。
+    var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : 2;
     var mask = acc.mask || {};
     var mxMin,mxMax,myMin,myMax,mzMin,mzMax;
     var usedBackOnly=false;
@@ -213,7 +216,10 @@ function stageAccessories(opts){
     var name = acc.name || 'accessory';
     var mode = acc.mode || 'rigid';
     var bones = acc.bones || [];
-    var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : gp.psq_acc;
+    // ★2026-07-12: 全アクセサリー共通の「まとめて設定」(gp.psq_acc)は廃止した
+    // (各アクセサリーは必ず個別のpsq値を持つ)。ここでの2は、それでも欠けて
+    // いた場合(壊れた/旧形式JSON等)に備えた安全側フォールバックに過ぎない。
+    var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : 2;
     // accessoryはマスク(mask[view].bbox、色分けマップ由来・自動抽出のみ)形式
     // だけを持つ(多角形(regions)形式は2026-07-09に廃止)。実際の3D彫刻は
     // bbox範囲内のアルファ検出(carveRegion)で行われる。
@@ -294,10 +300,10 @@ function stageAccessories(opts){
       vox: gp.acc_vox,
       // アクセサリーは頭/胴体/脚のような部位分けが無いため、部位別指数は
       // 全て同じ値を渡す(neckY/hipsYを渡さないのでcarveRegion側は常に
-      // psqTorso=accPsqを使う)。★2026-07-10: 従来は全アクセサリー共通の
-      // gp.psq_accしか無かったが、アクセサリーごとに理想的な丸みが異なる
-      // (硬いアクセサリー/柔らかい布等)ため、acc.psq(個別設定、未設定なら
-      // null)があればそちらを優先する。
+      // psqTorso=accPsqを使う)。アクセサリーごとに理想的な丸みが異なる
+      // (硬いアクセサリー/柔らかい布等)ため、各アクセサリーが必ず個別の
+      // acc.psqを持つ(★2026-07-12: 全アクセサリー共通の「まとめて設定」は
+      // 廃止した、上のaccPsq代入部分参照)。
       psqHead: accPsq, psqTorso: accPsq, psqLegs: accPsq,
       psqArms: accPsq, psqHands: accPsq,
       trackWin: gp.track_win,

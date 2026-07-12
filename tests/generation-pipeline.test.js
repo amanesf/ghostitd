@@ -166,9 +166,16 @@ const EXPECTED_BODY_ONLY = {
 // 早期ロードを復元した(js/pipeline.js参照)。with-accessory側のテクスチャ
 // 焼き込み結果が大きく変わるため、ハッシュを更新した(body-onlyはアクセサ
 // リーが無く対象外のため不変)。
+// ★2026-07-12(ユーザー指摘「まとめて設定は意味がない」「サンプル初期値」対応):
+// 全アクセサリー共通の「まとめて設定」(psq_acc)を廃止し、各アクセサリーが
+// 必ず個別のpsq値を持つようにした。サンプル(landmarks_ai_2_embedded.json)の
+// 初期値は前髪/後ろ髪=5、それ以外(左右ツインテール/髪飾り/マフラー/スカート)
+// =2に設定した(以前は全アクセサリーが共通のpsq_acc=5を使っていた)。彫刻結果
+// が変わるため、with-accessoryのハッシュを更新した(body-onlyはアクセサリー
+// を含まないため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 823272,
-  sha256: "f7829042222f65af565677a98f797078170a6c488f1bfb4f58f2a7fc95b49aea",
+  byteLength: 816608,
+  sha256: "eee902471557f68175b7b7375146fd35154eced1eff849541b987dd752c1dd91",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
