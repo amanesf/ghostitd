@@ -104,7 +104,10 @@ P3D.buildDerivedLandmarks = buildDerivedLandmarks;
  *   seamAngles: landmark_tool.htmlのseamAngles
  *   seamNoSide: landmark_tool.htmlのseamNoSide(パーツ別「側面画像を使わない」フラグ)
  *   seamSmoothIters: landmark_tool.htmlのseamSmoothIters(境界線平滑化の強さ)
- *   colorGradWidth: landmark_tool.htmlのcolorGradWidth(色のディザグラデーション幅)
+ *   colorGradWidth: landmark_tool.htmlのcolorGradWidth(色のディザグラデーション幅、
+ *     無次元スケール、js/atlas.js参照)
+ *   colorGradStrength: landmark_tool.htmlのcolorGradStrength(境目ちょうどでの
+ *     最大ブレンド比率、0〜1)
  *   genParams: landmark_tool.htmlのgenParams
  * }
  * onProgress(stageLabel): 各ステージ開始時に呼ばれる(UIの経過秒数表示用)
@@ -459,7 +462,7 @@ P3D.runToIntermediate = runToIntermediate;
  * アクセサリー統合済み・継ぎ目なしの1枚のメッシュ)に間引き(decimate)・
  * 平滑化(smooth_iters)・スキニング・atlas焼き込み・GLB書き出しだけを適用する
  * (フェーズ2のライブパラメータ編集の中核関数)。
- * opts: {gp, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth}
+ * opts: {gp, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength}
  * 戻り値: Promise<ArrayBuffer>
  *
  * ★2026-07-11(ユーザー指摘「パーツ分割のタイミングが早すぎる」対応):
@@ -481,7 +484,7 @@ P3D.runToIntermediate = runToIntermediate;
  *   2. mesh_finish段(平滑化+パーツ分割+スキニング): 1の出力 + smooth_iters/
  *      rigid_soft_width(Tier1)に依存。
  *   3. atlas_bake段: 2の出力 + seamAngles/seamNoSide/seamSmoothIters/
- *      colorGradWidth(Tier3)に依存。
+ *      colorGradWidth/colorGradStrength(Tier3)に依存。
  *   4. model_glb段(テクスチャ圧縮+GLB書き出し): 3の出力 + kb_per_face(Tier1)。
  *      圧縮のみなので常に軽量、キャッシュ不要で毎回実行する。
  * 各段の入力シグネチャ(JSON文字列)をinter._stageCacheに保存し、前回と一致
@@ -576,7 +579,7 @@ async function finishFromIntermediate(inter, opts, onProgress){
   await tick();
 
   var origBled = inter.bled_canvases;
-  var bakeSig = meshSig+"|"+sig({sa:opts.seamAngles, sns:opts.seamNoSide, ssi:opts.seamSmoothIters, cgw:opts.colorGradWidth});
+  var bakeSig = meshSig+"|"+sig({sa:opts.seamAngles, sns:opts.seamNoSide, ssi:opts.seamSmoothIters, cgw:opts.colorGradWidth, cgs:opts.colorGradStrength});
   var bake, atlasCanvas;
   if(cache.bakeSig===bakeSig && cache.bake){
     bake = cache.bake; atlasCanvas = cache.atlasCanvas;
@@ -608,6 +611,7 @@ async function finishFromIntermediate(inter, opts, onProgress){
       seamNoSide: opts.seamNoSide,
       seamSmoothIters: opts.seamSmoothIters,
       colorGradWidth: opts.colorGradWidth,
+      colorGradStrength: opts.colorGradStrength,
       frontCanvas: bledCanvas.front, backCanvas: bledCanvas.back, sideCanvas: bledCanvas.side,
     });
     atlasCanvas = P3D.buildAtlasCanvas(bledCanvas.front, bledCanvas.back, bledCanvas.side);

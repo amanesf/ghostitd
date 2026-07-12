@@ -624,7 +624,7 @@ document.getElementById('modeNormalBtn').onclick=()=>{
 // できるUIパネルに置き換える)。
 let currentPackage=null; // フェーズ2のライブパラメータ編集用に保持しておく
 let liveGP=null;         // currentPackage.gen_paramsのコピー。パネル操作で更新する
-let liveSeamSmoothIters=null, liveColorGradWidth=null;
+let liveSeamSmoothIters=null, liveColorGradWidth=null, liveColorGradStrength=null;
 // ★追加課題5の対応: seamAngles/seamNoSide(ボーン別の継ぎ目角度・側面画像
 // 不使用フラグ)もビューアでライブ編集できるようにする(landmark_tool.htmlの
 // 「境目角度」タブと同じBONE_GROUPS/seamRowHtmlパターンを移植)。
@@ -638,6 +638,7 @@ document.getElementById('err').textContent='';
       liveGP = Object.assign({}, pkg.gen_params);
       liveSeamSmoothIters = pkg.seam_smooth_iters;
       liveColorGradWidth = pkg.color_grad_width;
+      liveColorGradStrength = (pkg.color_grad_strength!==undefined && pkg.color_grad_strength!==null) ? pkg.color_grad_strength : 0.5;
       liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
       liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
       document.getElementById('err').textContent='モデルを構築中…';
@@ -685,17 +686,25 @@ const GEN_PARAM_TIERS=[
   ]},
   {tier:"Tier3(生メッシュ+画像キャッシュ利用)", items:[
     {key:"__seamSmoothIters", label:"継ぎ目の平滑化回数", min:0,max:30,step:1,unit:"回"},
-    {key:"__colorGradWidth", label:"色のディザグラデーション幅", min:0,max:40,step:1,unit:"px"},
+    // ★2026-07-12バグ修正(ユーザー指摘「境界だけじゃなくて全体に広がる」):
+    // 判定に使う値は法線ベクトル由来(値域およそ[-1,1])の無次元スケールで、
+    // 「px」ではない(js/atlas.js参照)。以前はUI上0〜40pxとして見せていた
+    // ため、意味のありそうな値を入れるとほぼ全体がブレンド対象になっていた。
+    // 幅と強さ(境目ちょうどでの最大ブレンド比率)を別々に設定できるよう分離した。
+    {key:"__colorGradWidth", label:"色グラデーションの幅(境界からの距離)", min:0,max:1,step:0.01,unit:""},
+    {key:"__colorGradStrength", label:"色グラデーションの強さ(最大ブレンド比率)", min:0,max:1,step:0.05,unit:""},
   ]},
 ];
 function genParamGet(key){
   if(key==="__seamSmoothIters") return liveSeamSmoothIters;
   if(key==="__colorGradWidth") return liveColorGradWidth;
+  if(key==="__colorGradStrength") return liveColorGradStrength;
   return liveGP[key];
 }
 function genParamSet(key,val){
   if(key==="__seamSmoothIters"){ liveSeamSmoothIters=val; return; }
   if(key==="__colorGradWidth"){ liveColorGradWidth=val; return; }
+  if(key==="__colorGradStrength"){ liveColorGradStrength=val; return; }
   liveGP[key]=val;
 }
 let genPanelOpen={};
@@ -891,7 +900,8 @@ function scheduleGenRecompute(){
 // パラメータオブジェクトをここに集約する(重複定義でどちらかの更新漏れを防ぐ)。
 function currentLiveParams(){
   return {gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
-    seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth};
+    seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
+    colorGradStrength: liveColorGradStrength};
 }
 async function doGenRecompute(){
   if(!currentPackage) return;
@@ -950,6 +960,7 @@ function buildLiveJson(){
     gen_params: Object.assign({}, base.gen_params||{}, liveGP),
     seam_smooth_iters: liveSeamSmoothIters,
     color_grad_width: liveColorGradWidth,
+    color_grad_strength: liveColorGradStrength,
     seam_angles: Object.assign({}, liveSeamAngles),
     seam_no_side: Object.assign({}, liveSeamNoSide),
   });
@@ -1105,6 +1116,7 @@ function saveLiveSettingsToGeneratorSession(){
       seam_no_side: Object.assign({}, liveSeamNoSide),
       seam_smooth_iters: liveSeamSmoothIters,
       color_grad_width: liveColorGradWidth,
+      color_grad_strength: liveColorGradStrength,
     });
     const key=P3D.sessionStorageKey(currentPackage.session_mode, currentPackage.session_sample_id);
     localStorage.setItem(key, JSON.stringify(json));

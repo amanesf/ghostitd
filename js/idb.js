@@ -34,6 +34,7 @@ function openDb(){
 //   pivots: object,
 //   calib: {SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF},
 //   gen_params, seam_angles, seam_no_side, seam_smooth_iters, color_grad_width,
+//   color_grad_strength,
 // }
 function canvasToBlobEntry(canvas){
   return new Promise(function(resolve,reject){

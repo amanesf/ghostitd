@@ -420,8 +420,10 @@ function normalizeSeamSideDefaults(){
 // js/atlas.jsのopts.seamSmoothIters未指定時フォールバックも合わせて変更した。
 let seamSmoothIters=0; // 境界線平滑化の反復回数(atlas.jsのフォールバック既定と一致)
 const SEAM_DEFAULT_SMOOTH=0;
-let colorGradWidth=0; // 色のディザ(擬似)グラデーション幅(既定0=無効)
+let colorGradWidth=0; // 色のディザ(擬似)グラデーション幅(既定0=無効、js/atlas.js参照)
 const COLOR_GRAD_DEFAULT=0;
+let colorGradStrength=0.5; // 境目ちょうどでの最大ブレンド比率(0〜1)
+const COLOR_GRAD_STRENGTH_DEFAULT=0.5;
 // ★2026-07-10: 以前はjs/common.jsのP3D.DEFAULT_GEN_PARAMSと値を「一致させる」
 // 前提で、ここに丸ごとコピーした独自定義を持っていた。rigid_soft_widthが
 // こちらにしか存在しないという食い違いが生じていた(ユーザー指摘により発覚)ため、
@@ -1264,6 +1266,7 @@ function buildJson(){
     seam_no_side:Object.assign({},seamNoSide),
     seam_smooth_iters:seamSmoothIters,
     color_grad_width:colorGradWidth,
+    color_grad_strength:colorGradStrength,
     gen_params:Object.assign({},genParams)};
 }
 function exportJson(){
@@ -1318,6 +1321,7 @@ function applyLoadedJson(d){
   colorGradWidth=(d.color_grad_width!==undefined)?d.color_grad_width:COLOR_GRAD_DEFAULT;
   const colorGradEl=$("colorGradVal"); if(colorGradEl) colorGradEl.value=colorGradWidth;
   const colorGradSl=$("colorGradSlider"); if(colorGradSl) colorGradSl.value=colorGradWidth;
+  colorGradStrength=(d.color_grad_strength!==undefined && d.color_grad_strength!==null)?d.color_grad_strength:COLOR_GRAD_STRENGTH_DEFAULT;
   genParams=Object.assign({},DEFAULT_GEN_PARAMS,d.gen_params||{});
   renderParamsPanel();
   // ★2026-07-09: 色分けマップから全身/アクセサリー双方のマスクを再抽出する
@@ -1702,7 +1706,7 @@ $("generateBtn").onclick=async()=>{
         out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
         return out;
       }),
-      colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, genParams,
+      colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength, genParams,
     };
     // ★フェーズ1(2026-07-07〜): 「生成」は完成GLBまで作らず、重い彫刻(marching
     // cubes)までの中間データ(中間パッケージ)を作ってビューアに渡す。ビューア側
@@ -1722,6 +1726,7 @@ $("generateBtn").onclick=async()=>{
       seam_no_side: Object.assign({},seamNoSide),
       seam_smooth_iters: seamSmoothIters,
       color_grad_width: colorGradWidth,
+      color_grad_strength: colorGradStrength,
       // ★2026-07-10: ビューアの「戻る」でジェネレータの自動保存セッションへ
       // ライブ編集結果を書き戻す際、どのlocalStorageキー(通常/サンプルどれか)
       // に書けばよいかをビューア側は知らないため、ここで教えておく。

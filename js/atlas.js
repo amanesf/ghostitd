@@ -105,6 +105,19 @@ P3D.buildAtlasCanvas = buildAtlasCanvas;
  *     境目付近の帯の中で、実際にfront/side(および正面/背面)の写真ピクセルを
  *     角度ベースの重みで数値的に混ぜ合わせ、front/back/sideキャンバスへ直接
  *     焼き込む(ディザ/ノイズではない本物の色ブレンド)。
+ *     ★2026-07-12バグ修正(ユーザー指摘「境界だけじゃなくて全体に広がる」):
+ *     判定に使うsideS/frontS(下記)は法線ベクトルの成分(差)であり、値域は
+ *     およそ[-1,1]程度しかない。以前はこの値をUI上「px」単位(0〜40)として
+ *     見せていたため、UIで意味のありそうな値(5〜40等)を入れると
+ *     Math.abs(field)<colorGradWidthがほぼ常に真になり、境目から遠く離れた
+ *     面まで軒並みブレンド対象になっていた(境目だけに絞られない不具合の
+ *     根本原因)。colorGradWidthはこのsideS/frontSと同じ無次元スケール
+ *     (目安0〜1程度)で扱うこととし、UI側(character_3d.html)の表示範囲も
+ *     それに合わせて修正した。
+ *   colorGradStrength: 境目ちょうどでの最大ブレンド比率(0〜1、既定0.5)。
+ *     以前はseamWeight()の最大値が0.5に固定されていたが、幅(colorGradWidth)
+ *     と強さ(ブレンド比率)を別々に設定したいというユーザー要望に応え、
+ *     独立したパラメータとして分離した。
  *   frontCanvas,backCanvas,sideCanvas: bleed済みの生キャンバス(colorGradWidth>0の
  *     ときだけ使用。ピクセルを直接書き換える)
  * }
@@ -221,8 +234,13 @@ function stageAtlasBake(opts){
   // 色グラデーション(境界ぼかし)の幅(既定0=無効)。0より大きいと、境目付近の
   // 帯の中でfront/side(および正面/背面)の実ピクセル色を角度ベースの重みで
   // 数値的に混ぜてfront/back/sideキャンバスへ焼き込む(下のblendOnブロック)。
+  // ★sideS/frontS(法線ベクトル由来、値域およそ[-1,1])と同じ無次元スケールで
+  // 扱う(上のdocコメント参照、以前は誤って「px」相当のUI範囲で見せていた)。
   var colorGradWidth = (opts.colorGradWidth!==undefined && opts.colorGradWidth!==null)
     ? Math.max(0, Number(opts.colorGradWidth)) : 0;
+  // 境目ちょうどでの最大ブレンド比率(0〜1)。未指定時は従来の固定値0.5を踏襲する。
+  var colorGradStrength = (opts.colorGradStrength!==undefined && opts.colorGradStrength!==null)
+    ? Math.max(0, Math.min(1, Number(opts.colorGradStrength))) : 0.5;
 
   var pxAll=new Float64Array(nV), pyAll=new Float64Array(nV);
   var spxAll=new Float64Array(nV), spyAll=new Float64Array(nV);
@@ -306,10 +324,10 @@ function stageAtlasBake(opts){
     if(region==='back') return [(W-1)-pxAll[vi]+backOffsetX, pyAll[vi]+backOffsetY];
     return [spxAll[vi], spyAll[vi]];
   }
-  // 頂点viの、primary側からother側へのブレンド重み(継ぎ目ちょうどで0.5、
+  // 頂点viの、primary側からother側へのブレンド重み(継ぎ目ちょうどでcolorGradStrength、
   // colorGradWidth分離れると0になる)。fieldはsideS/frontSどちらかの平滑化済み配列。
   function seamWeight(field, vi){
-    return 0.5*Math.max(0, Math.min(1, 1-Math.abs(field[vi])/colorGradWidth));
+    return colorGradStrength*Math.max(0, Math.min(1, 1-Math.abs(field[vi])/colorGradWidth));
   }
 
   var finPos=[], finNorm=[], finUv=[], finFace=[], finOrigVi=[];
