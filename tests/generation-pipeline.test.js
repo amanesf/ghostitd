@@ -91,9 +91,22 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // バグではなく、ジオメトリ自体は閉じている)。
 // 上記3点の彫刻結果・テクスチャ焼き込み結果が変わるため、body-only/
 // with-accessoryともハッシュを更新した。
+// ★2026-07-12(ユーザー指摘「房が分かれているところの顔が切り抜けてない」
+// 対応、側面切り抜き精度): js/carving.jsのbuildDepthByRow()は、1行内にside
+// 画像上のrunが複数あっても常に前端〜後端をまるごと包む1本の奥行き区間に
+// 合成していた(2026-07-04、顎先が首との間の隙間で分断されて消える不具合の
+// 対策として導入)。これが、前髪の房のように奥行き方向で本来別々の物体
+// (房が手前、顔がその奥に覗く)まで1枚の奥行きスラブへ均してしまい、房と
+// 顔が癒着して見える原因になっていた。行内のrunどうしのpx間隔だけで判定
+// (新設のdepth_gap_close_px、既定6px)し、間隔がこの値以下のrunだけ従来通り
+// 1本にまとめ、間隔が大きいrunは別々の奥行き区間として保持するよう変更した
+// (connected-component分析は「同じ1つの連結成分内の凹み」まで区別できず
+// 効かなかったため不採用、詳細はjs/carving.jsのコメント参照)。体単体でも
+// 該当行があり彫刻結果が変わるため、body-only/with-accessoryともハッシュを
+// 更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 647948,
-  sha256: "635935e65d5bb2a3ee7df6ac01344299c1bc1af56c25ac239753d1f3b34a1176",
+  byteLength: 653052,
+  sha256: "b5219a2f5c1e4a53b08124ccbd76b181ba6a2eacaa7a4f1794a804994438abf1",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -139,8 +152,8 @@ const EXPECTED_BODY_ONLY = {
 // 焼き込み結果が大きく変わるため、ハッシュを更新した(body-onlyはアクセサ
 // リーが無く対象外のため不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 850448,
-  sha256: "61ad81f323054982108aa968d8725e5a278a7f4468735035fc86899cec77f182",
+  byteLength: 866496,
+  sha256: "19f40910adc9fbbff05b883f5014ceed2faa7873f71c908ebcf0c172b5c20a63",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

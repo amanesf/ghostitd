@@ -67,6 +67,7 @@ function buildBodyCarveOpts(opts){
     hipsY: opts.pivots.hips ? opts.pivots.hips[1] : null,
     trackWin: gp.track_win,
     trackGapClosePx: gp.track_gap_close_px,
+    depthGapClosePx: gp.depth_gap_close_px,
     smoothIters: 0,
     armLines: armLines, armMaxHw: gp.arm_max_hw,
     handLines: handLines.length ? handLines : null,

@@ -172,6 +172,7 @@ function buildAccessoryCarveOptsList(opts){
       psqArms: accPsq, psqHands: accPsq,
       trackWin: gp.track_win,
       trackGapClosePx: gp.track_gap_close_px,
+      depthGapClosePx: gp.depth_gap_close_px,
       smoothIters: 0,
     };
     out.push({name:name, mode:mode, bones:bones.slice(), usedBackOnly:usedBackOnly,
@@ -301,6 +302,7 @@ function stageAccessories(opts){
       psqArms: accPsq, psqHands: accPsq,
       trackWin: gp.track_win,
       trackGapClosePx: gp.track_gap_close_px,
+      depthGapClosePx: gp.depth_gap_close_px,
       // ★フェーズ1: bodyと同様、平滑化前の生メッシュをキャッシュするため
       // carveRegion自体には常にsmoothIters:0を渡し、平滑化はfinishAccessoryMesh
       // 側で別途適用する。

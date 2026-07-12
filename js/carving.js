@@ -620,6 +620,9 @@ function carveRegion(opts){
   // で色分けマップに残る数px〜十数px幅の隙間を、track判定(連結成分ラベリング)
   // の前にモルフォロジーclosingで埋めるための半径(px)。0で無効(従来通り)。
   var trackGapClosePx=opts.trackGapClosePx||0;
+  // ★2026-07-12追加: track_gap_close_pxと同じ考え方をside画像の奥行き測定にも
+  // 適用するための半径(px)。buildDepthByRowで使う(下記参照)。
+  var depthGapClosePx=opts.depthGapClosePx||0;
   var psqHead=opts.psqHead, psqTorso=opts.psqTorso, psqLegs=opts.psqLegs;
   var psqArms=opts.psqArms, psqHands=opts.psqHands;
   var neckY=opts.neckY, hipsY=opts.hipsY;
@@ -737,35 +740,64 @@ function carveRegion(opts){
   var smoothByRow = buildWidthTracks();
 
   // ---- 2) 行ごとの奥行き(side画像) ----
+  // ★2026-07-12(ユーザー指摘「房が分かれているところの顔が切り抜けてない」
+  // 対応): 当初はside画像上の連結成分ラベリング(track判定と同じ仕組み)で
+  // runをグループ化しようとしたが、前髪の房は多くの場合「顔と同じ1つの
+  // 連結成分の中の凹み(半島状)」であり、房と房の間で完全に切り離された
+  // 別の連結成分にはならない(体+アクセサリー全体が1つの巨大な連結成分に
+  // なりやすいのと同じ理由)。そのため連結成分ベースでは房と顔がグループ
+  // 分けされず、修正が効かなかった(実測で確認済み)。
+  // 位相的な連結性ではなく、行内のrunどうしの「pxでの隙間の大きさ」だけで
+  // 判定する(depth_gap_close_pxより狭い隙間は同じ帯として結合、それ以上は
+  // 別々の帯として保持)。顎先/首のような実在の小さい凹みはこの値未満の
+  // 隙間で埋まり従来通り1本の区間になり、房と顔のように隙間が大きいケースは
+  // 分断されたまま複数の奥行き区間として彫られる。
   function buildDepthByRow(){
-  var depthRows=[]; // [iy, hdFront, hdBack, zc]
+  var depthRows=[]; // [iy, [[hdFront,hdBack,zc], ...]]
   for(var iy2=0; iy2<ny; iy2++){
-    var saRow=rowOf1d(sa, saW, spy[iy2]);
-    var saPx = saCont ? Common.findRunsSubpixel(saRow, rowOf1d(saCont,saW,spy[iy2]), whiteThr) : Common.findRuns(saRow);
-    var zrunsMz = saPx.map(function(pq){ return [(pq[0]-SIDE_REF-sideOffsetX)/SCALE, (pq[1]-SIDE_REF-sideOffsetX)/SCALE]; });
-    zrunsMz = intersectIntervals(zrunsMz, mzLim);
-    if(!zrunsMz.length) continue;
-    // ★2026-07-04(改): 以前は「最大幅のrunを採用」(+vox*3以内の隙間の橋渡し)
-    // だったが、顎先と首の間のような実在の凹みで顎側runが分離すると、隙間が
-    // 橋渡し閾値を超えた時点で幅の広い首側runに負けて顎の突出が消えていた
-    // (閾値依存で直らない)。隙間サイズに依存しないよう、ノイズ幅(vox未満)の
-    // runを除いた全runを「前端の最小〜後端の最大」で包む1本の区間として
-    // 採用する(エンベロープ)。
-    zrunsMz.sort(function(p,q){return p[0]-q[0];});
-    var mz0=Infinity, mz1=-Infinity;
-    for(var k=0;k<zrunsMz.length;k++){
-      if(zrunsMz.length>1 && zrunsMz[k][1]-zrunsMz[k][0]<vox) continue; // ゴミ描線幅は無視
-      if(zrunsMz[k][0]<mz0) mz0=zrunsMz[k][0];
-      if(zrunsMz[k][1]>mz1) mz1=zrunsMz[k][1];
+    var rowPx2 = spy[iy2];
+    var saRow=rowOf1d(sa, saW, rowPx2);
+    var saPx = saCont ? Common.findRunsSubpixel(saRow, rowOf1d(saCont,saW,rowPx2), whiteThr) : Common.findRuns(saRow);
+    if(!saPx.length) continue;
+    saPx = saPx.slice().sort(function(p,q){return p[0]-q[0];});
+    // pxの隙間がdepthGapClosePx以下で隣接するrunどうしを同じ帯にまとめる
+    // (px空間でグループ化、モデル座標変換前に行う)。
+    var pxGroups=[[saPx[0]]];
+    for(var k1=1;k1<saPx.length;k1++){
+      var prevGroup=pxGroups[pxGroups.length-1];
+      var prevHi=prevGroup[prevGroup.length-1][1];
+      var gapPx=saPx[k1][0]-prevHi;
+      if(gapPx<=depthGapClosePx) prevGroup.push(saPx[k1]);
+      else pxGroups.push([saPx[k1]]);
     }
-    if(mz0>mz1){ mz0=zrunsMz[0][0]; mz1=zrunsMz[zrunsMz.length-1][1]; } // 全部ノイズ幅なら全体を包む
-    if(mz0<0.0 && 0.0<mz1){
-      depthRows.push([iy2, Math.max(mz1,EPS), Math.max(-mz0,EPS), 0.0]);
-    }else{
-      var zc=(mz0+mz1)/2.0;
-      var hw2=Math.max((mz1-mz0)/2.0, EPS);
-      depthRows.push([iy2, hw2, hw2, zc]);
+    var bands=[];
+    for(var g=0; g<pxGroups.length; g++){
+      var zrunsMz = pxGroups[g].map(function(pq){ return [(pq[0]-SIDE_REF-sideOffsetX)/SCALE, (pq[1]-SIDE_REF-sideOffsetX)/SCALE]; });
+      zrunsMz = intersectIntervals(zrunsMz, mzLim);
+      if(!zrunsMz.length) continue;
+      // ★2026-07-04(改): 以前は「最大幅のrunを採用」(+vox*3以内の隙間の橋渡し)
+      // だったが、顎先と首の間のような実在の凹みで顎側runが分離すると、隙間が
+      // 橋渡し閾値を超えた時点で幅の広い首側runに負けて顎の突出が消えていた
+      // (閾値依存で直らない)。隙間サイズに依存しないよう、ノイズ幅(vox未満)の
+      // runを除いた全runを「前端の最小〜後端の最大」で包む1本の区間として
+      // 採用する(エンベロープ、ただし同じ帯グループ内のrunに限る)。
+      zrunsMz.sort(function(p,q){return p[0]-q[0];});
+      var mz0=Infinity, mz1=-Infinity;
+      for(var k=0;k<zrunsMz.length;k++){
+        if(zrunsMz.length>1 && zrunsMz[k][1]-zrunsMz[k][0]<vox) continue; // ゴミ描線幅は無視
+        if(zrunsMz[k][0]<mz0) mz0=zrunsMz[k][0];
+        if(zrunsMz[k][1]>mz1) mz1=zrunsMz[k][1];
+      }
+      if(mz0>mz1){ mz0=zrunsMz[0][0]; mz1=zrunsMz[zrunsMz.length-1][1]; } // 全部ノイズ幅なら全体を包む
+      if(mz0<0.0 && 0.0<mz1){
+        bands.push([Math.max(mz1,EPS), Math.max(-mz0,EPS), 0.0]);
+      }else{
+        var zc=(mz0+mz1)/2.0;
+        var hw2=Math.max((mz1-mz0)/2.0, EPS);
+        bands.push([hw2,hw2,zc]);
+      }
     }
+    if(bands.length) depthRows.push([iy2, bands]);
   }
     // ★2026-07-04(改): 以前は奥行き(hdFront/hdBack/zc)にも行方向trackWin幅の
     // 中央値フィルタをかけていたが、顎先のような数行分しかない前方突出まで
@@ -773,7 +805,7 @@ function carveRegion(opts){
     // (幅セグメント側のトラッキング+中央値平滑化は従来通り)。
     var hdByRow=new Map();
     for(var j=0;j<depthRows.length;j++){
-      hdByRow.set(depthRows[j][0], [depthRows[j][1], depthRows[j][2], depthRows[j][3]]);
+      hdByRow.set(depthRows[j][0], depthRows[j][1]);
     }
     return hdByRow;
   }
@@ -926,14 +958,19 @@ function carveRegion(opts){
   var boundFactor = Math.pow(2, 1/psqMin);
 
   for(var iy3=0; iy3<ny; iy3++){
-    var hd=hdByRow.get(iy3);
-    if(!hd) continue;
-    var hdFront=hd[0], hdBack=hd[1], zc=hd[2];
+    var hdBands=hdByRow.get(iy3);
+    if(!hdBands) continue;
     var segsRow=smoothByRow.get(iy3);
     if(!segsRow) continue;
     var rowOff=iy3*strideY;
     var myv=my[iy3];
     var rowPsq=regionPsq(myv); // 腕/手プロファイル対象外の列(頭/胴体/脚)で使う指数
+    // ★2026-07-12: 1行に複数の奥行き区間(帯)がある場合(例: 前髪の房が手前、
+    // 顔がその奥に覗く)、同じ行の全x区間(segsRow)にそれぞれの帯を独立に
+    // 適用する(帯ごとに別々の奥行きスラブとして彫り、max-combineで正しい
+    // 側の表面が残る)。通常は1行1帯なのでこのループはほぼ1回で終わる。
+    for(var bi=0; bi<hdBands.length; bi++){
+    var hdFront=hdBands[bi][0], hdBack=hdBands[bi][1], zc=hdBands[bi][2];
     for(var si=0;si<segsRow.length;si++){
       var cx2=segsRow[si][0], hw3=segsRow[si][1];
       var segLo=cx2-hw3, segHi=cx2+hw3;
@@ -1019,6 +1056,7 @@ function carveRegion(opts){
           if(val>field[idx]){ field[idx]=val; if(ownerField) ownerField[idx]=ownerId; }
         }
       }
+    }
     }
   }
   if(opts.faceSculpt) applyEyeSocketRecess(field, opts.faceSculpt);
