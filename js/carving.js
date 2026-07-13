@@ -1310,11 +1310,32 @@ P3D.computeBoneBridgeRows = computeBoneBridgeRows;
 // (owner_blend/bone_bridge共通の仕組み)は既に両パーツが書き込んだボクセル
 // 同士の値を橋渡しするだけなので、どちらも書き込んでいない空隙には効かない
 // (実機検証で判明、SIMPLIFY_DECIMATE_PLAN.md後の一連の調査参照)。
+// ★2026-07-14修正(ユーザー指摘「四角形になって意味不明、境目をつなぐだけで
+// いい」): 当初の実装はxLo/xHiとzLo/zHiを両パーツの外縁の"和集合"(union)で
+// 計算していたため、前髪⇔顔・後ろ髪⇔顔のように境界が広く連続しているペアでは、
+// 行ごとにほぼ頭部の断面丸ごとに近い範囲を塗りつぶしてしまい、巨大な箱が
+// 大量に出現する結果になっていた(ツインテール付け根のような点的な小さい
+// 欠けでは目立たなかった副作用が、広い連続境界で顕在化した)。fillIntervalFor
+// Axisで軸ごとに「隙間があればその隙間(幅約eps)だけ」「重なっていれば
+// その重なり(交差)だけ」を対象にするよう修正し、和集合ではなく実際の
+// 隙間/重なりの近傍だけを埋めるようにした。これにより、点的な欠け(ツイン
+// テール付け根)では小さいパッチに、連続的な境界(前髪⇔顔等)では「隙間の
+// 軸だけ薄い帯・重なっている軸は交差幅のまま」という細い"膜"状の橋渡しに
+// なり、どちらの場合も「境目をつなぐだけ」に近い結果になる。
 var BONE_BRIDGE_FILL_VAL = 0.3;
-function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, grid){
+// 区間a,bのうち、実際に埋めるべき範囲(隙間があればその隙間の近傍のみ、
+// 重なっていればその重なり=交差のみ)を返す。どちらの場合も両区間の
+// 和集合よりずっと狭い範囲になる。
+function fillIntervalForAxis(a, b, eps){
+  if(a[1]<b[0]) return [a[1]-eps, b[0]+eps];
+  if(b[1]<a[0]) return [b[1]-eps, a[0]+eps];
+  return [Math.max(a[0],b[0]), Math.min(a[1],b[1])];
+}
+function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, grid, vox){
   var nx=grid.nx, nz=grid.nz, mx=grid.mx, mz=grid.mz;
   var mxMin=grid.mxMin, mxMax=grid.mxMax, mzMin=grid.mzMin, mzMax=grid.mzMax;
   var strideY=nx*nz, strideX=nz;
+  var eps = Math.max((vox||0.003)*2, 1e-6); // computeBoneBridgeRowsの隣接判定epsと揃える
   bridgeRows.forEach(function(rows, key){
     var parts = key.split(",");
     var oa = parseInt(parts[0],10), ob = parseInt(parts[1],10);
@@ -1324,8 +1345,9 @@ function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, g
       var xa=extA.xExtent[iy], xb=extB.xExtent[iy];
       var za=extA.zExtent[iy], zb=extB.zExtent[iy];
       if(!xa || !xb || !za || !zb) return;
-      var xLo=Math.min(xa[0],xb[0]), xHi=Math.max(xa[1],xb[1]);
-      var zLo=Math.min(za[0],zb[0]), zHi=Math.max(za[1],zb[1]);
+      var xi=fillIntervalForAxis(xa,xb,eps), zi=fillIntervalForAxis(za,zb,eps);
+      var xLo=xi[0], xHi=xi[1], zLo=zi[0], zHi=zi[1];
+      if(xLo>=xHi || zLo>=zHi) return;
       var ixLo=Math.max(0, Math.floor((xLo-mxMin)/(mxMax-mxMin)*(nx-1)));
       var ixHi=Math.min(nx-1, Math.ceil((xHi-mxMin)/(mxMax-mxMin)*(nx-1)));
       var izLo=Math.max(0, Math.floor((zLo-mzMin)/(mzMax-mzMin)*(nz-1)));
@@ -1426,7 +1448,7 @@ function carveUnifiedRegions(regions, sharedGrid, minFragFrac, ownerBlendStrengt
   // 外接範囲のうち、まだ何も書き込まれていないボクセルへ直接「橋渡し用の
   // 実体」を書き込む。
   if(bridgeRows && bridgeRows.size){
-    applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, sharedGrid);
+    applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, sharedGrid, voxForEps);
   }
 
   var anyPositive=false, cntPos=0;

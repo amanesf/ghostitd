@@ -216,10 +216,7 @@ const EXPECTED_BODY_ONLY = {
 // 限り、単純max-combineの代わりにpolynomial smooth-max(SDFベースCSGの
 // smooth union)でなだらかに橋渡しする機能を追加し、既定ONにした
 // (js/carving.jsのcarveSdfField/carveUnifiedRegions、gen_paramsの
-// owner_blend/owner_blend_strength参照)。同一パーツ内の奥行き帯(前髪が
-// 顔の手前にある等)には影響しない設計のため、実測での変化はごく僅か
-// (163,982頂点中34頂点、実測)。body-onlyはアクセサリーが無くパーツ境界
-// そのものが存在しないため完全に不変(ハッシュ同一を確認済み)。
+// owner_blend/owner_blend_strength参照)。
 // ★2026-07-13(ユーザー指摘「ツインテールの付け根で隙間が空く」対応、
 // bone_bridge機能追加): owner_blendの小さいブレンド半径は、front/side/back
 // 画像上でツインテールが後ろ髪の一部を覆い隠すことでシルエットそのものが
@@ -230,17 +227,21 @@ const EXPECTED_BODY_ONLY = {
 // 接している」と確信し、その行だけ実際にボクセルへ材質を書き込んで橋渡し
 // する機能を追加した(js/carving.jsのcomputeRowExtents/
 // computeBoneBridgeRows/applyBoneBridgeFill、gen_paramsのbone_bridge参照)。
-// 実機で45度・側面視点のスクリーンショット比較を行い、ツインテール付け根の
-// 隙間が埋まることと、他パーツ(前髪・後ろ髪の輪郭等)に不自然な融合が
-// 起きていないことを確認済み。ただし埋めた箇所が箱型(軸並行の矩形)の
-// パッチになり近くで見るとやや不自然に見える場合があること、実績が浅い
-// ことから既定はOFF(実験的機能、設定タブから有効化)とした
-// (ユーザー指示「一旦デフォルトオフで」)ため、既定生成結果自体は
-// owner_blendのみだった前回から不変(=ハッシュ不変)。body-onlyは
-// アクセサリーが無く橋渡し候補ペアが存在しないため完全に不変。
+// ★2026-07-14(ユーザー指摘「効果がなさすぎる」「四角形になって意味不明」
+// 対応): owner_blendは実測(163,982頂点のサンプル)で該当ボクセルがわずか
+// 34頂点分しかなく体感できる効果がほぼ無いこと、bone_bridgeの初回実装は
+// 橋渡し範囲を2パーツの外縁の和集合(union)で計算していたため前髪⇔顔・
+// 後ろ髪⇔顔のような広く連続した境界で行ごとに頭部の断面丸ごとに近い範囲を
+// 塗りつぶす巨大な箱になっていたことが分かったため、owner_blendは既定OFFに、
+// bone_bridgeは範囲計算を「隙間/重なりの近傍だけ」に絞る修正
+// (fillIntervalForAxis)を施した上で既定OFFのまま(体が無条件に全アクセサリー
+// の橋渡し候補になる点など、まだ誤爆の余地があるため実験的機能として継続
+// 調査中)とした。両機能とも既定OFFのため、既定生成結果(このテストが検証する
+// 対象)はowner_blend導入前の間引き強度変更時点(1406364→2816216バイト)から
+// 不変。body-onlyはアクセサリーが無くどちらの機能も対象外のため完全に不変。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 2817776,
-  sha256: "f950c48aacfe679a1e7dcb9fe20747a1b9ee38ae61f565e16a0a4840039693a3",
+  byteLength: 2816216,
+  sha256: "65ca0fae96cc18dd4a7e9c25aac2c34a007e57fa6f7dd0fc488863b22e085658",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
