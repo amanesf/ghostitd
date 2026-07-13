@@ -35,11 +35,50 @@ function buildBodyCarveOpts(opts){
   // 定数で設定していたが、キャラクターの体格によっては前腕に対して手が
   // 相対的に大きく、この固定値では列走査(buildBoneProfiles)の縦幅上限に
   // 引っかかって手の一部が「手」として扱われず高さ不足になっていた。
-  // 前腕(肘→手首)の長さlenに比例させることで、体格が変わっても自動的に
-  // 追従するようにする(はみ出した列は実シルエットが見つからず自然に除外
-  // されるので、多少大きめに取っても誤爆のリスクは低い)。
+  // ★2026-07-15(前腕長に比例させる案を実装したが実測してみると逆効果と判明):
+  // 前腕(肘→手首)の距離に比例させる案を試したが、このツールの想定ポーズは
+  // T字/A字で前腕がほぼ水平に伸びており、前腕自体のランドマーク間距離が
+  // 手の実寸より大幅に短いキャラクターがあり(実測: 前腕長0.104に対し
+  // 手の実際の長さは0.25でもまだ足りない)、比例計算だと以前の固定値より
+  // むしろ短くなってしまっていた(サイズ推定の代理変数として不適切)。
+  // 代わりに、実際にfront画像のシルエットを手首から外側へ1pxずつ走査し、
+  // 本当に絵柄がどこまで続いているか(=実寸)を直接検出する方式にした。
+  // 縦方向の半幅測定(buildBoneProfilesと同じgap>20pxの許容)も兼ねて行い、
+  // 検出できた最大半幅を太さの上限として使う(いずれも実データそのものが
+  // 根拠なので、キャラクターの体格・ポーズによらず正しい実寸に追従する)。
   var handLines=[];
   var handMaxHwAuto=0.06;
+  var faArr=opts.frontAlpha, faW=opts.faW, faH=opts.faH, hSCALE=opts.SCALE, hCX=opts.CX, hYBOT=opts.YBOT;
+  function scanHandExtent(wr, dirX, dirY){
+    var maxLen=0.5; // 安全上限(実データが無ければここまで届く前に打ち切られる)
+    var stepModel=1/hSCALE; // 1px刻みで走査
+    var maxSteps=Math.round(maxLen/stepModel);
+    var vSearchPx=Math.round(0.3*hSCALE); // 縦方向の探索範囲(手とみなせる範囲を十分カバー)
+    var missCount=0, lastFoundT=0, maxRy=0;
+    for(var s=1; s<=maxSteps; s++){
+      var t=s*stepModel;
+      var xv=wr[0]+dirX*t, yv=wr[1]+dirY*t;
+      var px=Math.round(xv*hSCALE+hCX);
+      if(px<0||px>=faW) break;
+      var py0=Math.round(hYBOT-yv*hSCALE);
+      var pyc=-1;
+      for(var dp=0; pyc<0 && dp<=vSearchPx; dp++){
+        var pu=py0-dp, pd=py0+dp;
+        if(pu>=0 && pu<faH && faArr[pu*faW+px]){ pyc=pu; break; }
+        if(pd>=0 && pd<faH && faArr[pd*faW+px]){ pyc=pd; break; }
+      }
+      if(pyc<0){ missCount++; if(missCount>20) break; continue; }
+      missCount=0;
+      var up=pyc, gapUp=0, pu2=pyc-1, stepsUp=0;
+      while(stepsUp<vSearchPx && pu2>=0){ if(faArr[pu2*faW+px]){ up=pu2; gapUp=0; } else { gapUp++; if(gapUp>20) break; } pu2--; stepsUp++; }
+      var dn=pyc, gapDn=0, pd2=pyc+1, stepsDn=0;
+      while(stepsDn<vSearchPx && pd2<faH){ if(faArr[pd2*faW+px]){ dn=pd2; gapDn=0; } else { gapDn++; if(gapDn>20) break; } pd2++; stepsDn++; }
+      var ry=((dn-up)/2)/hSCALE;
+      lastFoundT=t;
+      if(ry>maxRy) maxRy=ry;
+    }
+    return {len:Math.max(lastFoundT,0.02), maxHw:Math.max(maxRy*1.15,0.06)};
+  }
   if(gp.hand_extrude!==false){
     ['L','R'].forEach(function(side){
       var sh=opts.pivots['upperarm_'+side], el=opts.pivots['forearm_'+side], wr=opts.pivots['wrist_'+side];
@@ -47,9 +86,9 @@ function buildBodyCarveOpts(opts){
       var dx=wr[0]-el[0], dy=wr[1]-el[1];
       var len=Math.hypot(dx,dy);
       if(len<1e-6) return;
-      var handLen=len*0.9;
-      handLines.push([[wr[0],wr[1]],[wr[0]+dx/len*handLen, wr[1]+dy/len*handLen]]);
-      handMaxHwAuto=Math.max(handMaxHwAuto, len*0.8);
+      var ext=scanHandExtent(wr, dx/len, dy/len);
+      handLines.push([[wr[0],wr[1]],[wr[0]+dx/len*ext.len, wr[1]+dy/len*ext.len]]);
+      handMaxHwAuto=Math.max(handMaxHwAuto, ext.maxHw);
     });
   }
 
