@@ -346,6 +346,14 @@
       </div>
       <div id="paintCanvasWrap" style="margin-bottom:8px"></div>
       <p class="hint" id="paintEmptyHint" style="font-size:11px;color:var(--mut)"></p>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">輪郭拡張</span>
+        <input type="number" id="paintExpandPx" value="6" min="1" max="60" step="1" style="width:56px">
+        <span style="font-size:11px;color:var(--mut);flex:0 0 auto">px</span>
+        <button type="button" class="btn sm" id="paintExpandBtn" style="flex:0 0 auto">この対象の輪郭を拡張</button>
+      </div>
+      <p class="hint" style="font-size:11px;color:var(--mut);margin:-4px 0 8px">
+        「塗る対象」で選んだ領域を、指定px分だけ外側(他パーツ・背景を問わず)へ一括で太らせます。ツインテールに隠れた後ろ髪の輪郭を隠れている側へ食い込ませて拡張する、といった用途を想定しています。ブラシで縁を1px単位でなぞる代わりに使えます。</p>
       <div class="row">
         <button class="btn" id="paintUndo">↩ 元に戻す</button>
         <button class="btn danger" id="paintClearView">この面を全消去</button>
@@ -1559,6 +1567,68 @@ function paintClearCurrentView(){
   cm.ctx.fillRect(0,0,cm.w,cm.h);
   refreshAfterPaintChange();
 }
+function paintTargetLabelText(){
+  if(paintTarget==="body") return "体";
+  const a=accessories[+paintTarget];
+  return (a&&a.name) || "(無名)";
+}
+// ★2026-07-14追加(ユーザー要望「輪郭領域をパーツごとに拡張できる機能」):
+// ブラシで縁を1px単位でなぞらずに済むよう、選択中の対象の現在の色分け領域を
+// 指定px分だけ外側へ一括で太らせる。生成時と同じ最近傍色分類
+// (P3D.classifyColorsNearest、classifySilhouetteRawと同じ候補構成)で対象の
+// 現在の領域を特定し、そこを起点に8近傍の複数始点BFSで距離を測ることで
+// O(幅×高さ)で膨張範囲を求める(pxが大きくても遅くならない)。距離が
+// px以下になった、まだ対象色ではない画素だけを対象の色で上書きする
+// (ツインテールに隠れた後ろ髪の輪郭を、隠れている側へ食い込ませて
+// 拡張する、といった用途を想定)。
+function expandTargetContour(){
+  const cm=colormaps[paintView];
+  if(!cm) return;
+  const colorHex=paintTargetColorHex();
+  if(!colorHex) return;
+  const px=parseInt($("paintExpandPx").value,10)||0;
+  if(px<=0) return;
+  const accColors=accessories.filter(a=>a.color).map(a=>a.color);
+  const candidates=[P3D.hexToRgb("#ffffff"), P3D.hexToRgb("#000000")].concat(accColors.map(P3D.hexToRgb));
+  const targetIdx=(paintTarget==="body") ? 1 : (accColors.indexOf(colorHex)+2);
+  if(targetIdx<1) return;
+  const w=cm.w, h=cm.h, n=w*h;
+  const labels=P3D.classifyColorsNearest(cm.ctx, w, h, candidates);
+  const mask=new Uint8Array(n);
+  for(let i=0;i<n;i++){ mask[i]=(labels[i]===targetIdx)?1:0; }
+  const dist=new Int32Array(n).fill(-1);
+  const queue=new Int32Array(n);
+  let qHead=0, qTail=0;
+  for(let i=0;i<n;i++){ if(mask[i]){ dist[i]=0; queue[qTail++]=i; } }
+  if(qTail===0){
+    alert("この面にはまだ「"+paintTargetLabelText()+"」の領域がありません。先にブラシで少し塗ってから拡張してください。");
+    return;
+  }
+  const dx8=[-1,0,1,-1,1,-1,0,1], dy8=[-1,-1,-1,0,0,1,1,1];
+  while(qHead<qTail){
+    const idx=queue[qHead++];
+    const d=dist[idx];
+    if(d>=px) continue;
+    const x=idx%w, y=(idx/w)|0;
+    for(let k=0;k<8;k++){
+      const nx=x+dx8[k], ny=y+dy8[k];
+      if(nx<0||nx>=w||ny<0||ny>=h) continue;
+      const nidx=ny*w+nx;
+      if(dist[nidx]===-1){ dist[nidx]=d+1; queue[qTail++]=nidx; }
+    }
+  }
+  pushPaintUndo(paintView);
+  const rgb=P3D.hexToRgb(colorHex);
+  const id=cm.ctx.getImageData(0,0,w,h);
+  const data=id.data;
+  for(let i=0;i<n;i++){
+    if(!mask[i] && dist[i]!==-1 && dist[i]<=px){
+      data[i*4]=rgb[0]; data[i*4+1]=rgb[1]; data[i*4+2]=rgb[2]; data[i*4+3]=255;
+    }
+  }
+  cm.ctx.putImageData(id,0,0);
+  refreshAfterPaintChange();
+}
 function paintCanvasToImgPt(canvas,e){
   const rc=canvas.getBoundingClientRect();
   const sx=canvas.width/rc.width, sy=canvas.height/rc.height;
@@ -1709,6 +1779,7 @@ if($("paintBrushSlider")){
 }
 if($("paintUndo")) $("paintUndo").onclick=paintUndo;
 if($("paintClearView")) $("paintClearView").onclick=paintClearCurrentView;
+if($("paintExpandBtn")) $("paintExpandBtn").onclick=expandTargetContour;
 if($("paintZoomIn")) $("paintZoomIn").onclick=()=>setPaintZoom(paintZoom*1.25);
 if($("paintZoomOut")) $("paintZoomOut").onclick=()=>setPaintZoom(paintZoom/1.25);
 if($("paintZoomReset")) $("paintZoomReset").onclick=()=>setPaintZoom(1);
