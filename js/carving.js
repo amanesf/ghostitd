@@ -1042,9 +1042,6 @@ function carveRegion(opts){
   var sharedField = accumulate ? accumulate.field : null;
   var sharedOwnerField = accumulate ? accumulate.ownerField : null;
   var ownerId = accumulate ? accumulate.ownerId : 0;
-  // ★2026-07-12追加(パーツ境界のなじませ、owner_blend機能): 0ならcombineは
-  // 従来通りの単純max(下記コメント参照)。P3D.OWNER_BLEND_K_MAX参照。
-  var seamBlendK = accumulate ? (accumulate.seamBlendK||0) : 0;
   // ★2026-07-13追加(bone_bridge機能): Map<"oa,ob", Set<iy>>。P3D.computeBoneBridgeRows
   // 参照。このパーツ(ownerId)と競合相手のペアがここに載っていて、かつ現在の行(iy3)が
   // そのSetに含まれる場合だけ、通常のseamBlendKの代わりにbridgeK(ずっと緩い)を使う。
@@ -1160,34 +1157,28 @@ function carveRegion(opts){
           }
           var val=1.0-(exVal+ez);
           var idx=base+iz;
-          // ★2026-07-12追加(パーツ境界のなじませ、owner_blend機能):
-          // front/side/back画像はパーツごとに独立にフィールドを作るため、
-          // 3方向どの投影でも輪郭は一致して見えても斜め方向には「どちらの
-          // パーツの表面も届いていない(両方負)」隙間が実際にでき得る
-          // (詳細はSIMPLIFY_DECIMATE_PLAN.md後の45度視点隙間の調査参照)。
-          // 異なるパーツ同士が競合するセル(ownerField[idx]がこのパーツと
-          // 異なる)に限り、単純max(force winner-take-all)の代わりに
-          // polynomial smooth-max(Inigo Quilezのsmooth-min/maxを符号反転、
-          // val>0=inside系のため)で橋渡しする。hは2値の差がseamBlendK未満
-          // の時だけ0より大きくなり、かつどちらか一方が自分の表面から
-          // seamBlendK以内にある場合のみ発動するため、無関係な離れたパーツ
-          // 同士が偶然近い値を持つケースには影響しない。同一パーツ内の
-          // 複数奥行き帯(前髪が顔の手前にある等)はownerが一致するため
-          // 常にelse分岐(従来通りの単純max)を通り、意図的な奥行きの
-          // 分離が損なわれることはない。
+          // ★2026-07-13追加(bone_bridge機能): front/side/back画像はパーツ
+          // ごとに独立にフィールドを作るため、3方向どの投影でも輪郭は一致
+          // して見えても斜め方向には「どちらのパーツの表面も届いていない
+          // (両方負)」隙間が実際にでき得る(詳細はSIMPLIFY_DECIMATE_PLAN.md
+          // 後の45度視点隙間の調査参照)。ボーン共有+多方向同時隣接で確定
+          // した橋渡し行(bridgeRows)でのみ、異なるパーツ同士が競合するセル
+          // (ownerField[idx]がこのパーツと異なる)に限り、単純max
+          // (force winner-take-all)の代わりにpolynomial smooth-max
+          // (Inigo Quilezのsmooth-min/maxを符号反転、val>0=inside系のため)
+          // で橋渡しする。同一パーツ内の複数奥行き帯(前髪が顔の手前にある等)
+          // はownerが一致するため常にelse分岐(従来通りの単純max)を通り、
+          // 意図的な奥行きの分離が損なわれることはない。
+          // ★2026-07-14: 同様の目的だったowner_blend機能(競合ボクセルのみ
+          // 常時smooth-maxで橋渡し)は、実測で該当ボクセルがわずかしかなく
+          // 効果がほぼ無いことが分かったため機能ごと削除し、bridgeKのみ
+          // (確定橋渡し行だけに限定)を残した。
           var prevVal=field[idx];
-          // ★2026-07-13追加(bone_bridge機能): 確定橋渡し行では、owner_blendの
-          // 小さいKでは届かない大きな値差も橋渡しできるよう、この1ボクセルに
-          // 限りbridgeK(ずっと緩い)をそのまま使う(owner_blendのK自体は
-          // 上書きしない。max(seamBlendK,ここでのbridgeK)ではなく、bridge対象
-          // 行は無条件でbridgeKを使う=owner_blendより強く効くことを意図)。
-          var effK = seamBlendK;
+          var effK = 0;
           if(ownerField && ownerField[idx]!==-1 && ownerField[idx]!==ownerId){
-            var bk = bridgeKFor(ownerField[idx], iy3);
-            if(bk>effK) effK = bk;
+            effK = bridgeKFor(ownerField[idx], iy3);
           }
-          if(effK>0 && ownerField && ownerField[idx]!==-1 && ownerField[idx]!==ownerId
-             && Math.max(val,prevVal)>-effK){
+          if(effK>0 && Math.max(val,prevVal)>-effK){
             var h=Math.max(effK-Math.abs(val-prevVal), 0.0)/effK;
             var blended=Math.max(val,prevVal)+h*h*effK*0.25;
             if(val>prevVal){ field[idx]=blended; ownerField[idx]=ownerId; }
@@ -1307,9 +1298,9 @@ P3D.computeBoneBridgeRows = computeBoneBridgeRows;
 // うち、まだどのパーツも書き込んでいない(field===-1のまま)ボクセルへ、
 // 2パーツの外縁(xExtent/zExtent)が作る外接範囲内に限って橋渡し用の実体
 // (BONE_BRIDGE_FILL_VAL)を書き込む。carveSdfField内のsmooth-maxブレンド
-// (owner_blend/bone_bridge共通の仕組み)は既に両パーツが書き込んだボクセル
-// 同士の値を橋渡しするだけなので、どちらも書き込んでいない空隙には効かない
-// (実機検証で判明、SIMPLIFY_DECIMATE_PLAN.md後の一連の調査参照)。
+// (bridgeK)は既に両パーツが書き込んだボクセル同士の値を橋渡しするだけ
+// なので、どちらも書き込んでいない空隙には効かない(実機検証で判明、
+// SIMPLIFY_DECIMATE_PLAN.md後の一連の調査参照)。
 // ★2026-07-14修正(ユーザー指摘「四角形になって意味不明、境目をつなぐだけで
 // いい」): 当初の実装はxLo/xHiとzLo/zHiを両パーツの外縁の"和集合"(union)で
 // 計算していたため、前髪⇔顔・後ろ髪⇔顔のように境界が広く連続しているペアでは、
@@ -1401,30 +1392,21 @@ P3D.applyBoneBridgeFill = applyBoneBridgeFill;
  *   (呼び出し側で対応表を持つこと)。
  * sharedGrid: buildGrid()の戻り値(体+全アクセサリーの外接範囲で作ったもの)
  * minFragFrac: dropSmallFragmentsの閾値(未指定時0.05)
- * ownerBlendStrength: 省略可(0〜1)。パーツ境界のなじませ(owner_blend機能)
- *   の強さ。0または省略時は従来通りの単純max-combine(carveSdfField参照)。
  * boneBridgeCandidates: 省略可。Set<"oa,ob">(oa<ob)。bone_bridge機能
  *   (ツインテール付け根の隙間対策)で橋渡し候補にするownerIdペア
  *   (js/pipeline.jsのrunCarvingStages参照)。
  * 戻り値: {V,F,owner} (owner: Int32Array、頂点ごとのownerId) または
  *   null(彫れなかった場合)
  */
-// ★2026-07-12追加: ownerBlendStrength(0〜1)→carveSdfFieldのsmooth-max
-// ブレンド半径seamBlendKへの校正定数。val(=1-(exVal+ez))は表面付近で
-// おおよそ-1〜1の無次元スケールになるため、その一部を橋渡し半径として使う。
-// 実サンプル(7アクセサリー全部乗せ)を45度視点で目視確認して校正した値。
-var OWNER_BLEND_K_MAX = 0.4;
 // ★2026-07-13追加(bone_bridge機能): 確定橋渡し行(computeBoneBridgeRows)の
-// ボクセルで使う、owner_blendよりずっと緩いブレンド半径。owner_blendの
-// K(最大0.4)では届かない大きな値差(実測でツインテール-後ろ髪間はval差が
-// 2を超えるケースがあった)も橋渡しできるよう、確信度の高い(=ボーン共有+
+// ボクセルで使うブレンド半径。実測でツインテール-後ろ髪間はval差が2を
+// 超えるケースがあったため、かなり緩めの値にし、確信度の高い(=ボーン共有+
 // 幅と奥行き両方で隣接確認済み)行にだけ適用する。
 var BONE_BRIDGE_K = 5.0;
-function carveUnifiedRegions(regions, sharedGrid, minFragFrac, ownerBlendStrength, boneBridgeCandidates){
+function carveUnifiedRegions(regions, sharedGrid, minFragFrac, boneBridgeCandidates){
   var nx=sharedGrid.nx, ny=sharedGrid.ny, nz=sharedGrid.nz;
   var field = new Float32Array(ny*nx*nz).fill(-1.0);
   var ownerField = new Int32Array(ny*nx*nz).fill(-1);
-  var seamBlendK = (ownerBlendStrength>0) ? ownerBlendStrength*OWNER_BLEND_K_MAX : 0;
 
   var bridgeRows = null;
   if(boneBridgeCandidates && boneBridgeCandidates.size){
@@ -1445,7 +1427,7 @@ function carveUnifiedRegions(regions, sharedGrid, minFragFrac, ownerBlendStrengt
   regions.forEach(function(r){
     var opts = Object.assign({}, r.opts, {
       grid: sharedGrid,
-      accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId, seamBlendK:seamBlendK,
+      accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId,
         bridgeRows:bridgeRows, bridgeK:BONE_BRIDGE_K},
     });
     carveRegion(opts);

@@ -404,16 +404,15 @@ async function runCarvingStages(state, report){
   var sharedGrid = P3D.buildGrid(unionBounds[0], unionBounds[1], unionBounds[2], gp.body_vox);
   var regions = [{ownerId:0, opts:bodyBuilt.carveOpts}].concat(
     accBuilt.map(function(a,i){ return {ownerId:i+1, opts:a.carveOpts}; }));
-  // ★2026-07-12追加(パーツ境界のなじませ、owner_blend機能): 3方向投影
-  // だけでは埋まらない斜め視点でのパーツ間の隙間をなじませる強さ
-  // (js/carving.jsのcarveUnifiedRegions/carveSdfField参照)。
-  var ownerBlendStrength = gp.owner_blend ? (gp.owner_blend_strength||0) : 0;
   // ★2026-07-13追加(bone_bridge機能、ユーザー指摘「ツインテールの付け根の
-  // 隙間」対応): owner_blendの小さいブレンド半径では届かない、遮蔽によって
-  // シルエットが分断されたパーツ同士(例: 後ろ髪の一部を覆うツインテール)を
-  // 橋渡しする。誤結合を避けるため、ボーン(bones)を共有するパーツ同士だけを
-  // 候補にする(体はbonesを持たず常に候補、js/carving.jsのcarveUnifiedRegions
-  // /carveSdfField参照)。
+  // 隙間」対応): 遮蔽によってシルエットが分断されたパーツ同士(例: 後ろ髪の
+  // 一部を覆うツインテール)を橋渡しする。誤結合を避けるため、ボーン(bones)
+  // を共有するパーツ同士だけを候補にする(体はbonesを持たず常に候補、
+  // js/carving.jsのcarveUnifiedRegions/carveSdfField参照)。
+  // ★2026-07-14(ユーザー指摘「効果がなさすぎる」対応): 同様の目的だった
+  // owner_blend機能(パーツ境界で競合するボクセルのみsmooth-maxで橋渡し)は、
+  // 実測(163,982頂点のサンプル)で該当ボクセルがわずか34頂点分しかなく
+  // 体感できる効果がほぼ無いことが分かったため機能ごと削除した。
   var boneBridgeCandidates = new Set();
   if(gp.bone_bridge){
     var ownerBones = [null].concat(accBuilt.map(function(a){ return a.bones||null; }));
@@ -428,7 +427,7 @@ async function runCarvingStages(state, report){
       }
     }
   }
-  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, ownerBlendStrength, boneBridgeCandidates);
+  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, boneBridgeCandidates);
   if(!unified) throw new Error("visual_hull+accessories: carving produced an empty mesh");
   console.log("  carveUnifiedRegions: total verts", unified.V.length/3, "faces", unified.F.length/3);
 
