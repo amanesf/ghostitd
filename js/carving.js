@@ -1345,6 +1345,20 @@ function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, g
       var xa=extA.xExtent[iy], xb=extB.xExtent[iy];
       var za=extA.zExtent[iy], zb=extB.zExtent[iy];
       if(!xa || !xb || !za || !zb) return;
+      // ★2026-07-14修正(実機デバッグで判明): x・z両方の区間が"重なっている"
+      // (隙間ではない)行は、体のように大きいパーツと、その上に乗る/被さる
+      // アクセサリー(前髪・マフラー等)のバウンディング範囲がたまたま両軸とも
+      // 大きく重なっているだけの偽陽性である可能性が高い(実測: 体⇔前髪は
+      // 該当した全36行でx・z両方が常に重なっており、埋める範囲が最大10cm×7.7cm
+      // にもなっていた。体⇔マフラーも同様に最大16.8cm×9.3cmの大きな塊になり、
+      // 顎付近に無関係な色のパッチが出る不具合の原因だった)。前髪⇔後ろ髪の
+      // ように「幅(x)は常に重なるが奥行き(z)は常に隙間」という一貫したパターン
+      // (=薄い膜状の正当な継ぎ目)や、ツインテール付け根のように「両軸とも
+      // 隙間」という点的なパターンは、片方の軸だけ"重なり"かどちらの軸も"隙間"
+      // なので影響を受けない。両軸とも"重なり"の行だけを埋め対象から除外する。
+      var xOverlap = xa[1]>=xb[0] && xb[1]>=xa[0];
+      var zOverlap = za[1]>=zb[0] && zb[1]>=za[0];
+      if(xOverlap && zOverlap) return;
       var xi=fillIntervalForAxis(xa,xb,eps), zi=fillIntervalForAxis(za,zb,eps);
       var xLo=xi[0], xHi=xi[1], zLo=zi[0], zHi=zi[1];
       if(xLo>=xHi || zLo>=zHi) return;
