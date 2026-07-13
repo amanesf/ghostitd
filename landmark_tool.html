@@ -353,7 +353,7 @@
         <button type="button" class="btn sm" id="paintExpandBtn" style="flex:0 0 auto">この対象の輪郭を拡張</button>
       </div>
       <p class="hint" style="font-size:11px;color:var(--mut);margin:-4px 0 8px">
-        「塗る対象」で選んだ領域を、指定px分だけ外側(他パーツ・背景を問わず)へ一括で太らせます。ツインテールに隠れた後ろ髪の輪郭を隠れている側へ食い込ませて拡張する、といった用途を想定しています。ブラシで縁を1px単位でなぞる代わりに使えます。</p>
+        「塗る対象」で選んだ領域を、指定px分だけ外側(他パーツの領域)へ一括で太らせます。ツインテールに隠れた後ろ髪の輪郭を隠れている側へ食い込ませて拡張する、といった用途を想定しています。背景(色分けマップ上で何も塗られていない範囲、体+全アクセサリーの合計シルエットの外側)へは広がらないため、実際には描かれていない架空の領域を作ってしまう心配はありません。ブラシで縁を1px単位でなぞる代わりに使えます。</p>
       <div class="row">
         <button class="btn" id="paintUndo">↩ 元に戻す</button>
         <button class="btn danger" id="paintClearView">この面を全消去</button>
@@ -1579,6 +1579,13 @@ function paintTargetLabelText(){
 // px以下になった、まだ対象色ではない画素だけを対象の色で上書きする
 // (ツインテールに隠れた後ろ髪の輪郭を、隠れている側へ食い込ませて
 // 拡張する、といった用途を想定)。
+// ★2026-07-14追加(ユーザー指摘「本当の輪郭にははみ出ないようにできる？」):
+// 素朴な膨張だと背景(白)側にも際限なく広がり、実際には描かれていない
+//架空の領域を作ってしまう。背景と分類された画素へはBFSが一切踏み込まない
+// ようにし、体+全アクセサリーの合計シルエット(=色分けマップ上で何らかの
+// 色が塗られている範囲)の内側だけで、他パーツの領域を対象色に置き換える
+// 形に制限する。これにより「本当の輪郭(合計シルエットの外周)」を超えて
+// 拡張されることはなくなる。
 function expandTargetContour(){
   const cm=colormaps[paintView];
   if(!cm) return;
@@ -1612,6 +1619,7 @@ function expandTargetContour(){
       const nx=x+dx8[k], ny=y+dy8[k];
       if(nx<0||nx>=w||ny<0||ny>=h) continue;
       const nidx=ny*w+nx;
+      if(labels[nidx]===0) continue; // 背景(合計シルエットの外側)へは広げない
       if(dist[nidx]===-1){ dist[nidx]=d+1; queue[qTail++]=nidx; }
     }
   }
