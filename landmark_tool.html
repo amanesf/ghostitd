@@ -354,6 +354,19 @@
       </div>
       <p class="hint" style="font-size:11px;color:var(--mut);margin:-4px 0 8px">
         「塗る対象」で選んだ領域を、指定px分だけ外側(他パーツの領域)へ一括で太らせます。ツインテールに隠れた後ろ髪の輪郭を隠れている側へ食い込ませて拡張する、といった用途を想定しています。背景(色分けマップ上で何も塗られていない範囲、体+全アクセサリーの合計シルエットの外側)へは広がらないため、実際には描かれていない架空の領域を作ってしまう心配はありません。ブラシで縁を1px単位でなぞる代わりに使えます。</p>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">隙間を自動で塞ぐ</span>
+        <input type="number" id="paintCloseGapPx" value="6" min="1" max="60" step="1" style="width:56px">
+        <span style="font-size:11px;color:var(--mut);flex:0 0 auto">px</span>
+        <button type="button" class="btn sm" id="paintCloseGapBtn" style="flex:0 0 auto">この面の隙間を塞ぐ</button>
+      </div>
+      <p class="hint" style="font-size:11px;color:var(--mut);margin:-4px 0 8px">
+        「輪郭拡張」は塗る対象を1つずつ選んで手動で広げますが、こちらはこの面
+        全体を見て、指定px以下の幅の隙間(パーツとパーツの間に残った細い背景の
+        帯)を自動的に検出し、隣接するパーツの色でまとめて塞ぎます(画像処理の
+        「クロージング」相当。塗る対象の選択には関係なく面全体に一度に効きます)。
+        全体の外周のシルエットは変えず、パーツ間の狭い隙間だけを埋められます。
+        指定px以上の広い隙間や背景そのものには影響しません。</p>
       <div class="row">
         <button class="btn" id="paintUndo">↩ 元に戻す</button>
         <button class="btn danger" id="paintClearView">この面を全消去</button>
@@ -1635,6 +1648,96 @@ function expandTargetContour(){
   cm.ctx.putImageData(id,0,0);
   refreshAfterPaintChange();
 }
+// ★2026-07-14追加(ユーザー要望「パーツ間の設定距離に応じて塞ぐ機能」):
+// 「輪郭拡張」は1つの対象を選んで手動で広げる操作だが、こちらは対象を選ばず
+// この面全体を見て、指定px以下の幅の隙間(パーツ同士の間に残った細い背景の
+// 帯)を自動的に検出してまとめて塞ぐ。標準的な画像処理の「クロージング」
+// (dilateしてerode)に相当する処理をBFSで実装する:
+//  1) 全ての前景画素(体+全アクセサリー)を起点に、半径R以内の背景画素へ
+//     多始点BFSで広がる(dilate)。このとき最も近い前景の色(nearestLabel)も
+//     一緒に伝搬する。
+//  2) dilate後の「非前景」画素を起点に、同じ半径Rで多始点BFSする。この距離が
+//     Rを超える(=外側から遠く、狭い隙間の内部にしかない)画素だけがerode後も
+//     残る。
+//  3) 元は背景で、erode後も残った画素だけを、その画素にとって最も近かった
+//     前景の色(nearestLabel)で塗る。
+// 結果として、幅がR以下の細い隙間だけが埋まり、外周の広い背景やR超の
+// 大きい隙間には影響しない(標準的なクロージングの性質)。
+function autoCloseGaps(){
+  const cm=colormaps[paintView];
+  if(!cm) return;
+  const R=parseInt($("paintCloseGapPx").value,10)||0;
+  if(R<=0) return;
+  const accColors=accessories.filter(a=>a.color).map(a=>a.color);
+  const candidates=[P3D.hexToRgb("#ffffff"), P3D.hexToRgb("#000000")].concat(accColors.map(P3D.hexToRgb));
+  const w=cm.w, h=cm.h, n=w*h;
+  const labels=P3D.classifyColorsNearest(cm.ctx, w, h, candidates); // 0=背景,1=体,2+=アクセサリー
+  const dx8=[-1,0,1,-1,1,-1,0,1], dy8=[-1,-1,-1,0,0,1,1,1];
+
+  // 1) dilate: 前景から半径R以内の背景画素へ広がりつつ、最も近い前景ラベルを伝搬
+  const dist1=new Int32Array(n).fill(-1);
+  const nearestLabel=new Int32Array(n).fill(-1);
+  const queue1=new Int32Array(n);
+  let q1Head=0, q1Tail=0;
+  for(let i=0;i<n;i++){
+    if(labels[i]!==0){ dist1[i]=0; nearestLabel[i]=labels[i]; queue1[q1Tail++]=i; }
+  }
+  while(q1Head<q1Tail){
+    const idx=queue1[q1Head++];
+    const d=dist1[idx];
+    if(d>=R) continue;
+    const x=idx%w, y=(idx/w)|0;
+    for(let k=0;k<8;k++){
+      const nx=x+dx8[k], ny=y+dy8[k];
+      if(nx<0||nx>=w||ny<0||ny>=h) continue;
+      const nidx=ny*w+nx;
+      if(dist1[nidx]===-1){ dist1[nidx]=d+1; nearestLabel[nidx]=nearestLabel[idx]; queue1[q1Tail++]=nidx; }
+    }
+  }
+  const dilated=new Uint8Array(n);
+  for(let i=0;i<n;i++){ dilated[i]=(labels[i]!==0 || dist1[i]!==-1) ? 1 : 0; }
+
+  // 2) erode: dilate後の「非前景」画素を起点に半径R以内かどうかを見る
+  const dist2=new Int32Array(n).fill(-1);
+  const queue2=new Int32Array(n);
+  let q2Head=0, q2Tail=0;
+  for(let i=0;i<n;i++){ if(!dilated[i]){ dist2[i]=0; queue2[q2Tail++]=i; } }
+  while(q2Head<q2Tail){
+    const idx=queue2[q2Head++];
+    const d=dist2[idx];
+    if(d>=R) continue;
+    const x=idx%w, y=(idx/w)|0;
+    for(let k=0;k<8;k++){
+      const nx=x+dx8[k], ny=y+dy8[k];
+      if(nx<0||nx>=w||ny<0||ny>=h) continue;
+      const nidx=ny*w+nx;
+      if(dist2[nidx]===-1){ dist2[nidx]=d+1; queue2[q2Tail++]=nidx; }
+    }
+  }
+
+  const rgbAcc=accColors.map(P3D.hexToRgb);
+  const id=cm.ctx.getImageData(0,0,w,h);
+  const data=id.data;
+  let changed=0;
+  for(let i=0;i<n;i++){
+    if(labels[i]!==0) continue; // 元々前景の画素は変更しない
+    const survivesErosion = dilated[i] && (dist2[i]===-1 || dist2[i]>R);
+    if(!survivesErosion) continue;
+    const lb=nearestLabel[i];
+    if(lb<1) continue;
+    const rgb=(lb===1) ? [0,0,0] : rgbAcc[lb-2];
+    if(!rgb) continue;
+    data[i*4]=rgb[0]; data[i*4+1]=rgb[1]; data[i*4+2]=rgb[2]; data[i*4+3]=255;
+    changed++;
+  }
+  if(changed===0){
+    alert("この面には、指定した距離("+R+"px)以内で塞げる隙間が見つかりませんでした。");
+    return;
+  }
+  pushPaintUndo(paintView);
+  cm.ctx.putImageData(id,0,0);
+  refreshAfterPaintChange();
+}
 function paintCanvasToImgPt(canvas,e){
   const rc=canvas.getBoundingClientRect();
   const sx=canvas.width/rc.width, sy=canvas.height/rc.height;
@@ -1786,6 +1889,7 @@ if($("paintBrushSlider")){
 if($("paintUndo")) $("paintUndo").onclick=paintUndo;
 if($("paintClearView")) $("paintClearView").onclick=paintClearCurrentView;
 if($("paintExpandBtn")) $("paintExpandBtn").onclick=expandTargetContour;
+if($("paintCloseGapBtn")) $("paintCloseGapBtn").onclick=autoCloseGaps;
 if($("paintZoomIn")) $("paintZoomIn").onclick=()=>setPaintZoom(paintZoom*1.25);
 if($("paintZoomOut")) $("paintZoomOut").onclick=()=>setPaintZoom(paintZoom/1.25);
 if($("paintZoomReset")) $("paintZoomReset").onclick=()=>setPaintZoom(1);
