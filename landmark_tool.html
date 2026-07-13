@@ -704,6 +704,26 @@ function renderPsqAccessoryOverridesHtml(){
     '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の断面の丸み</div>'+
     rows+'</div>';
 }
+// ★2026-07-14追加(ユーザー指摘「ボクセルとピクセルを一致させたら無駄がない」):
+// body_vox(model単位)を、元画像のpx解像度にちょうど1px=1voxelで合わせられる
+// ヘルパーを表示する。SCALE(px/model単位、js/pipeline.jsのrunCarvingStagesが
+// 生成時に計算するprof.YBOT-prof.YTOP)と全く同じ値を、ランドマーク配置時の
+// analysis.BH(=analysis.ybot-analysis.ytop)が既に持っている(2026-07-04の
+// 修正で両者を同じ2値化方式に揃え済み)。voxが元画像のpx解像度より細かいと、
+// 実際には存在しない副px情報を彫るだけで生成が遅く重くなるだけ無駄になる
+// (逆に粗すぎると実在する輪郭の情報を捨てることになる)。
+function renderVoxPxHelperHtml(){
+  if(!analysis || !analysis.BH) return "";
+  const scale=analysis.BH; // px / model単位(身長のpx実測値)
+  const curVox=genParams.body_vox;
+  const curPx=(curVox*scale).toFixed(2);
+  const fitVox=1/scale;
+  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
+    '<div style="font-size:11px;color:var(--mut)">現在のボクセル解像度は元画像の約<b style="color:#7aa2ff">'+curPx+'px</b>相当です(身長実測'+Math.round(scale)+'pxから換算)。'+
+    '1pxより細かい設定は元画像に存在しない情報を彫るだけで、生成が遅く・重くなるだけで無駄になります。</div>'+
+    '<button type="button" class="btn sm" id="voxFitPxBtn" style="margin-top:6px">ボクセルを1pxに合わせる(推奨値 '+fitVox.toFixed(5)+')</button>'+
+    '</div>';
+}
 function buildParamsPanelHtml(){
   const groups=[]; PARAM_META.forEach(m=>{if(!groups.includes(m.group))groups.push(m.group);});
   return groups.map(g=>{
@@ -745,6 +765,7 @@ function buildParamsPanelHtml(){
       '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
       '</summary><div class="accbody">'+items+
       (g==="断面の丸み具合"?renderPsqAccessoryOverridesHtml():"")+
+      (g==="解像度/軽量化"?renderVoxPxHelperHtml():"")+
       '</div></details>';
   }).join("");
 }
@@ -816,6 +837,14 @@ function wireParamsPanelEvents(el){
   [].forEach.call(el.querySelectorAll(".psqAccSlider"),sl=>{
     sl.oninput=()=>{ setAccessoryPsq(+sl.dataset.i, parseFloat(sl.value)); };
   });
+  const voxFitBtn=el.querySelector("#voxFitPxBtn");
+  if(voxFitBtn){
+    voxFitBtn.onclick=()=>{
+      if(!analysis || !analysis.BH) return;
+      genParams.body_vox=Math.round((1/analysis.BH)*100000)/100000;
+      renderParamsPanel();
+    };
+  }
   [].forEach.call(el.querySelectorAll(".psqAccNum"),num=>{
     num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||2); };
   });
