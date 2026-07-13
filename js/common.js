@@ -152,6 +152,21 @@ var DEFAULT_GEN_PARAMS = {
   // ONにすると、パーツ境界で競合するボクセルだけをsmooth-maxでなだらかに
   // 橋渡しして隙間を埋める(品質改善のため既定ON、face_sculpt等と同方針)。
   owner_blend: true, owner_blend_strength: 0.4,
+  // ★2026-07-13追加(ユーザー指摘「ツインテールの付け根で隙間が空く」対応):
+  // owner_blendの小さいブレンド半径では、遮蔽(例: ツインテールが後ろ髪の
+  // 一部を覆い隠す)によってシルエットそのものが欠落したパーツ同士の隙間は
+  // 埋まらない(実測で確認: 競合ボクセルの値差が2を超えるケースがあり、
+  // owner_blend単体では橋渡しできなかった)。bones(付け根の骨、例えば
+  // ツインテール・後ろ髪はともに"head")を共有するパーツ同士に限り、front/back
+  // (幅)とside(奥行き)の両方で同時に隙間なく隣接している行だけを「本当に
+  // 3D的に接している」と確信し、その行だけ実際にボクセルへ材質を書き込んで
+  // 橋渡しする(js/carving.jsのcomputeRowExtents/computeBoneBridgeRows/
+  // applyBoneBridgeFill、js/pipeline.jsのrunCarvingStages参照)。ツインテール
+  // 付け根での隙間解消は目視確認済みだが、埋めた箇所が箱型(軸並行の矩形)の
+  // パッチになり近くで見るとやや不自然に見える場合があること、実績が浅いことから、
+  // 既定はOFFとし使いたい場合は設定タブから有効化する実験的機能とする
+  // (ユーザー指示「一旦デフォルトオフで」)。
+  bone_bridge: false,
 };
 P3D.DEFAULT_GEN_PARAMS = DEFAULT_GEN_PARAMS;
 

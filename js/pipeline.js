@@ -408,7 +408,27 @@ async function runCarvingStages(state, report){
   // だけでは埋まらない斜め視点でのパーツ間の隙間をなじませる強さ
   // (js/carving.jsのcarveUnifiedRegions/carveSdfField参照)。
   var ownerBlendStrength = gp.owner_blend ? (gp.owner_blend_strength||0) : 0;
-  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, ownerBlendStrength);
+  // ★2026-07-13追加(bone_bridge機能、ユーザー指摘「ツインテールの付け根の
+  // 隙間」対応): owner_blendの小さいブレンド半径では届かない、遮蔽によって
+  // シルエットが分断されたパーツ同士(例: 後ろ髪の一部を覆うツインテール)を
+  // 橋渡しする。誤結合を避けるため、ボーン(bones)を共有するパーツ同士だけを
+  // 候補にする(体はbonesを持たず常に候補、js/carving.jsのcarveUnifiedRegions
+  // /carveSdfField参照)。
+  var boneBridgeCandidates = new Set();
+  if(gp.bone_bridge){
+    var ownerBones = [null].concat(accBuilt.map(function(a){ return a.bones||null; }));
+    for(var oa=0; oa<ownerBones.length; oa++){
+      for(var ob=oa+1; ob<ownerBones.length; ob++){
+        var isCandidate = (oa===0 || ob===0); // 体は常に候補
+        if(!isCandidate){
+          var ba=ownerBones[oa], bb=ownerBones[ob];
+          if(ba && bb) isCandidate = ba.some(function(b){ return bb.indexOf(b)>=0; });
+        }
+        if(isCandidate) boneBridgeCandidates.add(oa+","+ob);
+      }
+    }
+  }
+  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, ownerBlendStrength, boneBridgeCandidates);
   if(!unified) throw new Error("visual_hull+accessories: carving produced an empty mesh");
   console.log("  carveUnifiedRegions: total verts", unified.V.length/3, "faces", unified.F.length/3);
 
