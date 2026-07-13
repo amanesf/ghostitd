@@ -24,12 +24,25 @@ var P3D = global.P3D = global.P3D || {};
 // (0〜1、内部でSimplifyModifierの許容誤差maxCostに変換する)を指定し、結果の
 // 頂点数は表示するだけ」という誤差ベースの方式に変更した。
 var DEFAULT_GEN_PARAMS = {
+  // ★2026-07-14追加(ユーザー指摘「横方向は490頂点も要らない。丸みは数式で
+  // 合成してるだけだから細かく作る必要ない。縦方向は画像の実測値だから重要」):
+  // 縦(Y、高さ方向)と横/奥行き(X・Z)で解像度を分離した(js/carving.jsの
+  // buildGrid参照)。body_voxは縦(Y)専用になった: front/side/back画像の
+  // 実測行をそのままサンプルする実データのため、細かさに意味がある。
+  // body_vox_xzは横/奥行き(X・Z)専用: 各行の断面はcarveSdfField内で
+  // なめらかな数式(superellipse)で合成しているだけの近似形状なので、
+  // body_voxほど細かくしても実質的な情報は増えず、頂点数・メモリだけ
+  // 無駄に消費する(実測: 体+全アクセサリーで490頂点/行前後、等方
+  // 0.003model単位=2.661px相当だった)。既定値はbody_voxの4倍(=横方向の
+  // 頂点数はおおよそ4分の1)にし、ユーザー体感の目標(横100〜150頂点/行)に
+  // 近づけた。
   body_vox: 0.003,
+  body_vox_xz: 0.012,
   // ★2026-07-10: 体+全アクセサリーを1つの共有ボクセルグリッドで統合彫刻する
   // 方式に変更したため(js/pipeline.jsのrunCarvingStages/js/carving.jsの
-  // carveUnifiedRegions参照)、実際のグリッド解像度はbody_voxのみで決まる。
-  // acc_voxは旧・独立彫刻方式の名残で現在は未使用(js/accessories.jsの
-  // 後方互換用stageAccessoriesだけが参照する)。生成器UIからも削除済み。
+  // carveUnifiedRegions参照)、実際のグリッド解像度はbody_vox/body_vox_xzで
+  // 決まる。acc_voxは旧・独立彫刻方式の名残で現在は未使用(js/accessories.js
+  // の後方互換用stageAccessoriesだけが参照する)。生成器UIからも削除済み。
   acc_vox: 0.003,
   // ★2026-07-10: 既定の間引き後頂点数(3000/1000)だと、特に顔まわり・
   // アクセサリーの折り目等で三角面のカクつき(ローポリ感)が目立つとの指摘

@@ -401,7 +401,10 @@ async function runCarvingStages(state, report){
     [Math.min.apply(null, allMyBounds.map(function(b){return b[0];})), Math.max.apply(null, allMyBounds.map(function(b){return b[1];}))],
     [Math.min.apply(null, allMzBounds.map(function(b){return b[0];})), Math.max.apply(null, allMzBounds.map(function(b){return b[1];}))],
   ];
-  var sharedGrid = P3D.buildGrid(unionBounds[0], unionBounds[1], unionBounds[2], gp.body_vox);
+  // ★2026-07-14追加(縦横の解像度分離): 横/奥行き(X・Z)はbody_vox_xz、
+  // 縦(Y、front/side/back画像の実測行)はbody_voxを使う(js/carving.jsの
+  // buildGrid参照)。
+  var sharedGrid = P3D.buildGrid(unionBounds[0], unionBounds[1], unionBounds[2], gp.body_vox_xz, gp.body_vox);
   var regions = [{ownerId:0, opts:bodyBuilt.carveOpts}].concat(
     accBuilt.map(function(a,i){ return {ownerId:i+1, opts:a.carveOpts}; }));
   // ★2026-07-13追加(bone_bridge機能、ユーザー指摘「ツインテールの付け根の

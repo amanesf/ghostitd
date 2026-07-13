@@ -651,11 +651,23 @@ P3D.linspace = linspace;
 // 共有グリッド(buildGrid)にまとめ、carveRegion側はこのグリッドへ蓄積彫刻
 // する(carveUnifiedRegions参照)ことで、彫刻段階そのものでは接合不整合が
 // 原理的に起きなくなる。
-function buildGrid(mxBounds, myBounds, mzBounds, vox){
+// ★2026-07-14追加(ユーザー指摘「横方向は490頂点も要らない。丸みは数式で
+// 合成してるだけだから細かく作る必要ない。縦方向は画像の実測値だから重要」):
+// 縦(Y、高さ方向)と横/奥行き(X・Z)で別々の解像度を持てるようにした。
+// Y方向の行位置(iy)はfront/side/back画像の実ピクセル行をそのままサンプル
+// するため実測データそのものだが、各行のX/Z断面はcarveSdfField内で
+// Math.pow(Math.abs(xv-cx2)/hw3, rowPsq)というなめらかな数式(superellipse)
+// で合成しているだけなので、細かく刻んでも滑らかな曲線を無駄に高頻度で
+// 標本化するだけで実質的な情報は増えない。voxXZ(X・Z軸)をvoxY(Y軸)より
+// 粗くすることで、頂点数・メモリを大きく減らせる(js/pipeline.jsの
+// runCarvingStages、js/common.jsのbody_vox/body_vox_xz参照)。
+// voxY省略時はvoxXZと同じ値を使う(後方互換)。
+function buildGrid(mxBounds, myBounds, mzBounds, voxXZ, voxY){
+  if(voxY===undefined || voxY===null) voxY=voxXZ;
   var mxMin=mxBounds[0],mxMax=mxBounds[1], myMin=myBounds[0],myMax=myBounds[1], mzMin=mzBounds[0],mzMax=mzBounds[1];
-  var nx=Math.max(Math.round((mxMax-mxMin)/vox),4);
-  var ny=Math.max(Math.round((myMax-myMin)/vox),4);
-  var nz=Math.max(Math.round((mzMax-mzMin)/vox),4);
+  var nx=Math.max(Math.round((mxMax-mxMin)/voxXZ),4);
+  var ny=Math.max(Math.round((myMax-myMin)/voxY),4);
+  var nz=Math.max(Math.round((mzMax-mzMin)/voxXZ),4);
   var mx=linspace(mxMin,mxMax,nx), my=linspace(myMin,myMax,ny), mz=linspace(mzMin,mzMax,nz);
   return {mx:mx,my:my,mz:mz,nx:nx,ny:ny,nz:nz,
     mxMin:mxMin,mxMax:mxMax,myMin:myMin,myMax:myMax,mzMin:mzMin,mzMax:mzMax};

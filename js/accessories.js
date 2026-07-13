@@ -166,11 +166,12 @@ function buildAccessoryCarveOptsList(opts){
       SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:curSYTOP, SYBOT:curSYBOT, SIDE_REF:curSIDE_REF,
       backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:curSideOffsetX, sideOffsetY:curSideOffsetY,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
-      // ★2026-07-10(体+アクセサリー統合彫刻対応): 共有グリッド(body_voxで
-      // 作る)へ統合するため、voxもgp.body_voxで揃える(グリッドの実際の
-      // セルサイズと閾値判定(最小セグメント幅等)の基準を一致させるため。
+      // ★2026-07-10(体+アクセサリー統合彫刻対応): 共有グリッド(body_vox_xz/
+      // body_voxで作る)へ統合するため、voxもグリッドのX/Z軸解像度(body_vox_xz)
+      // に揃える(閾値判定(最小セグメント幅等)はX/Z方向の量のため。
       // acc_voxは独立彫刻時代の名残で、統合彫刻では使わない)。
-      vox: gp.body_vox,
+      // ★2026-07-14: 縦横解像度分離に伴いbody_vox_xzを使うよう更新。
+      vox: gp.body_vox_xz,
       psqHead: accPsq, psqTorso: accPsq, psqLegs: accPsq,
       psqArms: accPsq, psqHands: accPsq,
       trackWin: gp.track_win,

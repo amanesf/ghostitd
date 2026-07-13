@@ -60,7 +60,10 @@ function buildBodyCarveOpts(opts){
     backOffsetX: gp.back_offset_x, backOffsetY: gp.back_offset_y,
     sideOffsetX: gp.side_offset_x, sideOffsetY: gp.side_offset_y,
     mxBounds: mxBounds, myBounds: myBounds, mzBounds: mzBounds,
-    vox: gp.body_vox,
+    // ★2026-07-14: carveRegion内のvoxはセグメント統合・ノイズ床等のX/Z
+    // (横・奥行き)方向の閾値にしか使わないため、body_vox_xz(横方向解像度)
+    // を使う(縦方向の行数自体はgrid.ny、buildGrid参照)。
+    vox: gp.body_vox_xz,
     psqHead: gp.psq_head, psqTorso: gp.psq_torso, psqLegs: gp.psq_legs,
     psqArms: gp.psq_arms, psqHands: gp.psq_hands,
     neckY: opts.pivots.neck ? opts.pivots.neck[1] : null,

@@ -132,9 +132,20 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 変わるため、body-only/with-accessoryともファイルサイズ・ハッシュが変わった
 // (with-accessory側はアクセサリーが体に道連れで過度に削られなくなった分、
 // より大きく変化している。SIMPLIFY_DECIMATE_PLAN.mdの発端そのものの改善)。
+// ★2026-07-14(ユーザー指摘「横方向は490頂点も要らない、丸みは数式で合成
+// してるだけだから細かく作る必要ない。縦方向は画像の実測値だから重要」):
+// ボクセル解像度を縦(Y、body_vox)と横/奥行き(X・Z、body_vox_xz新設)に
+// 分離した(js/carving.jsのbuildGrid参照)。縦は各行がfront/side/back画像の
+// 実測行そのものだが、横/奥行きの断面はcarveSdfField内でなめらかな数式
+// (superellipse)で合成しているだけの近似形状のため、縦と同じ細かさにする
+// 意味が無い。既定でbody_vox_xzをbody_voxの4倍(粗く)にしたところ、実測で
+// 生頂点数が163,982→27,794(約17%)、生成時間が約60秒→13秒に減った一方、
+// 45度・側面視点での目視確認では丸みのカクつき等の劣化は確認されなかった。
+// body-only/with-accessoryとも彫刻結果(頂点分布)が変わるため、ハッシュを
+// 更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 1337360,
-  sha256: "6dcf87fcce92e4e48742572c2ba0273560101fa3955842db80f4af4c4f981eb3",
+  byteLength: 697988,
+  sha256: "7dacc315e157feb84dbbc6f0d0941eb8944f4e722b9c42f563ad25d9a00bf7da",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -236,12 +247,15 @@ const EXPECTED_BODY_ONLY = {
 // bone_bridgeは範囲計算を「隙間/重なりの近傍だけ」に絞る修正
 // (fillIntervalForAxis)を施した上で既定OFFのまま(体が無条件に全アクセサリー
 // の橋渡し候補になる点など、まだ誤爆の余地があるため実験的機能として継続
-// 調査中)とした。両機能とも既定OFFのため、既定生成結果(このテストが検証する
-// 対象)はowner_blend導入前の間引き強度変更時点(1406364→2816216バイト)から
-// 不変。body-onlyはアクセサリーが無くどちらの機能も対象外のため完全に不変。
+// 調査中)とした。両機能とも既定OFFのため、この時点での既定生成結果は
+// owner_blend導入前の間引き強度変更時点(1406364→2816216バイト)から不変
+// だった。
+// ★2026-07-14(上のEXPECTED_BODY_ONLYコメント「縦横のボクセル解像度分離」
+// 参照): body_vox_xz新設によりwith-accessory側も彫刻結果が変わったため、
+// ハッシュを更新した(2816216→1222828バイト)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 2816216,
-  sha256: "65ca0fae96cc18dd4a7e9c25aac2c34a007e57fa6f7dd0fc488863b22e085658",
+  byteLength: 1222828,
+  sha256: "8503f23f647dec9589183bfd7d6f6a4c232af5cbadee1f3e399137ff3fddce79",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
