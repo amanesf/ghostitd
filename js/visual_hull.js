@@ -27,12 +27,19 @@ function buildBodyCarveOpts(opts){
       if(el && wr) armLines.push([[el[0],el[1]],[wr[0],wr[1]]]);
     });
   }
-  // 手首から先(手)の線分: 前腕方向に手首から延長する。長さは肩→手首の45%
-  // (実測で指先は手首から肩→手首距離の3割程度先にあり、余らせても列走査が
-  // シルエット外で自動的に打ち切られるため長め側に倒す)。手はこの線分の
+  // 手首から先(手)の線分: 前腕方向に手首から延長する。手はこの線分の
   // 近傍列を「frontシルエットを一定奥行き(hand_depth)で押し出した板」として
   // 彫る(carving.js)。
+  // ★2026-07-15(ユーザー指摘「手の高さが足りない、固定値ではなく自動でいい」):
+  // 以前はhand_len/hand_max_hw(手の長さ・太さとみなす上限)を固定のmodel単位
+  // 定数で設定していたが、キャラクターの体格によっては前腕に対して手が
+  // 相対的に大きく、この固定値では列走査(buildBoneProfiles)の縦幅上限に
+  // 引っかかって手の一部が「手」として扱われず高さ不足になっていた。
+  // 前腕(肘→手首)の長さlenに比例させることで、体格が変わっても自動的に
+  // 追従するようにする(はみ出した列は実シルエットが見つからず自然に除外
+  // されるので、多少大きめに取っても誤爆のリスクは低い)。
   var handLines=[];
+  var handMaxHwAuto=0.06;
   if(gp.hand_extrude!==false){
     ['L','R'].forEach(function(side){
       var sh=opts.pivots['upperarm_'+side], el=opts.pivots['forearm_'+side], wr=opts.pivots['wrist_'+side];
@@ -40,8 +47,9 @@ function buildBodyCarveOpts(opts){
       var dx=wr[0]-el[0], dy=wr[1]-el[1];
       var len=Math.hypot(dx,dy);
       if(len<1e-6) return;
-      var handLen=gp.hand_len;
+      var handLen=len*0.9;
       handLines.push([[wr[0],wr[1]],[wr[0]+dx/len*handLen, wr[1]+dy/len*handLen]]);
+      handMaxHwAuto=Math.max(handMaxHwAuto, len*0.8);
     });
   }
 
@@ -74,7 +82,7 @@ function buildBodyCarveOpts(opts){
     smoothIters: 0,
     armLines: armLines, armMaxHw: gp.arm_max_hw,
     handLines: handLines.length ? handLines : null,
-    handDepthHw: gp.hand_depth, handMaxHw: gp.hand_max_hw,
+    handDepthHw: gp.hand_depth, handMaxHw: handMaxHwAuto,
     // ★2026-07-10: 全身シルエットが色分けマップの黒(体色)のみで判定される
     // ようになったことで、マフラー/スカート等に覆われた行で体が分断され、
     // 頭部や脚が独立した閉じたパーツとして彫られることがある。これは

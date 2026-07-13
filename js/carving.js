@@ -1399,17 +1399,18 @@ P3D.applyBoneBridgeFill = applyBoneBridgeFill;
 // だけを埋める。ボーン共有やパーツの種類は一切見ない、純粋に距離だけの判定
 // なので、bone_bridgeで問題になった「粗い近似による誤判定」が原理的に起きない
 // (実測した3次元距離そのものを使うため)。
-// 実装は多始点BFSを2種類組み合わせる:
-//  1) 全パーツの表面ボクセルを起点に、最も近いownerIdを伝搬するBFS(R歩まで)。
-//     塞ぐボクセルをどの色で塗るか決めるのに使う。
-//  2) ownerIdごとに独立したBFS(R歩まで)を行い、各空ボクセルに「どのownerId
-//     の表面からR以内に届いたか」をビットマスクで記録する。
-// 最終的に、ビットが2つ以上立っている(=異なる2パーツ以上に挟まれている)
-// 空ボクセルだけを、1)で求めた最も近いownerIdの色で埋める。
-// BFSはどちらも「既存の表面からR歩以内」でしか探索しないため、モデル全体の
-// ボクセル数ではなく表面積×Rにほぼ比例するコストで済み、Rが小さい(隙間を
-// 塞ぐ距離は通常ボクセル数個〜十数個分)実用範囲では十分高速。
-var PART_GAP_CLOSE_FILL_VAL = 0.3;
+// ★2026-07-15(ユーザー指摘「隙間を板で埋めたみたいで不自然、境界だけ繋げたい」):
+// 当初は検出したボクセルへ一律の定数値を書き込んでいたが、これだと隙間の内側
+// (定数値)と外側(何もない背景値)の境目でfieldの値が不連続に落ちる箇所ができ、
+// marching cubesがその段差をそのまま「四角い突起」として描画してしまっていた
+// (スカート裾・腕等で頂点が飛び出す不具合の原因)。ここを「各空ボクセルの
+// 一番近いパーツまでの距離+2番目に近い別パーツまでの距離の合計」に応じて
+// なめらかに減衰する値に変更する。合計距離が小さい(=2つの表面が向き合って
+// 最短で接近している真上)ほど高い値、離れるほど滑らかに0へ戻るため、
+// 段差が生まれず、かつ塗る範囲も「実際に向き合っている境界」付近だけに
+// 自然に絞られる(単純に両方からR以内というAND判定だと、表面の縁の外側の
+// 何もない空間まで同じ幅で塗ってしまっていた)。
+var PART_GAP_CLOSE_PEAK = 0.3; // 埋める領域の中心(最短経路の真上)でのピーク値
 function closeInterPartGaps(field, ownerField, grid, vox, maxDist){
   if(!(maxDist>0)) return;
   var nx=grid.nx, ny=grid.ny, nz=grid.nz;
@@ -1439,58 +1440,57 @@ function closeInterPartGaps(field, ownerField, grid, vox, maxDist){
     }
   }
 
-  // 1) 最も近いownerId(Voronoi風)をR歩以内で伝搬
-  var nearestOwner=new Int32Array(n).fill(-1);
-  var dist1=new Int32Array(n).fill(-1);
-  var queue1=new Int32Array(n);
-  var q1Head=0, q1Tail=0;
-  for(i=0;i<n;i++){
-    if(ownerField[i]>=0){ nearestOwner[i]=ownerField[i]; dist1[i]=0; queue1[q1Tail++]=i; }
-  }
-  while(q1Head<q1Tail){
-    var idx1=queue1[q1Head++];
-    var d1=dist1[idx1];
-    if(d1>=R) continue;
-    neighborsOf(idx1, function(nidx){
-      if(dist1[nidx]===-1){ dist1[nidx]=d1+1; nearestOwner[nidx]=nearestOwner[idx1]; queue1[q1Tail++]=nidx; }
-    });
-  }
-
-  // 2) ownerIdごとに独立したBFS(R歩以内)。到達したownerIdをビットマスクで記録。
-  var reachMask=new Int32Array(n);
+  // ownerIdごとに独立したBFS(R歩以内)を行い、各空ボクセルについて
+  // 「一番近いパーツまでの距離・そのownerId」(bestDist/bestOwner)と
+  // 「2番目に近い別パーツまでの距離」(secondDist)を求める。
+  // (以前はここをbitmaskで「届いたかどうか」だけ記録していたが、埋める値を
+  // 距離ベースで減衰させるには実際の距離が要るため、距離そのものを持つ形にした)
+  var bestDist=new Int32Array(n).fill(-1);
+  var bestOwner=new Int32Array(n).fill(-1);
+  var secondDist=new Int32Array(n).fill(-1);
   owners.forEach(function(ownerId){
-    var bit=1<<ownerId;
     var visited=new Uint8Array(n);
-    var queue2=new Int32Array(n);
-    var q2Head=0, q2Tail=0;
+    var queue=new Int32Array(n);
+    var qHead=0, qTail=0;
     for(var i2=0;i2<n;i2++){
-      if(ownerField[i2]===ownerId){ visited[i2]=1; reachMask[i2]|=bit; queue2[q2Tail++]=i2; }
+      if(ownerField[i2]===ownerId){ visited[i2]=1; queue[qTail++]=i2; }
     }
     var distO=new Int32Array(n).fill(-1);
-    for(var s=0;s<q2Tail;s++) distO[queue2[s]]=0;
+    for(var s=0;s<qTail;s++) distO[queue[s]]=0;
     var qh=0;
-    while(qh<q2Tail){
-      var idx2=queue2[qh++];
-      var d2=distO[idx2];
-      if(d2>=R) continue;
-      neighborsOf(idx2, function(nidx){
-        if(!visited[nidx]){ visited[nidx]=1; reachMask[nidx]|=bit; distO[nidx]=d2+1; queue2[q2Tail++]=nidx; }
+    while(qh<qTail){
+      var idx=queue[qh++];
+      var d=distO[idx];
+      if(d>=R) continue;
+      neighborsOf(idx, function(nidx){
+        if(visited[nidx]) return;
+        visited[nidx]=1;
+        var dd=d+1;
+        distO[nidx]=dd;
+        queue[qTail++]=nidx;
+        if(ownerField[nidx]!==-1) return; // 既に実体があるボクセルは埋める対象外
+        if(bestOwner[nidx]===-1 || dd<bestDist[nidx]){
+          secondDist[nidx]=bestDist[nidx]; bestDist[nidx]=dd; bestOwner[nidx]=ownerId;
+        }else if(secondDist[nidx]===-1 || dd<secondDist[nidx]){
+          secondDist[nidx]=dd;
+        }
       });
     }
   });
 
-  // 3) 異なる2パーツ以上に挟まれた(reachMaskのビットが2つ以上立った)、
-  //    まだ誰も領域を持たない空ボクセルだけを埋める。
+  // 異なる2パーツ以上に挟まれた(secondDistが求まった)空ボクセルだけを、
+  // 合計距離(bestDist+secondDist)が小さいほど高い、なめらかなsmoothstep減衰で埋める。
   for(i=0;i<n;i++){
     if(ownerField[i]!==-1) continue; // 既にどこかのパーツが領域を持つボクセルは変更しない
-    var mask=reachMask[i];
-    if(!mask) continue;
-    var count=0, m=mask;
-    while(m){ count+=m&1; m>>=1; }
-    if(count>=2 && nearestOwner[i]>=0){
-      field[i]=PART_GAP_CLOSE_FILL_VAL;
-      ownerField[i]=nearestOwner[i];
-    }
+    if(bestOwner[i]<0 || secondDist[i]<0) continue;
+    var gapSum=bestDist[i]+secondDist[i];
+    var t=1-gapSum/(2*R);
+    if(t<=0) continue;
+    if(t>1) t=1;
+    var val=PART_GAP_CLOSE_PEAK*(t*t*(3-2*t)); // smoothstep(0→1)
+    if(val<=0) continue;
+    field[i]=val;
+    ownerField[i]=bestOwner[i];
   }
 }
 P3D.closeInterPartGaps = closeInterPartGaps;

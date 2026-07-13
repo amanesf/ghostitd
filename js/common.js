@@ -115,7 +115,9 @@ var DEFAULT_GEN_PARAMS = {
   // 定義元になる。
   rigid_soft_width: 0,
   arm_circle: true, arm_tol: 0.06, arm_max_hw: 0.2,
-  hand_extrude: true, hand_depth: 0.01, hand_max_hw: 0.1, hand_len: 0.25,
+  // ★2026-07-15: hand_max_hw/hand_lenは前腕の実測長に比例した自動値に変更した
+  // ため廃止(js/visual_hull.jsのbuildBodyCarveOpts参照)。
+  hand_extrude: true, hand_depth: 0.01,
   alpha_dilate: 9,
   // ★2026-07-11追加(切り抜き精度向上、point3): にじみ(bleedEdges)の起点を
   // 輪郭ぎりぎり(0)ではなく、この分だけ内側へ侵食した「安全な内部色」から
