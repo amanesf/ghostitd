@@ -115,6 +115,27 @@
   .viewbtn{flex:1;height:34px;border-radius:9px;font-size:12px;cursor:pointer;
     border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut)}
   .viewbtn.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
+  #paintCanvasWrap{overflow:auto;max-height:min(70vh,560px);border-radius:8px;
+    border:1px solid var(--line)}
+  #paintCanvas{display:block;touch-action:none;cursor:crosshair}
+  .paintZoomRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .paintZoomBtns{display:flex;gap:6px;flex:0 0 auto}
+  .paintZoomBtns .btn{flex:0 0 auto;width:44px;height:34px}
+  /* ★2026-07-13追加: 既存の.dpad(ランドマークの微調整用十字キー)は、選択中の
+     点が無いと全ボタンを自動的にdisabled化するグローバル配線
+     (document.querySelectorAll(".dpad button")、下部のsel監視部分参照)を
+     持っており、同じクラスを使うとパン操作が常に無効化されてしまう
+     (CLAUDE.md記載の変数/クラス名衝突リスクの実例)。見た目は揃えつつ、
+     衝突を避けるため独立クラス名にした。 */
+  .paintDpad{display:grid;grid-template-columns:40px 40px 40px;grid-template-rows:34px 34px 34px;gap:6px;flex:0 0 auto}
+  .paintDpad button{width:40px;height:34px;font-size:18px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(255,255,255,.04);color:var(--txt);cursor:pointer}
+  .paintDpad button:active{background:rgba(255,47,176,.18)}
+  .paintChip{height:30px;padding:0 10px;border-radius:8px;font-size:11.5px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut);
+    display:inline-flex;align-items:center;gap:6px}
+  .paintChip.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
+  .paintChip .sw{width:11px;height:11px;border-radius:3px;border:1px solid rgba(255,255,255,.5);flex:0 0 auto}
   .acpanel{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
   .acpanel h2{font-size:13px;margin:0 0 8px;color:var(--txt)}
   .tabbar{display:flex;gap:6px;margin:14px 0 10px;flex-wrap:wrap}
@@ -184,6 +205,7 @@
     <div class="tabbar" id="tabbar">
       <button class="tabbtn on" data-tab="lm">マーク</button>
       <button class="tabbtn" data-tab="automask">自動マスク</button>
+      <button class="tabbtn" data-tab="paintmask">手動マスク</button>
       <button class="tabbtn" data-tab="params">設定値</button>
       <button class="tabbtn" data-tab="gen">生成</button>
     </div>
@@ -272,12 +294,63 @@
     </div>
     <div id="automaskLightbox"></div>
 
-    <!-- ★2026-07-09: 手動マスク(除外範囲塗り)タブと、それが生成していた
-         exclude_masksという概念そのものを廃止した。全身のシルエットも
-         色分けマップ(体=黒)由来の色許容誤差方式で抽出するようになり、
-         アクセサリー色の画素は体色と一致しないため、そもそもスカート等が
-         体の輪郭に紛れ込む問題が起こらなくなった(ユーザー合意済み、
-         「複雑なことしすぎ、自動マスクで領域を取ればいい」)。 -->
+    <!-- ★2026-07-09: 手動マスク(除外範囲塗り、exclude_masks方式)タブは、
+         全身のシルエットが色分けマップ(体=黒)由来の抽出方式に一本化された
+         ことで不要になり廃止した(ユーザー合意済み)。
+         ★2026-07-13追加(ユーザー要望「昔あった手動マスク機能を復活して、
+         全身・パーツごとに塗れるように」): 上記とは別の目的で、色分けマップ
+         そのものへ直接ブラシで塗り足せる「手動マスク」タブを新設した。
+         例えばツインテールに隠れて後ろ髪の輪郭が写真上に存在しない場合、
+         隠れているはずの範囲を後ろ髪の色で塗り足せば、彫刻の入力データ自体が
+         実在するようになり、bone_bridgeのような幾何的な橋渡しに頼らず
+         根本的に隙間を埋められる(colormaps[view].canvasへ直接ペイントする
+         だけなので、既存の自動マスク抽出(extractAllAccessoryMasks)・
+         保存/書き出し(colormaps、buildJson参照)にそのまま乗る)。 -->
+    <div class="tabpanel acpanel" data-tabpanel="paintmask">
+      <h2>手動マスク(色分けマップに直接塗る)
+        <button type="button" class="qbtn" data-help="help-paintmask">?</button></h2>
+      <p class="helpText hidden" id="help-paintmask">
+        色分けマップ(front/side/leftSide/back)へ直接ブラシで塗り足して、体
+        または各アクセサリーの領域を追加/修正できます。例えばツインテールに
+        隠れて後ろ髪の輪郭が写真から読み取れない場合、隠れているはずの範囲を
+        「後ろ髪」の色で塗り足すと、そのぶん彫刻の入力データ自体が実在する
+        ようになり、パーツ間の隙間を根本から埋められます。塗った内容は自動
+        マスクの抽出結果やモデル生成にそのまま反映されます。この面の色分け
+        マップがまだ無い場合、最初の一筆で白背景(=未着色)の新規マップを
+        自動的に作成します。</p>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">面</span>
+        <div id="paintViewbar" style="display:flex;gap:6px;flex:1;flex-wrap:wrap"></div>
+      </div>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">塗る対象</span>
+        <div id="paintTargetList" style="display:flex;gap:6px;flex-wrap:wrap;flex:1"></div>
+      </div>
+      <div class="acitem" style="margin-bottom:8px">
+        <span class="nm">ブラシサイズ</span>
+        <input type="range" id="paintBrushSlider" min="2" max="150" value="24" style="flex:1">
+        <span id="paintBrushVal" style="width:36px;text-align:right;font-size:11px;color:var(--mut);flex:0 0 auto">24px</span>
+      </div>
+      <div class="paintZoomRow">
+        <span class="nm" style="flex:0 0 auto">表示</span>
+        <div class="paintZoomBtns">
+          <button type="button" class="btn sm" id="paintZoomOut" title="縮小">－</button>
+          <button type="button" class="btn sm" id="paintZoomReset" title="幅に合わせてリセット" style="width:64px">リセット</button>
+          <button type="button" class="btn sm" id="paintZoomIn" title="拡大">＋</button>
+        </div>
+        <div class="paintDpad">
+          <span></span><button type="button" id="paintPanUp">▲</button><span></span>
+          <button type="button" id="paintPanLeft">◀</button><span></span><button type="button" id="paintPanRight">▶</button>
+          <span></span><button type="button" id="paintPanDown">▼</button><span></span>
+        </div>
+      </div>
+      <div id="paintCanvasWrap" style="margin-bottom:8px"></div>
+      <p class="hint" id="paintEmptyHint" style="font-size:11px;color:var(--mut)"></p>
+      <div class="row">
+        <button class="btn" id="paintUndo">↩ 元に戻す</button>
+        <button class="btn danger" id="paintClearView">この面を全消去</button>
+      </div>
+    </div>
 
     <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
          (seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの編集UI)は
@@ -1366,6 +1439,7 @@ function syncTabs(){
     p.classList.toggle("on",p.dataset.tabpanel===curTab);
   });
   if(curTab==="automask") renderAutomaskTab();
+  if(curTab==="paintmask") renderPaintTab();
   if(curTab==="lm") renderAccessoryBoneList();
   // ★2026-07-11: アクセサリー個別の断面の丸み(psq)を設定値タブへ移動した
   // ため、マークタブでの名前変更等を反映できるようタブ切替時に再描画する。
@@ -1389,6 +1463,260 @@ function syncViewBtns(){
   });
 }
 const VIEWJP={front:"正面",side:"側面(右)",leftSide:"側面(左)",back:"背面"};
+
+/* ---------- 手動マスク(色分けマップへ直接ブラシで塗る、2026-07-13追加) ----------
+   colormaps[v]という既存のグローバル状態(canvas)を直接書き換えるだけなので、
+   自動マスク抽出(extractAllAccessoryMasks)・保存/書き出し(buildJson、
+   saveNormalSessionImages)は無改修でそのまま効く。塗る対象の色は「体=黒」
+   固定+各accessoryが既に持つcolor(色分けマップ上の塗り分け色)をそのまま
+   使うため、最近傍色分類(classifySilhouetteRaw)による誤判定は起きない。 */
+const PAINT_BODY_COLOR="#000000";
+let paintView="front";
+let paintTarget="body"; // "body" または accessories配列のindexを文字列化したもの
+let paintBrushSize=24;
+let paintUndoStack=[]; // {view, imageData}の配列(直近PAINT_UNDO_MAX手分)
+const PAINT_UNDO_MAX=20;
+let paintDrawing=false, paintLastImgPt=null;
+let paintZoom=1; // 表示倍率(1=コンテナ幅に合わせたフィット表示)。内部解像度は
+                 // 常にimg.w×img.hのままなので、paintCanvasToImgPtの座標変換は
+                 // ズーム値に関わらず変更不要(getBoundingClientRectの実測サイズを
+                 // 使っているため)。
+let paintCurScale=1; // 直近に適用した実表示倍率(フィット基準×paintZoom)。
+                     // ブラシカーソルの線の太さを画面上一定に保つために使う。
+let paintHoverPt=null; // 直近のポインタ位置(画像内部px座標)。ブラシ円の表示用。
+function paintableAccessories(){
+  return accessories.map((a,i)=>({a,i})).filter(x=>x.a.color);
+}
+function paintTargetColorHex(){
+  if(paintTarget==="body") return PAINT_BODY_COLOR;
+  const a=accessories[+paintTarget];
+  return (a&&a.color) ? a.color : null;
+}
+// この面の色分けマップがまだ無ければ、白背景(=未着色)の新規canvasを作る
+// (ゴーストスキャナーを使わず手動マスクだけでこの面を完結させたい場合に対応)。
+function ensurePaintColormap(v){
+  if(colormaps[v]) return colormaps[v];
+  const im=imgs[v];
+  if(!im) return null;
+  const c=document.createElement("canvas");
+  c.width=im.w; c.height=im.h;
+  const ctx=c.getContext("2d");
+  ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,c.width,c.height);
+  colormaps[v]={canvas:c,ctx:ctx,w:c.width,h:c.height};
+  return colormaps[v];
+}
+function pushPaintUndo(v){
+  const cm=colormaps[v];
+  if(!cm) return;
+  paintUndoStack.push({view:v, imageData:cm.ctx.getImageData(0,0,cm.w,cm.h)});
+  if(paintUndoStack.length>PAINT_UNDO_MAX) paintUndoStack.shift();
+}
+function paintStampCircle(v,x,y,r,colorHex){
+  const cm=colormaps[v]; if(!cm) return;
+  cm.ctx.save();
+  cm.ctx.fillStyle=colorHex;
+  cm.ctx.beginPath();
+  cm.ctx.arc(x,y,r,0,Math.PI*2);
+  cm.ctx.fill();
+  cm.ctx.restore();
+}
+// ドラッグ中はpointermoveの間隔が空くと点線状になるため、前回点から補間して
+// 一定間隔でスタンプする。
+function paintStrokeTo(v,x,y,r,colorHex){
+  if(!paintLastImgPt){ paintStampCircle(v,x,y,r,colorHex); paintLastImgPt=[x,y]; return; }
+  const lx=paintLastImgPt[0], ly=paintLastImgPt[1];
+  const dist=Math.hypot(x-lx,y-ly);
+  const step=Math.max(r*0.5,1);
+  const n=Math.max(1,Math.ceil(dist/step));
+  for(let i=1;i<=n;i++){
+    const t=i/n;
+    paintStampCircle(v, lx+(x-lx)*t, ly+(y-ly)*t, r, colorHex);
+  }
+  paintLastImgPt=[x,y];
+}
+// 塗り終わり(1ストローク完了)・アンドゥ・全消去の後に共通で呼ぶ:
+// 自動マスクを再抽出し、パネル全体(面/対象一覧/キャンバス)を再描画する。
+function refreshAfterPaintChange(){
+  extractAllAccessoryMasks();
+  resyncAnalysisToProfile();
+  renderPaintTab();
+}
+function paintUndo(){
+  const entry=paintUndoStack.pop();
+  if(!entry) return;
+  const cm=ensurePaintColormap(entry.view);
+  if(!cm) return;
+  cm.ctx.putImageData(entry.imageData,0,0);
+  paintView=entry.view;
+  refreshAfterPaintChange();
+}
+function paintClearCurrentView(){
+  const cm=colormaps[paintView];
+  if(!cm) return;
+  if(!confirm("この面("+(VIEWJP[paintView]||paintView)+")の色分けマップを全て背景(白)に戻します。よろしいですか？")) return;
+  pushPaintUndo(paintView);
+  cm.ctx.fillStyle="#ffffff";
+  cm.ctx.fillRect(0,0,cm.w,cm.h);
+  refreshAfterPaintChange();
+}
+function paintCanvasToImgPt(canvas,e){
+  const rc=canvas.getBoundingClientRect();
+  const sx=canvas.width/rc.width, sy=canvas.height/rc.height;
+  return [(e.clientX-rc.left)*sx, (e.clientY-rc.top)*sy];
+}
+function renderPaintViewbar(){
+  const wrap=$("paintViewbar"); if(!wrap) return;
+  wrap.innerHTML=["front","side","leftSide","back"].map(v=>{
+    const has=!!imgs[v];
+    return '<button type="button" class="paintChip'+(v===paintView?" on":"")+'" data-v="'+v+'"'+
+      (has?"":" disabled")+' style="'+(has?"":"opacity:.4;cursor:not-allowed")+'">'+(VIEWJP[v]||v)+'</button>';
+  }).join("");
+  [].forEach.call(wrap.querySelectorAll(".paintChip"),b=>{
+    b.onclick=()=>{
+      if(b.disabled) return;
+      paintView=b.dataset.v;
+      paintLastImgPt=null;
+      renderPaintTab();
+    };
+  });
+}
+function renderPaintTargetList(){
+  const wrap=$("paintTargetList"); if(!wrap) return;
+  const accs=paintableAccessories();
+  let html='<button type="button" class="paintChip'+(paintTarget==="body"?" on":"")+'" data-t="body">'+
+    '<span class="sw" style="background:'+PAINT_BODY_COLOR+'"></span>体</button>';
+  html+=accs.map(({a,i})=>'<button type="button" class="paintChip'+(paintTarget===String(i)?" on":"")+'" data-t="'+i+'">'+
+    '<span class="sw" style="background:'+a.color+'"></span>'+(a.name||"(無名)")+'</button>').join("");
+  wrap.innerHTML=html;
+  [].forEach.call(wrap.querySelectorAll(".paintChip"),b=>{
+    b.onclick=()=>{ paintTarget=b.dataset.t; renderPaintTargetList(); };
+  });
+}
+// コンテナ幅にフィットさせる基準倍率(paintZoom=1の時の実表示倍率)。
+function paintFitScale(){
+  const wrap=$("paintCanvasWrap");
+  const im=imgs[paintView];
+  if(!wrap||!im) return 1;
+  return (wrap.clientWidth||360)/im.w;
+}
+// canvas要素自体は作り直さず、CSS表示サイズだけをpaintZoomに合わせて更新する
+// (ピンチ操作が難しい環境向けに拡大/縮小ボタンのみで操作できるようにした、
+// 2026-07-13追加)。内部解像度(canvas.width/height)は常に画像そのままの
+// 解像度を保つため、ブラシ座標変換(paintCanvasToImgPt)はズーム後も無改修で
+// 正しく動く。
+function applyPaintCanvasSize(){
+  const canvas=$("paintCanvas");
+  const im=imgs[paintView];
+  if(!canvas||!im) return;
+  paintCurScale=paintFitScale()*paintZoom;
+  canvas.style.width=(im.w*paintCurScale)+"px";
+  canvas.style.height=(im.h*paintCurScale)+"px";
+}
+function setPaintZoom(z){
+  paintZoom=Math.max(0.25,Math.min(8,z));
+  applyPaintCanvasSize();
+}
+function paintPanStepX(){ const w=$("paintCanvasWrap"); return w?Math.max(60,w.clientWidth*0.35):80; }
+function paintPanStepY(){ const w=$("paintCanvasWrap"); return w?Math.max(60,w.clientHeight*0.35):80; }
+function renderPaintCanvas(){
+  const wrap=$("paintCanvasWrap"), hint=$("paintEmptyHint");
+  if(!wrap) return;
+  const im=imgs[paintView];
+  if(!im){
+    wrap.innerHTML="";
+    if(hint) hint.textContent="この面の画像がまだありません。";
+    return;
+  }
+  if(hint) hint.textContent="";
+  const cm=ensurePaintColormap(paintView);
+  const canvas=document.createElement("canvas");
+  canvas.id="paintCanvas";
+  canvas.width=im.w; canvas.height=im.h;
+  const ctx=canvas.getContext("2d");
+  ctx.drawImage(im.el,0,0,im.w,im.h);
+  if(cm){ ctx.save(); ctx.globalAlpha=0.55; ctx.drawImage(cm.canvas,0,0,im.w,im.h); ctx.restore(); }
+  wrap.innerHTML=""; wrap.appendChild(canvas);
+  applyPaintCanvasSize();
+  wirePaintCanvasEvents(canvas);
+}
+function wirePaintCanvasEvents(canvas){
+  const ctx=canvas.getContext("2d");
+  function redrawComposite(){
+    const im=imgs[paintView], cm=colormaps[paintView];
+    if(!im) return;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(im.el,0,0,im.w,im.h);
+    if(cm){ ctx.save(); ctx.globalAlpha=0.55; ctx.drawImage(cm.canvas,0,0,im.w,im.h); ctx.restore(); }
+    // ★2026-07-13追加: 塗りペンのサイズが分かるよう、ポインタ位置にブラシ半径の
+    // 円を重ね描きする(白地+黒地どちらの上でも見えるよう二重線にする)。線の
+    // 太さはpaintCurScaleで割ることで、ズーム倍率に関わらず画面上ほぼ一定の
+    // 太さに見えるようにしている。
+    if(paintHoverPt){
+      const hx=paintHoverPt[0], hy=paintHoverPt[1];
+      const lw=Math.max(0.75, 2.5/(paintCurScale||1));
+      ctx.save();
+      ctx.lineWidth=lw*1.6; ctx.strokeStyle="rgba(255,255,255,.95)";
+      ctx.beginPath(); ctx.arc(hx,hy,paintBrushSize,0,Math.PI*2); ctx.stroke();
+      ctx.lineWidth=lw; ctx.strokeStyle="rgba(0,0,0,.95)";
+      ctx.beginPath(); ctx.arc(hx,hy,paintBrushSize,0,Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+  }
+  canvas.addEventListener("pointerdown",e=>{
+    const colorHex=paintTargetColorHex();
+    if(!colorHex) return;
+    const cm=ensurePaintColormap(paintView);
+    if(!cm) return;
+    try{canvas.setPointerCapture(e.pointerId);}catch(_){}
+    pushPaintUndo(paintView);
+    paintDrawing=true; paintLastImgPt=null;
+    const p=paintCanvasToImgPt(canvas,e);
+    paintHoverPt=p;
+    paintStrokeTo(paintView,p[0],p[1],paintBrushSize,colorHex);
+    redrawComposite();
+  });
+  canvas.addEventListener("pointermove",e=>{
+    const p=paintCanvasToImgPt(canvas,e);
+    paintHoverPt=p;
+    if(paintDrawing){
+      const colorHex=paintTargetColorHex();
+      if(colorHex) paintStrokeTo(paintView,p[0],p[1],paintBrushSize,colorHex);
+    }
+    redrawComposite();
+  });
+  function endStroke(){
+    if(!paintDrawing) return;
+    paintDrawing=false; paintLastImgPt=null;
+    refreshAfterPaintChange();
+  }
+  canvas.addEventListener("pointerup",endStroke);
+  canvas.addEventListener("pointercancel",endStroke);
+  canvas.addEventListener("pointerleave",()=>{
+    paintHoverPt=null;
+    if(paintDrawing) endStroke(); else redrawComposite();
+  });
+}
+function renderPaintTab(){
+  renderPaintViewbar();
+  renderPaintTargetList();
+  renderPaintCanvas();
+}
+if($("paintBrushSlider")){
+  $("paintBrushSlider").oninput=()=>{
+    paintBrushSize=parseInt($("paintBrushSlider").value,10);
+    $("paintBrushVal").textContent=paintBrushSize+"px";
+  };
+}
+if($("paintUndo")) $("paintUndo").onclick=paintUndo;
+if($("paintClearView")) $("paintClearView").onclick=paintClearCurrentView;
+if($("paintZoomIn")) $("paintZoomIn").onclick=()=>setPaintZoom(paintZoom*1.25);
+if($("paintZoomOut")) $("paintZoomOut").onclick=()=>setPaintZoom(paintZoom/1.25);
+if($("paintZoomReset")) $("paintZoomReset").onclick=()=>setPaintZoom(1);
+if($("paintPanUp")) $("paintPanUp").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollTop-=paintPanStepY(); };
+if($("paintPanDown")) $("paintPanDown").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollTop+=paintPanStepY(); };
+if($("paintPanLeft")) $("paintPanLeft").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollLeft-=paintPanStepX(); };
+if($("paintPanRight")) $("paintPanRight").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollLeft+=paintPanStepX(); };
+
 // 「自動マスク」タブ: front/side/backの画像に、色分けマップ由来のマスク
 // (acc.mask[view].maskDataUrl、白RGB+アルファ=前景のラスタ)を重ね描きした
 // プレビューと、抽出済みパーツ一覧を同時表示する(GHOST_SCANNER_PLAN.md
