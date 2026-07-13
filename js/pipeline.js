@@ -427,7 +427,12 @@ async function runCarvingStages(state, report){
       }
     }
   }
-  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, boneBridgeCandidates);
+  // ★2026-07-14追加(part_gap_close機能、ユーザー要望「モデル生成時に、設定
+  // した距離でパーツ間の隙間を塞ぐ機能」): bone_bridgeのボーン共有+行単位の
+  // 粗い近似とは独立に、ボクセルグリッド上の本物の3次元距離だけで異なる
+  // パーツ間の隙間を塞ぐ(js/carving.jsのcloseInterPartGaps参照)。
+  var partGapCloseDist = gp.part_gap_close ? (gp.part_gap_close_dist||0) : 0;
+  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, boneBridgeCandidates, partGapCloseDist);
   if(!unified) throw new Error("visual_hull+accessories: carving produced an empty mesh");
   console.log("  carveUnifiedRegions: total verts", unified.V.length/3, "faces", unified.F.length/3);
 

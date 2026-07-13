@@ -1376,6 +1376,113 @@ function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, g
 }
 P3D.applyBoneBridgeFill = applyBoneBridgeFill;
 
+// ★2026-07-14追加(part_gap_close機能、ユーザー要望「モデル生成時に、設定した
+// 距離でパーツ間の隙間を塞ぐ機能」): bone_bridgeはボーン共有+行単位の粗い
+// 外縁近似(1次元区間)で「隣接している」かどうかを判定していたため、実際には
+// 近くない箇所を誤って隣接と判定する不具合が繰り返し見つかった(union範囲の
+// 暴走、体⇔マフラーの誤爆等)。この機能はそれとは別に、ボクセルグリッド上の
+// 本物の3次元距離だけで判定するシンプルな方式にした: 「まだどのパーツも
+// 領域を持たない空ボクセルのうち、異なる2パーツ以上の表面から指定距離以内に
+// 同時に届いている(=パーツとパーツに挟まれた細い隙間の中にある)」ボクセル
+// だけを埋める。ボーン共有やパーツの種類は一切見ない、純粋に距離だけの判定
+// なので、bone_bridgeで問題になった「粗い近似による誤判定」が原理的に起きない
+// (実測した3次元距離そのものを使うため)。
+// 実装は多始点BFSを2種類組み合わせる:
+//  1) 全パーツの表面ボクセルを起点に、最も近いownerIdを伝搬するBFS(R歩まで)。
+//     塞ぐボクセルをどの色で塗るか決めるのに使う。
+//  2) ownerIdごとに独立したBFS(R歩まで)を行い、各空ボクセルに「どのownerId
+//     の表面からR以内に届いたか」をビットマスクで記録する。
+// 最終的に、ビットが2つ以上立っている(=異なる2パーツ以上に挟まれている)
+// 空ボクセルだけを、1)で求めた最も近いownerIdの色で埋める。
+// BFSはどちらも「既存の表面からR歩以内」でしか探索しないため、モデル全体の
+// ボクセル数ではなく表面積×Rにほぼ比例するコストで済み、Rが小さい(隙間を
+// 塞ぐ距離は通常ボクセル数個〜十数個分)実用範囲では十分高速。
+var PART_GAP_CLOSE_FILL_VAL = 0.3;
+function closeInterPartGaps(field, ownerField, grid, vox, maxDist){
+  if(!(maxDist>0)) return;
+  var nx=grid.nx, ny=grid.ny, nz=grid.nz;
+  var R=Math.max(1, Math.round(maxDist/(vox||0.003)));
+  var n=nx*ny*nz;
+  var strideY=nx*nz, strideX=nz;
+
+  var ownerSet=new Set();
+  for(var i=0;i<n;i++){ if(ownerField[i]>=0) ownerSet.add(ownerField[i]); }
+  var owners=Array.from(ownerSet);
+  if(owners.length<2) return; // 隙間を語れるのは2パーツ以上ある場合のみ
+
+  // 26近傍オフセット(3x3x3から中心を除いた26通り)。斜め方向の隙間
+  // (=45度視点で見える隙間そのもの)も見逃さないよう対角も含める。
+  var offs=[];
+  for(var oy=-1;oy<=1;oy++)for(var ox=-1;ox<=1;ox++)for(var oz=-1;oz<=1;oz++){
+    if(ox===0&&oy===0&&oz===0) continue;
+    offs.push([oy,ox,oz]);
+  }
+
+  function neighborsOf(idx, cb){
+    var iy=(idx/strideY)|0, rem=idx-iy*strideY, ix=(rem/strideX)|0, iz=rem-ix*strideX;
+    for(var k=0;k<offs.length;k++){
+      var niy=iy+offs[k][0], nix=ix+offs[k][1], niz=iz+offs[k][2];
+      if(niy<0||niy>=ny||nix<0||nix>=nx||niz<0||niz>=nz) continue;
+      cb(niy*strideY+nix*strideX+niz);
+    }
+  }
+
+  // 1) 最も近いownerId(Voronoi風)をR歩以内で伝搬
+  var nearestOwner=new Int32Array(n).fill(-1);
+  var dist1=new Int32Array(n).fill(-1);
+  var queue1=new Int32Array(n);
+  var q1Head=0, q1Tail=0;
+  for(i=0;i<n;i++){
+    if(ownerField[i]>=0){ nearestOwner[i]=ownerField[i]; dist1[i]=0; queue1[q1Tail++]=i; }
+  }
+  while(q1Head<q1Tail){
+    var idx1=queue1[q1Head++];
+    var d1=dist1[idx1];
+    if(d1>=R) continue;
+    neighborsOf(idx1, function(nidx){
+      if(dist1[nidx]===-1){ dist1[nidx]=d1+1; nearestOwner[nidx]=nearestOwner[idx1]; queue1[q1Tail++]=nidx; }
+    });
+  }
+
+  // 2) ownerIdごとに独立したBFS(R歩以内)。到達したownerIdをビットマスクで記録。
+  var reachMask=new Int32Array(n);
+  owners.forEach(function(ownerId){
+    var bit=1<<ownerId;
+    var visited=new Uint8Array(n);
+    var queue2=new Int32Array(n);
+    var q2Head=0, q2Tail=0;
+    for(var i2=0;i2<n;i2++){
+      if(ownerField[i2]===ownerId){ visited[i2]=1; reachMask[i2]|=bit; queue2[q2Tail++]=i2; }
+    }
+    var distO=new Int32Array(n).fill(-1);
+    for(var s=0;s<q2Tail;s++) distO[queue2[s]]=0;
+    var qh=0;
+    while(qh<q2Tail){
+      var idx2=queue2[qh++];
+      var d2=distO[idx2];
+      if(d2>=R) continue;
+      neighborsOf(idx2, function(nidx){
+        if(!visited[nidx]){ visited[nidx]=1; reachMask[nidx]|=bit; distO[nidx]=d2+1; queue2[q2Tail++]=nidx; }
+      });
+    }
+  });
+
+  // 3) 異なる2パーツ以上に挟まれた(reachMaskのビットが2つ以上立った)、
+  //    まだ誰も領域を持たない空ボクセルだけを埋める。
+  for(i=0;i<n;i++){
+    if(ownerField[i]!==-1) continue; // 既にどこかのパーツが領域を持つボクセルは変更しない
+    var mask=reachMask[i];
+    if(!mask) continue;
+    var count=0, m=mask;
+    while(m){ count+=m&1; m>>=1; }
+    if(count>=2 && nearestOwner[i]>=0){
+      field[i]=PART_GAP_CLOSE_FILL_VAL;
+      ownerField[i]=nearestOwner[i];
+    }
+  }
+}
+P3D.closeInterPartGaps = closeInterPartGaps;
+
 /**
  * ★2026-07-10(体+アクセサリー統合彫刻、ユーザー指摘「パーツ間の隙間」対応):
  * 体+全アクセサリーを1つの共有ボクセルグリッドへ蓄積彫刻し、1回だけ
@@ -1395,6 +1502,9 @@ P3D.applyBoneBridgeFill = applyBoneBridgeFill;
  * boneBridgeCandidates: 省略可。Set<"oa,ob">(oa<ob)。bone_bridge機能
  *   (ツインテール付け根の隙間対策)で橋渡し候補にするownerIdペア
  *   (js/pipeline.jsのrunCarvingStages参照)。
+ * partGapCloseDist: 省略可(model単位、0または未指定で無効)。part_gap_close機能
+ *   (js/carving.jsのcloseInterPartGaps参照)で、異なる2パーツ以上の表面から
+ *   同時にこの距離以内にある空ボクセルを埋める閾値。
  * 戻り値: {V,F,owner} (owner: Int32Array、頂点ごとのownerId) または
  *   null(彫れなかった場合)
  */
@@ -1403,7 +1513,7 @@ P3D.applyBoneBridgeFill = applyBoneBridgeFill;
 // 超えるケースがあったため、かなり緩めの値にし、確信度の高い(=ボーン共有+
 // 幅と奥行き両方で隣接確認済み)行にだけ適用する。
 var BONE_BRIDGE_K = 5.0;
-function carveUnifiedRegions(regions, sharedGrid, minFragFrac, boneBridgeCandidates){
+function carveUnifiedRegions(regions, sharedGrid, minFragFrac, boneBridgeCandidates, partGapCloseDist){
   var nx=sharedGrid.nx, ny=sharedGrid.ny, nz=sharedGrid.nz;
   var field = new Float32Array(ny*nx*nz).fill(-1.0);
   var ownerField = new Int32Array(ny*nx*nz).fill(-1);
@@ -1445,6 +1555,14 @@ function carveUnifiedRegions(regions, sharedGrid, minFragFrac, boneBridgeCandida
   // 実体」を書き込む。
   if(bridgeRows && bridgeRows.size){
     applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, sharedGrid, voxForEps);
+  }
+
+  // ★2026-07-14追加(part_gap_close機能): ボーン共有や行単位の近似を介さず、
+  // 純粋なボクセルグリッド上の3次元距離だけで異なるパーツ間の隙間を塞ぐ
+  // (closeInterPartGaps参照)。
+  if(partGapCloseDist>0){
+    var voxForGapClose = regions.length ? (regions[0].opts.vox||0.003) : 0.003;
+    closeInterPartGaps(field, ownerField, sharedGrid, voxForGapClose, partGapCloseDist);
   }
 
   var anyPositive=false, cntPos=0;
