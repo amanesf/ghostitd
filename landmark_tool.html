@@ -534,7 +534,7 @@ const PARAM_META=[
  // に残すが、編集しても効果が無いUIを表示し続けるとユーザーを混乱させるため)。
  {group:"輪郭抽出", key:"subpixel_edges", label:"色分けマップ境界のサブピクセル補正", type:"checkbox",
   desc:"ONだと、色分けマップ上の体・各アクセサリー・背景の境界(最近傍色分類による確定的な境界)を、アンチエイリアスで混ざった実際の色から1px未満の精度で補間する。OFFだと従来通り整数px単位の境界になる(輪郭がわずかにガタつく)。以前の輝度しきい値ベースのサブピクセル補正は色分けマップで不安定になった実績があるため、様子を見て問題があればOFFに戻せるようにしている。"},
- {group:"解像度/軽量化", key:"body_vox", label:"ボクセル解像度(体+アクセサリー共通)", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)",
+ {group:"解像度/軽量化", key:"body_vox", label:"ボクセル解像度(体+アクセサリー共通)", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)", pxUnit:true,
   desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。大きくすると速く軽くなるが丸みが粗くなる。体+全アクセサリーを1つの共有グリッドで彫るため、この1値が両方に効く。"},
  {group:"断面の丸み具合", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく(専門的には「スーパー楕円指数」と呼ぶ形状パラメータ)。"},
@@ -548,11 +548,11 @@ const PARAM_META=[
   desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
  {group:"顔の彫刻", key:"face_sculpt", label:"目窩を彫る", type:"checkbox",
   desc:"ONだと「目L」「目R」ランドマークを中心に、彫刻済みの頭部表面へ局所的な凹みを彫る(front/back/sideどのシルエット輪郭にも現れない内部形状なので、輪郭=元イラストの実測データとは矛盾しない)。頭部は他の部位と同じ行ごとの断面で彫るため、OFFのままだとのっぺりした顔になりやすい。"},
- {group:"顔の彫刻", key:"eye_socket_depth", label:"目窩の深さ", type:"number", min:0, max:0.03, step:0.001, unit:"(model単位)",
+ {group:"顔の彫刻", key:"eye_socket_depth", label:"目窩の深さ", type:"number", min:0, max:0.03, step:0.001, unit:"(model単位)", pxUnit:true,
   desc:"目のランドマークを中心に、彫刻済みの表面をどれだけ内側(-z)へ凹ませるか(中心での最大値。周囲へなだらかに0まで減衰する)。face_sculptがONの時のみ有効。"},
- {group:"顔の彫刻", key:"eye_socket_radius_x", label:"目窩の横幅", type:"number", min:0.005, max:0.05, step:0.001, unit:"(model単位)",
+ {group:"顔の彫刻", key:"eye_socket_radius_x", label:"目窩の横幅", type:"number", min:0.005, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
   desc:"目窩の凹みの左右方向の広がり(このランドマークからの楕円形footprintの半径)。face_sculptがONの時のみ有効。"},
- {group:"顔の彫刻", key:"eye_socket_radius_y", label:"目窩の縦幅", type:"number", min:0.005, max:0.05, step:0.001, unit:"(model単位)",
+ {group:"顔の彫刻", key:"eye_socket_radius_y", label:"目窩の縦幅", type:"number", min:0.005, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
   desc:"目窩の凹みの上下方向の広がり(このランドマークからの楕円形footprintの半径)。face_sculptがONの時のみ有効。"},
  // ★2026-07-12追加(ユーザー指摘「45度から見たらパーツ間隙間が開く」対応):
  // 体+全アクセサリーは1つの共有グリッドへ統合彫刻されるが、各パーツの
@@ -578,7 +578,7 @@ const PARAM_META=[
  // (js/carving.jsのcloseInterPartGaps参照)。
  {group:"パーツ境界", key:"part_gap_close", label:"パーツ間の隙間を距離で塞ぐ", type:"checkbox",
   desc:"まだどのパーツも彫刻データを持たない空ボクセルのうち、異なる2パーツ以上の表面から同時に「パーツ間の隙間を塞ぐ距離」以内に届いている(=パーツとパーツに挟まれた細い隙間の中にある)ボクセルだけを実体で埋める。ボーンや行単位の近似は使わず、ボクセルグリッド上の実測3次元距離だけで判定するため、bone_bridgeで見つかったような「粗い近似による誤判定」が起きにくい。同一パーツ内の凹みや、1パーツだけに近い外周(輪郭そのもの)には影響しない。"},
- {group:"パーツ境界", key:"part_gap_close_dist", label:"パーツ間の隙間を塞ぐ距離", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)",
+ {group:"パーツ境界", key:"part_gap_close_dist", label:"パーツ間の隙間を塞ぐ距離", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
   desc:"この距離以内で2パーツ以上に挟まれている隙間を塞ぐ。大きいほど広い隙間まで塞げるが、離れた無関係なパーツ同士まで誤って繋がるリスクが増える。part_gap_closeがONの時のみ有効。"},
  {group:"ノイズ・ガタつき対策", key:"track_win", label:"横方向のノイズ平滑化幅", type:"number", min:1, max:31, step:2, unit:"行",
   desc:"幅方向(front/back)のセグメント測定に適用する。大きくすると測定ノイズは減るが細かい起伏も均されて鈍る。小さくすると細部の形状は残るがノイズによる凸凹が出やすい。※奥行き(side計測)には適用されない(顎先のような数行の突出が消えるため)。"},
@@ -588,16 +588,16 @@ const PARAM_META=[
   desc:"側面の色分けマップ上で、奥行き方向に複数の塊(例: 前髪の房が手前、顔がその奥に覗く)が並んでいるとき、この値より狭い隙間は「顎先と首の間」のような実在の小さい凹みとみなして同じ塊として繋げ、1枚の連続した奥行きで彫る。この値より広い隙間は本当に別々の塊とみなし、それぞれ独立した奥行きスラブとして彫る(房の手前に別の奥行きの顔が覗くような形になる)。0で無効(隙間があれば常に別々の塊として彫る)。大きくしすぎると本来分かれているべき房と顔が奥行き方向で融合する。"},
  {group:"腕の彫刻", key:"arm_circle", label:"腕をボーンに沿った円筒形にする", type:"checkbox",
   desc:"ONだと肩→肘→手首の骨線に沿って、front画像の各列で腕の縦(y)方向の太さを測り、それを奥行き(z)に適用した円形断面で彫る(side計測は腕に使わない。腕が板状/胴体並みの厚みになるのを防ぐ)。OFFにすると従来通りside計測の奥行きをそのまま使う。"},
- {group:"腕の彫刻", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)",
+ {group:"腕の彫刻", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)", pxUnit:true,
   desc:"腕の円形断面の半径(縦幅から傾き補正した値)の上限。これを超える列は腕とみなさない(骨線が肩の付け根など胴体内部を通る列を誤って円形化するのを防ぐ)。小さくしすぎると太い袖の腕が拾われなくなる。arm_circleがONの時のみ有効。"},
  {group:"手の彫刻", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
   desc:"ONだと手首から先(手)を、side計測の奥行き(その高さの胴体・腰の厚み)ではなく、front絵柄のシルエットをhand_depthの薄い奥行きでそのまま押し出した板として彫る。OFFだと従来通りside計測の奥行きになる。"},
- {group:"手の彫刻", key:"hand_depth", label:"手の厚み(半分の値)", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)",
+ {group:"手の彫刻", key:"hand_depth", label:"手の厚み(半分の値)", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)", pxUnit:true,
   desc:"手の押し出しの厚みの半分(全厚はこの2倍)。side計測やシルエット幅に関係なく、手の奥行きは常にこの設定値になる。hand_extrudeがONの時のみ有効。"},
- {group:"手の彫刻", key:"hand_max_hw", label:"手とみなす最大の太さ", type:"number", min:0.01, max:0.15, step:0.005, unit:"(model単位)",
+ {group:"手の彫刻", key:"hand_max_hw", label:"手とみなす最大の太さ", type:"number", min:0.01, max:0.15, step:0.005, unit:"(model単位)", pxUnit:true,
   desc:"列走査で測った手の縦半幅がこれを超える(=手の線が胴体等の内部を通っている)列は手扱いしない安全弁。arm_max_hwの手版。hand_extrudeがONの時のみ有効。"},
- {group:"手の彫刻", key:"hand_len", label:"手の長さ(手首から先)", type:"number", min:0.02, max:0.3, step:0.005, unit:"(model単位)",
-  desc:"手首から指方向へ何model単位分を「手」として押し出し扱いにするかの長さ。長すぎると前腕側まで手扱いになり、短すぎると指先が手扱いから外れて胴体側面の奥行きに戻ってしまう。hand_extrudeがONの時のみ有効。"},
+ {group:"手の彫刻", key:"hand_len", label:"手の長さ(手首から先)", type:"number", min:0.02, max:0.3, step:0.005, unit:"(model単位)", pxUnit:true,
+  desc:"手首から指方向へ何px分を「手」として押し出し扱いにするかの長さ。長すぎると前腕側まで手扱いになり、短すぎると指先が手扱いから外れて胴体側面の奥行きに戻ってしまう。hand_extrudeがONの時のみ有効。"},
  {group:"エッジ処理", key:"alpha_dilate", label:"縁の色にじみの膨張量", type:"number", min:0, max:30, step:1, unit:"px",
   desc:"増やすとテクスチャ縁の透明の隙間(拡大縮小時ににじみが出るのを防ぐ処理)が広がるが、輪郭のディテールがわずかに丸まる。"},
  {group:"エッジ処理", key:"bleed_inset_px", label:"にじみの起点を内側へずらす量", type:"number", min:0, max:15, step:1, unit:"px",
@@ -724,6 +724,14 @@ function renderVoxPxHelperHtml(){
     '<button type="button" class="btn sm" id="voxFitPxBtn" style="margin-top:6px">ボクセルを1pxに合わせる(推奨値 '+fitVox.toFixed(5)+')</button>'+
     '</div>';
 }
+// ★2026-07-14追加(ユーザー指摘「設定値のモデル単位は全部px表記にしてほしい、
+// モデル単位だとわからない」): PARAM_METAでpxUnit:trueが付いた項目(元は
+// unit:"(model単位)"だった距離系パラメータ)は、model単位の生値はそのまま
+// genParams/DEFAULT_GEN_PARAMSに保持しつつ、UI表示・編集だけをpx換算で行う。
+// 換算にはvoxFitPxBtn(renderVoxPxHelperHtml)と同じSCALE(analysis.BH、px/
+// model単位)を使う。画像未読込等でanalysis.BHが無い場合はmodel単位のまま
+// 表示する(フォールバック)。
+function pxScale(){ return (analysis && analysis.BH) ? analysis.BH : null; }
 function buildParamsPanelHtml(){
   const groups=[]; PARAM_META.forEach(m=>{if(!groups.includes(m.group))groups.push(m.group);});
   return groups.map(g=>{
@@ -731,7 +739,11 @@ function buildParamsPanelHtml(){
     const items=itemList.map(m=>{
       const dv=DEFAULT_GEN_PARAMS[m.key];
       const cur=genParams[m.key];
-      const defTxt="既定値: "+(typeof dv==="boolean"?(dv?"ON":"OFF"):(dv+(m.unit?(" "+m.unit):"")));
+      const scale=(m.pxUnit && m.type==="number") ? pxScale() : null;
+      const fmt=(n)=>Math.round(n*1000)/1000;
+      const dispUnit=scale ? "px" : m.unit;
+      const defTxt="既定値: "+(typeof dv==="boolean"?(dv?"ON":"OFF"):
+        ((scale?fmt(dv*scale):dv)+(dispUnit?(" "+dispUnit):"")));
       const resetBtn='<button type="button" class="paramResetOne" data-reset-param="'+m.key+'" title="既定値に戻す" '+
         'style="flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--line);'+
         'background:rgba(255,255,255,.05);color:var(--mut);cursor:pointer;font-size:13px">↺</button>';
@@ -742,11 +754,14 @@ function buildParamsPanelHtml(){
           '<span style="display:flex;align-items:center;gap:6px">'+
           '<input type="checkbox" data-param="'+m.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px">'+resetBtn+'</span></label>';
       }else{
+        const dispCur=scale?fmt(cur*scale):cur, dispMin=scale?fmt(m.min*scale):m.min,
+          dispMax=scale?fmt(m.max*scale):m.max, dispStep=scale?fmt(m.step*scale):m.step;
+        const pxFlag=scale?"1":"0";
         body='<div style="color:var(--txt);font-size:12px;margin-bottom:6px">'+m.label+'</div>'+
           '<div style="display:flex;align-items:center;gap:6px">'+
-          '<input type="range" data-param-range="'+m.key+'" value="'+cur+'" min="'+m.min+'" max="'+m.max+'" step="'+m.step+'" style="flex:1;min-width:60px">'+
-          '<input type="number" data-param="'+m.key+'" value="'+cur+'" min="'+m.min+'" max="'+m.max+'" step="'+m.step+'" style="width:78px;flex:0 0 auto">'+
-          (m.unit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+m.unit+'</span>':"")+resetBtn+'</div>';
+          '<input type="range" data-param-range="'+m.key+'" data-px="'+pxFlag+'" value="'+dispCur+'" min="'+dispMin+'" max="'+dispMax+'" step="'+dispStep+'" style="flex:1;min-width:60px">'+
+          '<input type="number" data-param="'+m.key+'" data-px="'+pxFlag+'" value="'+dispCur+'" min="'+dispMin+'" max="'+dispMax+'" step="'+dispStep+'" style="width:78px;flex:0 0 auto">'+
+          (dispUnit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+dispUnit+'</span>':"")+resetBtn+'</div>';
       }
       return '<div class="acform" style="margin-bottom:6px">'+body+
         '<div style="font-size:10.5px;color:var(--mut)">'+m.desc+' <b style="color:#7aa2ff">('+defTxt+')</b></div>'+
@@ -772,24 +787,29 @@ function buildParamsPanelHtml(){
 function wireParamsPanelEvents(el){
   [].forEach.call(el.querySelectorAll("[data-param]"),inp=>{
     const key=inp.dataset.param;
+    const isPx=inp.dataset.px==="1";
     const sync=()=>{
-      const rg=el.querySelector('[data-param-range="'+key+'"]'); if(rg)rg.value=genParams[key];
+      const rg=el.querySelector('[data-param-range="'+key+'"]');
+      if(rg) rg.value = isPx ? (genParams[key]*pxScale()) : genParams[key];
     };
     inp.onchange=()=>{
       if(inp.type==="checkbox")genParams[key]=inp.checked;
       else{
         const n=parseFloat(inp.value);
-        genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
+        if(isFinite(n)) genParams[key] = isPx ? (n/pxScale()) : n;
+        else genParams[key]=DEFAULT_GEN_PARAMS[key];
       }
       sync();
     };
   });
   [].forEach.call(el.querySelectorAll("[data-param-range]"),rg=>{
     const key=rg.dataset.paramRange;
+    const isPx=rg.dataset.px==="1";
     rg.oninput=()=>{
       const n=parseFloat(rg.value);
-      genParams[key]=isFinite(n)?n:DEFAULT_GEN_PARAMS[key];
-      const numEl=el.querySelector('[data-param="'+key+'"]'); if(numEl)numEl.value=genParams[key];
+      if(isFinite(n)) genParams[key] = isPx ? (n/pxScale()) : n;
+      else genParams[key]=DEFAULT_GEN_PARAMS[key];
+      const numEl=el.querySelector('[data-param="'+key+'"]'); if(numEl)numEl.value=rg.value;
     };
   });
   [].forEach.call(el.querySelectorAll("[data-reset-param]"),btn=>{
