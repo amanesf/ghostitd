@@ -166,10 +166,18 @@
 			const position = [];
 			index = []; //
 
+			// ★2026-07-14改変(3DtoolJS): vertices.indexOf(face.vX)は残存頂点数に
+			// 対する線形走査で、面数×3回呼ばれるためO(頂点数×面数)になり
+			// 大規模メッシュ(100万頂点級)で数十分級の支配的コストになっていた。
+			// Map(頂点オブジェクト→index)を1回だけ構築してO(1)参照に置き換える
+			// (出力結果は従来と完全に同一、探索方法のみ変更)。
+			const vertexIndexMap = new Map();
+
 			for ( let i = 0; i < vertices.length; i ++ ) {
 
 				const vertex = vertices[ i ].position;
 				position.push( vertex.x, vertex.y, vertex.z );
+				vertexIndexMap.set( vertices[ i ], i );
 
 			} //
 
@@ -177,9 +185,9 @@
 			for ( let i = 0; i < faces.length; i ++ ) {
 
 				const face = faces[ i ];
-				const a = vertices.indexOf( face.v1 );
-				const b = vertices.indexOf( face.v2 );
-				const c = vertices.indexOf( face.v3 );
+				const a = vertexIndexMap.get( face.v1 );
+				const b = vertexIndexMap.get( face.v2 );
+				const c = vertexIndexMap.get( face.v3 );
 				index.push( a, b, c );
 
 			} //
