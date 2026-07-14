@@ -42,9 +42,8 @@
   .modeCard .sampleSelectRow select{width:100%;height:32px;font-size:12px}
 
   /* single bottom control bar (slides up from below; hidden by default) */
-  /* フェーズ2: パラメータパネルが増えても画面上半分の3Dビューは必ず見える
-     ように、バー全体の高さを50vh以内に制限しスクロール可能にする
-     (character_3d.htmlのUI制約、GENERATOR_LIVE_PREVIEW_PLAN.md参照)。 */
+  /* タブパネルが増えても画面上半分の3Dビューは必ず見えるように、バー全体の
+     高さを50vh以内に制限しスクロール可能にする。 */
   .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;max-height:50vh;overflow-y:auto;
     display:flex;flex-direction:column;gap:8px;padding:10px 10px calc(10px + env(safe-area-inset-bottom));
     background:linear-gradient(to top,rgba(13,15,18,.96),rgba(13,15,18,.74) 70%,transparent);
@@ -81,30 +80,7 @@
     display:flex;align-items:center;justify-content:center;user-select:none}
   .dpad button:active{background:rgba(91,230,255,.18)}
 
-  /* フェーズ2: ライブパラメータパネル(landmark_tool.htmlのaccgroupパターンを踏襲) */
-  .accgroup{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;overflow:hidden;background:rgba(255,255,255,.03)}
-  .accgroup>summary{list-style:none;cursor:pointer;padding:8px 10px;display:flex;align-items:center;gap:8px;
-    font-size:12.5px;color:var(--txt)}
-  .accgroup>summary::-webkit-details-marker{display:none}
-  .accgroup>summary::before{content:"▸";color:var(--mut);font-size:10px;transition:transform .12s}
-  .accgroup[open]>summary::before{transform:rotate(90deg)}
-  .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:10.5px}
-  .accgroup>.accbody{padding:2px 10px 10px}
-  .pitem{margin-bottom:8px}
-  .pitem .plabel{color:var(--txt);font-size:11.5px;margin-bottom:4px;display:flex;justify-content:space-between}
-  .pitem .prow{display:flex;align-items:center;gap:6px}
-  .pitem input[type=number]{width:66px;height:28px;border-radius:6px;border:1px solid var(--line);
-    background:#161a1f;color:var(--txt);font-size:11.5px;padding:0 6px}
-  .pitem .punit{color:var(--mut);font-size:10px;flex:0 0 auto}
   #genPanelStatus{font-size:11px;color:var(--mint);min-height:14px}
-  /* Task1: 継ぎ目角度(seamAngles/seamNoSide)のボーン別一覧。landmark_tool.htmlの
-     .aclist/.acitemを移植 */
-  .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
-  .acitem{display:flex;align-items:center;gap:8px;font-size:11.5px;background:rgba(255,255,255,.04);
-    border:1px solid var(--line);border-radius:9px;padding:6px 8px}
-  .acitem .nm{flex:0 0 52px;color:var(--txt)}
-  .acitem input[type=number]{width:44px;height:26px;border-radius:6px;border:1px solid var(--line);
-    background:#161a1f;color:var(--txt);font-size:11px;padding:0 4px}
 </style></head>
 <body>
 <canvas id="c"></canvas>
@@ -147,7 +123,7 @@
     <button class="vtabbtn" data-vtab="shader">シェーダ</button>
     <button class="vtabbtn" data-vtab="motion">モーション</button>
     <button class="vtabbtn" data-vtab="model">モデル</button>
-    <button class="vtabbtn" data-vtab="gen" id="genTabBtn" style="display:none">生成調整</button>
+    <button class="vtabbtn" data-vtab="gen" id="genTabBtn" style="display:none">書き出し</button>
   </div>
 
   <div class="vtabpanel on" data-vtabpanel="view">
@@ -202,16 +178,12 @@
     </div>
   </div>
 
-  <!-- フェーズ2: 中間パッケージ(生成ボタンから渡された彫刻直後メッシュ)がある
-       時だけ表示するライブパラメータパネル。彫刻(marching cubes)をやり直さず
-       反映できる12個のパラメータをTier1〜3の折りたたみグループで並べる
-       (landmark_tool.htmlのPARAM_META/accgroupパターンを移植)。 -->
+  <!-- ★2026-07-15(モデル調整機能のジェネレータ移植): 間引き・継ぎ目角度等の
+       調整はlandmark_tool.html側に移った(生成ボタンを押した時点で確定)ため、
+       ここは生成済みモデルがある時だけ表示する書き出し(GLB/JSON)専用パネル
+       になった。 -->
   <div class="vtabpanel" data-vtabpanel="gen" id="genPanel">
     <div id="genPanelStatus"></div>
-    <div id="genParamsPanel"></div>
-    <!-- Task1: ボーン別の継ぎ目角度(seamAngles)/側面画像使用有無(seamNoSide) -->
-    <div id="genSeamPanel"></div>
-    <!-- フェーズ3: 現在のライブ調整状態からの最終出力 -->
     <div class="row">
       <button class="btn mint" id="exportGlbBtn">GLB書き出し</button>
     </div>
@@ -224,22 +196,15 @@
 
 <script src="js/vendor/three.min.js"></script>
 <script src="js/vendor/GLTFLoader.js"></script>
-<script src="js/vendor/BufferGeometryUtils.js"></script>
-<script src="js/vendor/SimplifyModifier.js"></script>
+<!-- ★2026-07-15(モデル調整機能のジェネレータ移植): 以前はここで生成パイプ
+     ライン後半(平滑化/間引き/スキニング/テクスチャ焼き込み/GLB書き出し、
+     js/common.js〜js/pipeline.js)一式を読み込み、ジェネレータから渡される
+     彫刻直後の生メッシュをビューア側でfinishFromIntermediate()にかけて
+     ライブパラメータ編集していた。この生メッシュ保持+都度の再計算がビューア
+     を重くする原因になっていたため、その処理は全てジェネレータ側(生成ボタン
+     を押した時点)に移した。ビューアはjs/idb.js(生成済みGLBの取得)だけで
+     完成GLBを読み込んで表示するだけになった。 -->
 <script src="js/idb.js"></script>
-<!-- フェーズ1(2026-07-07〜): ジェネレータ(landmark_tool.html)から渡される
-     中間パッケージ(彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)から
-     GLBを組み立てるため、生成パイプラインの後半(平滑化/間引き/スキニング/
-     テクスチャ焼き込み/GLB書き出し)に必要なモジュールを読み込む。
-     フェーズ2ではこれらを使ったライブパラメータ編集UIをここに追加する。 -->
-<script src="js/common.js"></script>
-<script src="js/carving.js"></script>
-<script src="js/skeleton.js"></script>
-<script src="js/atlas.js"></script>
-<script src="js/model_export.js"></script>
-<script src="js/visual_hull.js"></script>
-<script src="js/accessories.js"></script>
-<script src="js/pipeline.js"></script>
 <script>
 (function(){
 const cvs=document.getElementById('c');
@@ -501,7 +466,7 @@ function setupMotionDropdown(gltf){
     clips.forEach((cl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=cl.name||('motion '+(i+1));sel.appendChild(o);});
   }
 }
-function loadGLB(buf,onLoaded,autoplayMotion,keepView){
+function loadGLB(buf,onLoaded,autoplayMotion){
   new THREE.GLTFLoader().parse(buf,'',function(gltf){
     let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
     if(!hasMesh){ addMotionClips(gltf.animations||[],autoplayMotion); if(onLoaded)onLoaded(); return; }
@@ -516,14 +481,8 @@ function loadGLB(buf,onLoaded,autoplayMotion,keepView){
     buildSkelViz(model);
     setupMotionDropdown(gltf);
     document.getElementById('err').textContent='';
-    // ★フェーズ2: ライブパラメータ変更での再読み込み(keepView=true)時は、
-    // カメラ位置/回転/ズームを毎回リセットすると微調整のたびに視点が飛んで
-    // しまうため、frameModel()(初期フィット)を呼ばずに現在の視点をそのまま
-    // 維持する。
-    if(!keepView){
-      // center AFTER matrices/skeleton are initialized (next frames), device-independent
-      requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
-    }
+    // center AFTER matrices/skeleton are initialized (next frames), device-independent
+    requestAnimationFrame(()=>{ root.updateMatrixWorld(true); requestAnimationFrame(()=>frameModel(model)); });
     invalidate();
     if(onLoaded)onLoaded();
   }, e=>{
@@ -615,386 +574,58 @@ document.getElementById('modeNormalBtn').onclick=()=>{
   document.getElementById('drop').classList.remove('hide');
 };
 // 3DtoolJS: ランドマークツールの「モデル生成」ボタンからIndexedDB経由で渡された
-// 生成済みGLBがあれば最優先で読み込む(モード選択画面は出さない。読み込んだら
-// 消費して1回限りにし、次回の通常起動では改めてモード選択を出す)。
-// ★フェーズ1(2026-07-07〜): loadGeneratedModel()は完成GLBではなく中間パッケージ
-// (彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)を返すようになった。
-// P3D.finishFromIntermediate()で平滑化/間引き/テクスチャ焼き込み/GLB化まで
-// このページ側で行ってから読み込む(フェーズ2ではこのgen_paramsをライブ編集
-// できるUIパネルに置き換える)。
-let currentPackage=null; // フェーズ2のライブパラメータ編集用に保持しておく
-let liveGP=null;         // currentPackage.gen_paramsのコピー。パネル操作で更新する
-let liveSeamSmoothIters=null, liveColorGradWidth=null, liveColorGradStrength=null;
-// ★追加課題5の対応: seamAngles/seamNoSide(ボーン別の継ぎ目角度・側面画像
-// 不使用フラグ)もビューアでライブ編集できるようにする(landmark_tool.htmlの
-// 「境目角度」タブと同じBONE_GROUPS/seamRowHtmlパターンを移植)。
-let liveSeamAngles=null, liveSeamNoSide=null;
-// ★2026-07-12(SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」): 間引きの設定が
-// 「目標頂点数を指定する」方式から「強さ(誤差閾値)を指定し、結果の頂点数は
-// 表示するだけ」方式になったのに伴い、直近のfinishFromIntermediate()実行で
-// 実際に間引かれた後の頂点数を保持しておく(パネルの読み取り専用表示用)。
-let liveDecimatedVertCount=null;
-function updateDecimatedVertCount(){
-  var dec = currentPackage && currentPackage._stageCache && currentPackage._stageCache.decimated;
-  if(dec) liveDecimatedVertCount = dec.V.length/3;
-}
+// 完成GLBがあれば最優先で読み込む(モード選択画面は出さない。読み込んだら消費して
+// 1回限りにし、次回の通常起動では改めてモード選択を出す)。
+// ★2026-07-15(モデル調整機能のジェネレータ移植): 以前(フェーズ1〜2)は
+// loadGeneratedModel()が彫刻直後の生メッシュ+prep/bleed済み画像を返し、この
+// ページ側でP3D.finishFromIntermediate()を呼んで(ライブパラメータ編集も
+// 兼ねて)平滑化/間引き/テクスチャ焼き込み/GLB化していたが、生メッシュを
+// 保持したままの再計算がビューアを重くする原因になっていた。この処理は全て
+// ジェネレータ側(生成ボタンを押した時点)に移し、ここは完成GLBをそのまま
+// loadGLBに渡すだけになった(currentPackageはlandmarks_json/session情報のみの
+// 軽量な値で、JSON書き出しと「戻る」でだけ使う)。
+let currentPackage=null;
 document.getElementById('err').textContent='';
 (async function(){
   try{
     const pkg = window.P3D && await P3D.loadGeneratedModel();
-    if(pkg && pkg.raw_unified){
+    if(pkg && pkg.glb){
       currentPackage = pkg;
-      liveGP = Object.assign({}, pkg.gen_params);
-      liveSeamSmoothIters = pkg.seam_smooth_iters;
-      liveColorGradWidth = pkg.color_grad_width;
-      liveColorGradStrength = (pkg.color_grad_strength!==undefined && pkg.color_grad_strength!==null) ? pkg.color_grad_strength : 0.5;
-      liveSeamAngles = Object.assign({}, pkg.seam_angles||{});
-      liveSeamNoSide = Object.assign({}, pkg.seam_no_side||{});
-      document.getElementById('err').textContent='モデルを構築中…';
-      const glb = await P3D.finishFromIntermediate(pkg, currentLiveParams(),
-        (label)=>{ document.getElementById('err').textContent='構築中: '+label; });
-      updateDecimatedVertCount();
-      // ★構築成功後に初めてIndexedDBの中間パッケージを消費する。失敗時に先に
-      // 消してしまうと、失敗の原因を直さないままページを再読込しても二度と
-      // 復元できなくなる(以前はfinishFromIntermediate呼び出し前にclearしていた)。
+      // ★消費後にIndexedDBの中間パッケージをclearする(失敗時に先に消して
+      // しまうと、原因を直さないままページを再読込しても二度と復元できなく
+      // なるため、読み込み成功を確認してから消す)。
       await P3D.clearGeneratedModel();
       document.getElementById('err').textContent='';
-      lastModelBuf=glb;
       // 生成直後のモデルは常に同梱の既定motion_<name>.glb(SAMPLES[0]と同じ命名規則)を使う。
-      loadGLB(glb,()=>loadMotionClips(SAMPLES[0]));
+      loadGLB(pkg.glb,()=>loadMotionClips(SAMPLES[0]));
       document.getElementById('genTabBtn').style.display='';
-      renderGenParamsPanel();
-      renderSeamPanel();
       return;
     }
-  }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル構築に失敗しました: '+((e&&e.message)||e); }
+  }catch(e){ console.warn('generated package load failed', e); document.getElementById('err').textContent='モデル読み込みに失敗しました: '+((e&&e.message)||e); }
   document.getElementById('modeChoice').classList.remove('hide');
 })();
 
-/* ---------- フェーズ2: ライブパラメータ編集パネル ---------- */
-// 彫刻(marching cubes)をやり直さずに反映できるパラメータをTier1〜3で分類
-// (GENERATOR_LIVE_PREVIEW_PLAN.md「移動可能パラメータの分類」参照)。
-// Tier1: 完全即時。Tier2: raw_unifiedの間引き前メッシュがあれば反映可能。
-// Tier3: 上記に加えてbled_canvases(atlas_bake再実行)が必要。
-// いずれもcharacter_3d.htmlは常にraw_unifiedとbled_canvasesを保持しているため、
-// 実装上は全てP3D.finishFromIntermediate()を丸ごと呼び直すだけで反映できる
-// (finishFromIntermediate自体が毎回decimate→smooth→atlas_bakeの順で計算する)。
-// ★2026-07-11(ユーザー指摘「パーツ分割のタイミングが早すぎる」対応): 体+
-// 全アクセサリーを間引き・平滑化が終わるまで1枚の連続したメッシュのまま
-// 扱うよう変更したため、境界を共有する頂点に別々の強さを適用できなくなり、
-// body_*/acc_*に分かれていたTier1/Tier2パラメータを1本に統合した
-// (ユーザー承認済み。パーツ別の強弱調整は失われるトレードオフ)。
-const GEN_PARAM_TIERS=[
-  {tier:"Tier1(即時反映)", items:[
-    {key:"smooth_iters", label:"表面平滑化回数(体+アクセサリー共通)", min:0,max:60,step:1,unit:"回"},
-    {key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", min:0,max:0.8,step:0.05,unit:""},
-    {key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", min:50,max:1000,step:10,unit:"KB"},
-  ]},
-  {tier:"Tier2(生メッシュキャッシュ利用)", items:[
-    {key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
-    // ★2026-07-12(SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」): 「目標頂点数を
-    // 決め打ちする」方式は、メッシュの実際の複雑さを無視した勘の設定になり
-    // やすいため、「間引きの強さ(誤差閾値)を指定し、結果の頂点数は表示だけ」
-    // という誤差ベースの方式に変更した(js/carving.jsのstrengthToMaxCost参照)。
-    {key:"decimate_strength", label:"間引きの強さ(体+アクセサリー共通)", min:0,max:1,step:0.01,unit:""},
-    {key:"__decimatedVertCount", label:"間引き後頂点数(体+アクセサリー合計、結果表示のみ)", type:"readonly"},
-  ]},
-  {tier:"Tier3(生メッシュ+画像キャッシュ利用)", items:[
-    {key:"__seamSmoothIters", label:"継ぎ目の平滑化回数", min:0,max:30,step:1,unit:"回"},
-    // ★2026-07-12バグ修正(ユーザー指摘「境界だけじゃなくて全体に広がる」):
-    // 判定に使う値は法線ベクトル由来(値域およそ[-1,1])の無次元スケールで、
-    // 「px」ではない(js/atlas.js参照)。以前はUI上0〜40pxとして見せていた
-    // ため、意味のありそうな値を入れるとほぼ全体がブレンド対象になっていた。
-    // 幅と強さ(境目ちょうどでの最大ブレンド比率)を別々に設定できるよう分離した。
-    {key:"__colorGradWidth", label:"色グラデーションの幅(境界からの距離)", min:0,max:1,step:0.01,unit:""},
-    {key:"__colorGradStrength", label:"色グラデーションの強さ(最大ブレンド比率)", min:0,max:1,step:0.05,unit:""},
-  ]},
-];
-function genParamGet(key){
-  if(key==="__seamSmoothIters") return liveSeamSmoothIters;
-  if(key==="__colorGradWidth") return liveColorGradWidth;
-  if(key==="__colorGradStrength") return liveColorGradStrength;
-  if(key==="__decimatedVertCount") return (liveDecimatedVertCount==null) ? "-" : liveDecimatedVertCount;
-  return liveGP[key];
-}
-function genParamSet(key,val){
-  if(key==="__seamSmoothIters"){ liveSeamSmoothIters=val; return; }
-  if(key==="__colorGradWidth"){ liveColorGradWidth=val; return; }
-  if(key==="__colorGradStrength"){ liveColorGradStrength=val; return; }
-  liveGP[key]=val;
-}
-let genPanelOpen={};
-function renderGenParamsPanel(){
-  const el=document.getElementById('genParamsPanel'); if(!el)return;
-  el.innerHTML=GEN_PARAM_TIERS.map(grp=>{
-    const isOpen=!!genPanelOpen[grp.tier];
-    const items=grp.items.map(it=>{
-      const cur=genParamGet(it.key);
-      let body;
-      if(it.type==="checkbox"){
-        body='<div class="prow" style="justify-content:space-between">'+
-          '<span>'+it.label+'</span><input type="checkbox" data-gkey="'+it.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px"></div>';
-        return '<div class="pitem">'+body+'</div>';
-      }else if(it.type==="readonly"){
-        body='<div class="prow" style="justify-content:space-between">'+
-          '<span>'+it.label+'</span><span data-gkey-readonly="'+it.key+'">'+cur+'</span></div>';
-        return '<div class="pitem">'+body+'</div>';
-      }else{
-        body='<div class="prow">'+
-          '<input type="range" data-gkey-range="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
-          '<input type="number" data-gkey="'+it.key+'" value="'+cur+'" min="'+it.min+'" max="'+it.max+'" step="'+it.step+'">'+
-          (it.unit?'<span class="punit">'+it.unit+'</span>':'')+'</div>';
-      }
-      return '<div class="pitem"><div class="plabel">'+it.label+'</div>'+body+'</div>';
-    }).join("");
-    return '<details class="accgroup" data-gtier="'+grp.tier+'"'+(isOpen?" open":"")+'>'+
-      '<summary><span>'+grp.tier+'</span><span class="accCount">'+grp.items.length+'項目</span></summary>'+
-      '<div class="accbody">'+items+'</div></details>';
-  }).join("");
-  [].forEach.call(el.querySelectorAll("details.accgroup"),d=>{
-    d.addEventListener("toggle",()=>{ genPanelOpen[d.dataset.gtier]=d.open; });
-  });
-  [].forEach.call(el.querySelectorAll("[data-gkey]"),inp=>{
-    const key=inp.dataset.gkey;
-    inp.onchange=()=>{
-      const v = inp.type==="checkbox" ? inp.checked : (parseFloat(inp.value)||0);
-      genParamSet(key,v);
-      const rg=el.querySelector('[data-gkey-range="'+key+'"]'); if(rg)rg.value=v;
-      scheduleGenRecompute();
-    };
-  });
-  [].forEach.call(el.querySelectorAll("[data-gkey-range]"),rg=>{
-    const key=rg.dataset.gkeyRange;
-    rg.oninput=()=>{
-      const v=parseFloat(rg.value)||0;
-      genParamSet(key,v);
-      const numEl=el.querySelector('[data-gkey="'+key+'"]'); if(numEl)numEl.value=v;
-      scheduleGenRecompute();
-    };
-  });
-}
-/* ---------- Task1: seamAngles/seamNoSideのボーン別ライブ編集 ---------- */
-// landmark_tool.htmlのBONE_GROUPS/BONE_JP/seamRowHtmlパターンをそのまま移植。
-const SEAM_DEFAULT_DEG=45;
-const BONE_JP_V={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
-  clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
-  clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
-  thigh_L:"腿L",shin_L:"すねL",foot_L:"足L",toe_L:"つま先L",
-  thigh_R:"腿R",shin_R:"すねR",foot_R:"足R",toe_R:"つま先R"};
-const BONE_GROUPS_V=[
-  {label:"体幹", bones:["hips","torso","chest","neck","head"]},
-  {label:"左腕", bones:["clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L"]},
-  {label:"右腕", bones:["clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R"]},
-  {label:"左脚", bones:["thigh_L","shin_L","foot_L","toe_L"]},
-  {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
-];
-let seamGroupOpen={};
-function seamRowHtmlV(label,key,v,ns){
-  return '<div class="acitem"><span class="nm">'+label+'</span>'+
-    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-vseam-range="'+key+'" style="flex:1;min-width:40px">'+
-    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-vseam-key="'+key+'" style="width:44px">°'+
-    '<label style="font-size:10.5px;color:var(--mut);margin-left:4px;white-space:nowrap">'+
-    '<input type="checkbox" data-vseam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面</label>'+
-    '</div>';
-}
-// ★ユーザー指摘2026-07-07:「側面画像利用は元々一括変更機能があったのに
-// なくなった」への対応。landmark_tool.htmlの旧「画像境界」タブにあった
-// 「一括設定」(全パーツ角度一括適用/側面画像を使う一括ON-OFF)をビューアの
-// 継ぎ目パネルにも移植する(Task1でボーン別の個別リストは移植済みだったが、
-// 一括操作部分が抜けていた)。
-let seamBulkOpen=false;
-function renderSeamBulkHtml(){
-  return '<details class="accgroup" data-vseamgroup="一括設定"'+(seamBulkOpen?" open":"")+'>'+
-    '<summary><span>一括設定</span><span class="accCount">2項目</span></summary>'+
-    '<div class="accbody">'+
-    '<div class="acitem" style="margin-bottom:8px">'+
-    '<span class="nm">全パーツ一括</span>'+
-    '<input type="number" id="vSeamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°'+
-    '<button class="btn sm mint" id="vSeamBulkApply">全パーツに適用</button>'+
-    '</div>'+
-    '<div class="acitem" style="flex-wrap:wrap;row-gap:6px">'+
-    '<span class="nm" style="flex:1 1 100%">側面画像を使う(一括)</span>'+
-    '<button class="btn sm mint" id="vSeamSideAllOn" style="flex:1 1 auto">全パーツON</button>'+
-    '<button class="btn sm" id="vSeamSideAllOff" style="flex:1 1 auto">全パーツOFF</button>'+
-    '</div></div></details>';
-}
-function wireSeamBulkHtml(el){
-  const bulkDetails=el.querySelector('details[data-vseamgroup="一括設定"]');
-  if(bulkDetails) bulkDetails.addEventListener("toggle",()=>{ seamBulkOpen=bulkDetails.open; });
+/* ---------- 生成調整タブ: 現在のモデルの書き出し(GLB/JSON) ---------- */
+// ★2026-07-15(モデル調整機能のジェネレータ移植): 間引き等は既にジェネレータ側で
+// 確定済みなので、ここでの「GLB書き出し」は再計算せず直近に読み込んだGLBバイト列
+// (lastModelBuf、loadGLB内で設定される)をそのまま書き出す。
+document.getElementById('exportGlbBtn').onclick=()=>{
   const statusEl=document.getElementById('genPanelStatus');
-  const accKeys=(currentPackage.parts_meta||[]).filter(p=>p.ownerId>0).map(p=>"acc:"+p.name);
-  document.getElementById('vSeamBulkApply').onclick=()=>{
-    const v=parseInt(document.getElementById('vSeamBulkVal').value,10);
-    if(!isFinite(v)||v<1||v>89){ if(statusEl)statusEl.textContent='角度は1〜89の範囲で入力してください。'; return; }
-    // ★2026-07-10: landmark_tool.html(ジェネレータ)側の同等機能(allSeamSideKeys)
-    // はボーンだけでなくアクセサリーにも角度一括適用していたが、こちらは
-    // P3D.BONESのみが対象でアクセサリーが漏れていた(ジェネレータ側の当該UIは
-    // 単純重複のため削除し、以後はビューアのこのパネルが唯一の実装になったため
-    // 差異を解消する)。
-    P3D.BONES.concat(accKeys).forEach(b=>{ if(v===SEAM_DEFAULT_DEG) delete liveSeamAngles[b]; else liveSeamAngles[b]=v; });
-    renderSeamPanel();
-    scheduleGenRecompute();
-  };
-  document.getElementById('vSeamSideAllOn').onclick=()=>{
-    liveSeamNoSide={};
-    renderSeamPanel();
-    scheduleGenRecompute();
-  };
-  document.getElementById('vSeamSideAllOff').onclick=()=>{
-    P3D.BONES.forEach(b=>{ liveSeamNoSide[b]=true; });
-    accKeys.forEach(k=>{ liveSeamNoSide[k]=true; });
-    renderSeamPanel();
-    scheduleGenRecompute();
-  };
-}
-function buildSeamGroupsHtml(accKeys){
-  const boneGroupsHtml=BONE_GROUPS_V.map(grp=>{
-    const rows=grp.bones.map(b=>{
-      const v=(liveSeamAngles[b]!==undefined)?liveSeamAngles[b]:SEAM_DEFAULT_DEG;
-      return seamRowHtmlV(BONE_JP_V[b]||b,b,v,!!liveSeamNoSide[b]);
-    }).join("");
-    const isOpen=!!seamGroupOpen[grp.label];
-    return '<details class="accgroup" data-vseamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
-      '<summary><span>継ぎ目: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
-      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
-  }).join("");
-  let accHtml="";
-  if(accKeys.length){
-    const rows=accKeys.map(key=>{
-      const v=(liveSeamAngles[key]!==undefined)?liveSeamAngles[key]:SEAM_DEFAULT_DEG;
-      return seamRowHtmlV(key.replace(/^acc:/,""),key,v,!!liveSeamNoSide[key]);
-    }).join("");
-    const isOpen=!!seamGroupOpen["アクセサリー"];
-    accHtml='<details class="accgroup" data-vseamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
-      '<summary><span>継ぎ目: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
-      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
-  }
-  return boneGroupsHtml+accHtml;
-}
-function wireSeamPanelEvents(el){
-  [].forEach.call(el.querySelectorAll("details[data-vseamgroup]:not([data-vseamgroup='一括設定'])"),d=>{
-    d.addEventListener("toggle",()=>{ seamGroupOpen[d.dataset.vseamgroup]=d.open; });
-  });
-  function setAngle(key,n){
-    if(!isFinite(n)||n<1||n>89) return;
-    liveSeamAngles[key]=n;
-  }
-  [].forEach.call(el.querySelectorAll("[data-vseam-key]"),inp=>{
-    inp.onchange=()=>{
-      const key=inp.dataset.vseamKey, n=parseInt(inp.value,10);
-      setAngle(key,n);
-      const rg=el.querySelector('[data-vseam-range="'+key+'"]'); if(rg)rg.value=inp.value;
-      scheduleGenRecompute();
-    };
-  });
-  [].forEach.call(el.querySelectorAll("[data-vseam-range]"),rg=>{
-    rg.oninput=()=>{
-      const key=rg.dataset.vseamRange, n=parseInt(rg.value,10);
-      setAngle(key,n);
-      const numEl=el.querySelector('[data-vseam-key="'+key+'"]'); if(numEl)numEl.value=rg.value;
-      scheduleGenRecompute();
-    };
-  });
-  [].forEach.call(el.querySelectorAll("[data-vseam-side]"),cb=>{
-    cb.onchange=()=>{
-      const key=cb.dataset.vseamSide;
-      if(cb.checked) delete liveSeamNoSide[key]; else liveSeamNoSide[key]=true;
-      scheduleGenRecompute();
-    };
-  });
-}
-function renderSeamPanel(){
-  const el=document.getElementById('genSeamPanel'); if(!el || !liveSeamAngles)return;
-  const accKeys=(currentPackage.parts_meta||[]).filter(p=>p.ownerId>0).map(p=>"acc:"+p.name);
-  el.innerHTML=renderSeamBulkHtml()+buildSeamGroupsHtml(accKeys);
-  wireSeamBulkHtml(el);
-  wireSeamPanelEvents(el);
-}
-let genRecomputeTimer=null, genRecomputeBusy=false, genRecomputeQueued=false;
-function scheduleGenRecompute(){
-  clearTimeout(genRecomputeTimer);
-  genRecomputeTimer=setTimeout(doGenRecompute, 250);
-}
-// doGenRecompute()(自動更新)とexportGlbBtn(手動書き出し)の両方が同じ
-// ライブ調整状態からGLBを焼き直すため、finishFromIntermediate()に渡す
-// パラメータオブジェクトをここに集約する(重複定義でどちらかの更新漏れを防ぐ)。
-function currentLiveParams(){
-  return {gp: liveGP, seamAngles: liveSeamAngles, seamNoSide: liveSeamNoSide,
-    seamSmoothIters: liveSeamSmoothIters, colorGradWidth: liveColorGradWidth,
-    colorGradStrength: liveColorGradStrength};
-}
-async function doGenRecompute(){
-  if(!currentPackage) return;
-  if(genRecomputeBusy){ genRecomputeQueued=true; return; }
-  genRecomputeBusy=true;
-  const statusEl=document.getElementById('genPanelStatus');
-  try{
-    statusEl.textContent='更新中…';
-    const glb=await P3D.finishFromIntermediate(currentPackage, currentLiveParams(),
-      (label)=>{ statusEl.textContent='更新中: '+label; });
-    updateDecimatedVertCount();
-    // ★フルre-render(renderGenParamsPanel())ではなく該当spanだけ書き換える。
-    // doGenRecompute()はスライダー操作中にデバウンス経由で呼ばれるため、
-    // innerHTMLを丸ごと差し替えると操作中の要素のフォーカスが失われる。
-    const decCountEl=document.querySelector('[data-gkey-readonly="__decimatedVertCount"]');
-    if(decCountEl) decCountEl.textContent=genParamGet("__decimatedVertCount");
-    lastModelBuf=glb;
-    loadGLB(glb, undefined, false, true); // keepView=true: 視点を維持したまま差し替え
-    statusEl.textContent='';
-  }catch(e){
-    console.error(e);
-    statusEl.textContent='更新に失敗しました: '+((e&&e.message)||e);
-  }finally{
-    genRecomputeBusy=false;
-    if(genRecomputeQueued){ genRecomputeQueued=false; doGenRecompute(); }
-  }
-}
-
-/* ---------- フェーズ3: ビューアからの最終出力(GLB/JSON) ---------- */
-// 「GLB書き出し」: 現在のライブ調整状態(liveGP/liveSeamSmoothIters/
-// liveColorGradWidth)から改めてfinishFromIntermediate()でGLBを焼き直して
-// ダウンロードする(直近の自動更新がデバウンス待ち/実行中でも、押した時点の
-// 値で確実に最新のGLBを書き出すため、lastModelBufに頼らず明示的に再計算する)。
-document.getElementById('exportGlbBtn').onclick=async()=>{
-  if(!currentPackage){ document.getElementById('genPanelStatus').textContent='中間パッケージがありません(通常モードで読み込んだGLBは書き出し対象外です。「モデル」タブの「モデルを保存」をお使いください)。'; return; }
-  const statusEl=document.getElementById('genPanelStatus');
-  try{
-    statusEl.textContent='GLBを書き出し中…';
-    const glb=await P3D.finishFromIntermediate(currentPackage, currentLiveParams(),
-      (label)=>{ statusEl.textContent='書き出し中: '+label; });
-    lastModelBuf=glb;
-    const blob=new Blob([glb],{type:'model/gltf-binary'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    statusEl.textContent='GLBを書き出しました。';
-  }catch(e){
-    console.error(e);
-    statusEl.textContent='GLB書き出しに失敗しました: '+((e&&e.message)||e);
-  }
+  if(!lastModelBuf){ statusEl.textContent='モデルが読み込まれていません。'; return; }
+  const blob=new Blob([lastModelBuf],{type:'model/gltf-binary'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model.glb';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  statusEl.textContent='GLBを書き出しました。';
 };
 
 // 「JSON書き出し/コピー」: currentPackage.landmarks_json(landmark_tool.htmlの
-// buildJson()の戻り値そのもの)をベースに、ビューアでライブ調整した
-// gen_params/seam_smooth_iters/color_grad_widthフィールドだけを上書きして
-// landmarks_ai.json形式で出力する(landmark_tool.htmlのexportJson/copyJsonと
-// 同等のUI/挙動)。seam_angles/seam_no_sideはフェーズ2の対象外(生成時点の値の
-// まま)のため上書きしない。
-function buildLiveJson(){
-  const base=currentPackage.landmarks_json || {};
-  return Object.assign({}, base, {
-    gen_params: Object.assign({}, base.gen_params||{}, liveGP),
-    seam_smooth_iters: liveSeamSmoothIters,
-    color_grad_width: liveColorGradWidth,
-    color_grad_strength: liveColorGradStrength,
-    seam_angles: Object.assign({}, liveSeamAngles),
-    seam_no_side: Object.assign({}, liveSeamNoSide),
-  });
-}
+// buildJson()の戻り値そのもの、モデル調整パラメータも生成時点の値を含む)を
+// そのままlandmarks_ai.json形式で出力する。
 document.getElementById('exportJsonBtn').onclick=()=>{
   const statusEl=document.getElementById('genPanelStatus');
-  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
-  const str=JSON.stringify(buildLiveJson(),null,1), blob=new Blob([str],{type:"application/json"});
+  if(!currentPackage || !currentPackage.landmarks_json){ statusEl.textContent='中間データがありません。'; return; }
+  const str=JSON.stringify(currentPackage.landmarks_json,null,1), blob=new Blob([str],{type:"application/json"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="landmarks_ai.json";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
@@ -1002,8 +633,8 @@ document.getElementById('exportJsonBtn').onclick=()=>{
 };
 document.getElementById('copyJsonBtn').onclick=async()=>{
   const statusEl=document.getElementById('genPanelStatus');
-  if(!currentPackage){ statusEl.textContent='中間パッケージがありません。'; return; }
-  const str=JSON.stringify(buildLiveJson(),null,1);
+  if(!currentPackage || !currentPackage.landmarks_json){ statusEl.textContent='中間データがありません。'; return; }
+  const str=JSON.stringify(currentPackage.landmarks_json,null,1);
   try{ await navigator.clipboard.writeText(str); statusEl.textContent='JSONをコピーしました。'; }
   catch(_){
     const t=document.createElement("textarea"); t.value=str; document.body.appendChild(t); t.select();
@@ -1116,40 +747,11 @@ document.getElementById('download').onclick=()=>{
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 };
-// ★2026-07-10: ジェネレータ→「モデル生成」→ビューアでライブ編集(丸み/
-// 継ぎ目設定等)→「戻る」の往復で、ビューア側の編集結果がジェネレータの
-// 自動保存セッションに反映されず消えてしまっていた(ユーザー指摘)。
-// currentPackage.landmarks_json(ジェネレータのbuildJson()スナップショット)に
-// ライブ値を上書きしたものを、ジェネレータと同じlocalStorageキー
-// (P3D.sessionStorageKey、js/common.js)へ書き戻してから遷移する。
-// currentPackageが無い(直接ビューアを開いた/ビューア専用サンプルを見ている
-// 等、ジェネレータ側に対応するセッションが元々存在しないケース)場合は何もしない。
-// ★2026-07-11バグ修正(重大): currentPackage.landmarks_jsonはジェネレータの
-// buildJson()スナップショットそのもので、front/side/back/leftSideの実画像+
-// 色分けマップを丸ごとbase64で含んでいる。そのままlocalStorageへ書き戻すと
-// QuotaExceededErrorで保存自体が毎回(無言で)失敗し、「戻る」で行き来すると
-// 設定値が消える不具合の原因になっていた(ユーザー指摘)。
-// P3D.stripHeavyFieldsForSessionSave(js/common.js)で画像・色分けマップを
-// 除いてから書き戻す(ジェネレータ側は画像・色分けマップを自前の経路
-// (サンプルの固定アセット/通常モードのIndexedDB)から復元できるため不要)。
-function saveLiveSettingsToGeneratorSession(){
-  if(!currentPackage || !currentPackage.landmarks_json || !currentPackage.session_mode) return;
-  try{
-    const stripped=P3D.stripHeavyFieldsForSessionSave(currentPackage.landmarks_json);
-    const json=Object.assign({}, stripped, {
-      gen_params: Object.assign({}, liveGP),
-      seam_angles: Object.assign({}, liveSeamAngles),
-      seam_no_side: Object.assign({}, liveSeamNoSide),
-      seam_smooth_iters: liveSeamSmoothIters,
-      color_grad_width: liveColorGradWidth,
-      color_grad_strength: liveColorGradStrength,
-    });
-    const key=P3D.sessionStorageKey(currentPackage.session_mode, currentPackage.session_sample_id);
-    localStorage.setItem(key, JSON.stringify(json));
-  }catch(e){ console.warn("ジェネレータセッションへの書き戻しに失敗しました:", e); }
-}
+// ★2026-07-15(モデル調整機能のジェネレータ移植): モデル調整(間引き・継ぎ目
+// 設定等)は生成ボタンを押した時点でジェネレータ側に確定済みで、ビューアには
+// ライブ編集結果が存在しなくなったため、以前あった「戻る」時のジェネレータ
+// セッションへの書き戻し(saveLiveSettingsToGeneratorSession)は不要になった。
 document.getElementById('backToLandmark').onclick=()=>{
-  saveLiveSettingsToGeneratorSession();
   location.href='landmark_tool.html';
 };
 document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };

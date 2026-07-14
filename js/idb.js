@@ -15,75 +15,37 @@ function openDb(){
     req.onerror = function(){ reject(req.error); };
   });
 }
-// ★フェーズ1(2026-07-07〜): 契約を「完成GLBのArrayBuffer」から「中間パッケージ」
-// (元landmarks_ai.json全体+彫刻直後の生メッシュ+prep/bleed済み画像+骨格ピボット)
-// に変更した(破壊的変更。character_3d.html側もpackage形式を前提に読む)。
-// canvas要素はstructured cloneできないため、保存時にBlob(toBlob)へ変換して
-// {width,height,blob}の形でIndexedDBへ入れる。読み込み側(loadGeneratedModel)
-// はBlobから元のHTMLCanvasElementを復元してから返す。
+// ★2026-07-15(ユーザー指摘「1px/1pxにするとビューアが重すぎる、間引き等の
+// モデル調整機能はジェネレータに移した方がいい」対応): フェーズ1〜2で採用して
+// いた「彫刻直後の生メッシュ+画像一式を渡し、ビューア側でfinishFromIntermediate()
+// を呼んでライブに間引き/平滑化/継ぎ目調整する」方式(中間パッケージ)を廃止し、
+// 契約を元(2026-07-07以前)の「完成GLBのArrayBuffer」に戻した。間引き等の
+// モデル調整パラメータはlandmark_tool.html(ジェネレータ)側に移植済みで、
+// 生成ボタンを押した時点でfinishFromIntermediate()まで完了させてから保存する。
+// ビューアは完成メッシュを表示するだけになり、生メッシュ・画像一式を保持する
+// 必要が無くなった(IndexedDB転送量・ビューア初期化の負荷が大幅に減る)。
 // package: {
-//   landmarks_json: object,           // buildJson()の戻り値そのもの(元JSON全体)
-//   raw_unified: {V:Float32Array, F:Uint32Array, owner:Int32Array},
-//     // ★2026-07-11: 体+全アクセサリーを統合彫刻した直後・間引き/平滑化前の
-//     // 継ぎ目のない1枚のメッシュ(以前はraw_body/raw_accessoriesという分割
-//     // 済みの形だったが、パーツ分割を間引き・平滑化の後まで遅らせるよう
-//     // 変更したため統合形のまま保持する。ownerは頂点ごとの所属パーツID)。
-//   parts_meta: [{ownerId,name,mode,bones}, ...],
-//     // ownerId=0が体、1以降が各アクセサリー(raw_unified.ownerと対応)。
-//   bled_canvases: {front,back,side}, // 保存時はHTMLCanvasElement、読み込み後もHTMLCanvasElementに復元
-//   pivots: object,
-//   calib: {SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF},
-//   gen_params, seam_angles, seam_no_side, seam_smooth_iters, color_grad_width,
-//   color_grad_strength,
+//   glb: ArrayBuffer,                 // 完成GLB(finishFromIntermediate()の戻り値そのもの)
+//   landmarks_json: object,           // buildJson()の戻り値そのもの(「JSON書き出し」用)
+//   session_mode, session_sample_id,  // ビューアの「戻る」でジェネレータへ遷移するだけの情報
 // }
-function canvasToBlobEntry(canvas){
-  return new Promise(function(resolve,reject){
-    canvas.toBlob(function(blob){
-      if(!blob){ reject(new Error("canvas.toBlobに失敗しました")); return; }
-      resolve({width:canvas.width, height:canvas.height, blob:blob});
-    }, "image/png");
-  });
-}
-function blobEntryToCanvas(entry){
-  return new Promise(function(resolve,reject){
-    var img = new Image();
-    img.onload=function(){
-      var c=document.createElement("canvas"); c.width=entry.width; c.height=entry.height;
-      c.getContext("2d").drawImage(img,0,0);
-      resolve(c);
-    };
-    img.onerror=function(e){ reject(e); };
-    img.src = URL.createObjectURL(entry.blob);
-  });
-}
 async function saveGeneratedModel(pkg){
-  var bled = {};
-  for(var v of ["front","side","back"]){
-    if(pkg.bled_canvases && pkg.bled_canvases[v]) bled[v] = await canvasToBlobEntry(pkg.bled_canvases[v]);
-  }
-  var toStore = Object.assign({}, pkg, {bled_canvases: bled});
   var db = await openDb();
   return new Promise(function(resolve,reject){
     var tx = db.transaction(STORE,'readwrite');
-    tx.objectStore(STORE).put(toStore, KEY);
+    tx.objectStore(STORE).put(pkg, KEY);
     tx.oncomplete=function(){resolve();};
     tx.onerror=function(){reject(tx.error);};
   });
 }
 async function loadGeneratedModel(){
   var db = await openDb();
-  var raw = await new Promise(function(resolve,reject){
+  return new Promise(function(resolve,reject){
     var tx = db.transaction(STORE,'readonly');
     var req = tx.objectStore(STORE).get(KEY);
     req.onsuccess=function(){resolve(req.result||null);};
     req.onerror=function(){reject(req.error);};
   });
-  if(!raw) return null;
-  var bled = {};
-  for(var v of ["front","side","back"]){
-    if(raw.bled_canvases && raw.bled_canvases[v]) bled[v] = await blobEntryToCanvas(raw.bled_canvases[v]);
-  }
-  return Object.assign({}, raw, {bled_canvases: bled});
 }
 async function clearGeneratedModel(){
   var db = await openDb();

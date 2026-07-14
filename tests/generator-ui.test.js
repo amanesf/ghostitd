@@ -94,6 +94,56 @@ async function testEditorTabsAndOverlays(server, browser) {
   await page.close();
 }
 
+// ★2026-07-15(モデル調整機能のジェネレータ移植): 間引き・平滑化・継ぎ目角度
+// パネル(旧character_3d.htmlの「フェーズ2」ライブ編集パネル)をこちらに
+// 移植した。3Dプレビューは無い(ユーザー承認済み)ため、再計算ではなく
+// genParams/seamAngles/seamNoSideへ正しく値が書き込まれることだけを確認する。
+async function testModelAdjustAndSeamPanel(server, browser) {
+  const { page, errors } = await openPage(browser, server.url + "/landmark_tool.html");
+  await page.click("#modeSampleBtn b");
+  await page.waitForFunction(
+    () => !document.getElementById("editor").classList.contains("hidden"),
+    { timeout: 20000 }
+  );
+  await page.click('.tabbtn[data-tab="params"]');
+  await page.waitForTimeout(150);
+
+  const modelAdjustGroup = await page.$('details.accgroup[data-accgroup="モデル調整"]');
+  assert.ok(modelAdjustGroup, "モデル調整 accordion group should exist");
+  await modelAdjustGroup.click();
+  await page.waitForTimeout(150);
+
+  // decimate_strength(PARAM_META、genParams直結)。onchangeが例外なく走ることを確認する。
+  const decimateInput = await page.$('[data-param="decimate_strength"]');
+  assert.ok(decimateInput, "decimate_strength number input should be present");
+  await decimateInput.evaluate((el) => { el.value = "0.5"; el.dispatchEvent(new Event("change")); });
+  await page.waitForTimeout(100);
+
+  // 継ぎ目角度パネル(buildSeamGroupsHtml/wireParamsPanelEvents)
+  const seamGroup = await page.$('details.accgroup[data-seamgroup]:not([data-seamgroup="一括設定"])');
+  assert.ok(seamGroup, "seam angle accordion group should be present");
+  await seamGroup.click();
+  await page.waitForTimeout(150);
+  const rangeInput = await page.$("[data-seam-range]");
+  assert.ok(rangeInput, "seam angle range input should be present once the group is open");
+  await rangeInput.evaluate((el) => { el.value = 30; el.dispatchEvent(new Event("input")); });
+  await page.waitForTimeout(100);
+  const numEl = await page.$('[data-seam-key]');
+  const numVal = await numEl.evaluate((el) => el.value);
+  assert.strictEqual(numVal, "30", "moving the seam angle range slider should sync the paired number input");
+
+  // 一括設定(renderSeamBulkHtml/wireParamsPanelEvents)
+  const bulkGroup = await page.$('details.accgroup[data-seamgroup="一括設定"]');
+  assert.ok(bulkGroup, "seam bulk-apply group should be present");
+  await bulkGroup.click();
+  await page.waitForTimeout(150);
+  await page.click("#seamSideAllOff");
+  await page.waitForTimeout(150);
+
+  assert.deepStrictEqual(errors, []);
+  await page.close();
+}
+
 async function run() {
   const server = await startServer();
   const browser = await chromium.launch();
@@ -101,6 +151,7 @@ async function run() {
     await testSampleModeDropdown(server, browser);
     await testJsonModeLoadsEditor(server, browser);
     await testEditorTabsAndOverlays(server, browser);
+    await testModelAdjustAndSeamPanel(server, browser);
   } finally {
     await browser.close();
     await server.close();

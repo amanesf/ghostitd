@@ -1,8 +1,11 @@
 // -*- coding: utf-8 -*-
 // character_3d.html(ビューア)のUI回帰テスト。
 // dispose漏れ修正(clearModel/rebuildOutlines)やLong Method分割
-// (loadGLB/applyMeshMaterials/setupMotionDropdown, renderSeamPanel)の
-// 再構築パスを重点的に踏む。
+// (loadGLB/applyMeshMaterials/setupMotionDropdown)の再構築パスを重点的に
+// 踏む。
+// ★2026-07-15(モデル調整機能のジェネレータ移植): 生成モデルの継ぎ目角度
+// パネル(旧・生成調整タブのライブ編集)はlandmark_tool.html側に移った
+// ため、そちらのテスト(tests/generator-ui.test.js)に移動した。
 "use strict";
 const assert = require("assert");
 const { chromium } = require("playwright");
@@ -69,7 +72,10 @@ async function testSampleLoadAndMaterialToggles(server, browser) {
   await page.close();
 }
 
-async function testGeneratedModelSeamPanel(server, browser) {
+async function testGeneratedModelExportTab(server, browser) {
+  // ★2026-07-15(モデル調整機能のジェネレータ移植): 生成モデルは既に完成GLBの
+  // 状態でビューアに渡ってくる(landmark_tool.html側でfinishFromIntermediate()
+  // まで完了済み)。ビューアの「書き出し」タブはGLB/JSON再書き出し専用になった。
   const { page, errors } = await openPage(browser, server.url + "/landmark_tool.html");
   await page.click("#modeSampleBtn b");
   await page.waitForTimeout(1500);
@@ -89,16 +95,16 @@ async function testGeneratedModelSeamPanel(server, browser) {
   await page.click("#genTabBtn");
   await page.waitForTimeout(300);
 
-  // buildSeamGroupsHtml/wireSeamPanelEvents: アコーディオンを開いてスライダーを動かし、
-  // ライブ再構築(doGenRecompute/scheduleGenRecompute)が例外なく走ることを確認する
-  const seamGroup = await page.$('details[data-vseamgroup]:not([data-vseamgroup="一括設定"])');
-  assert.ok(seamGroup, "seam angle accordion group should be present for a generated model");
-  await seamGroup.click();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.click("#exportGlbBtn"),
+  ]);
+  assert.strictEqual(download.suggestedFilename(), "model.glb", "export button should re-serve the already-finished GLB");
+
+  await page.click("#exportJsonBtn");
   await page.waitForTimeout(200);
-  const rangeInput = await page.$("[data-vseam-range]");
-  assert.ok(rangeInput, "seam angle range input should be present once the group is open");
-  await rangeInput.evaluate((el) => { el.value = 30; el.dispatchEvent(new Event("input")); });
-  await page.waitForTimeout(1500);
+  const status = await page.$eval("#genPanelStatus", (el) => el.textContent);
+  assert.ok(status.includes("landmarks_ai.json"), "JSON export should report success: " + status);
 
   assert.deepStrictEqual(errors, []);
   await page.close();
@@ -110,7 +116,7 @@ async function run() {
   try {
     await testSampleDropdown(server, browser);
     await testSampleLoadAndMaterialToggles(server, browser);
-    await testGeneratedModelSeamPanel(server, browser);
+    await testGeneratedModelExportTab(server, browser);
   } finally {
     await browser.close();
     await server.close();

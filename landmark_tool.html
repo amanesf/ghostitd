@@ -619,18 +619,32 @@ const PARAM_META=[
   desc:"左右非対称キャラ用のleftSide(左向き側面)画像のズレ補正。意味・使い方はside_offset_xと同じ(mask.leftSideを持つアクセサリーだけに影響する。全身の奥行きは常にside(右)画像のみを使い、leftSideは使わない)。"},
  {group:"背面/側面ズレ補正", key:"leftside_offset_y", label:"側面(左)画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
   desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ // ★2026-07-15(ユーザー指摘「1px/1pxにするとビューアが重すぎる、間引き等の
+ // モデル調整機能はジェネレータに移した方がいい」対応): 2026-07-07〜07-12は
+ // 「生成」を彫刻直後の生メッシュまでで止め、平滑化/間引き/継ぎ目調整は
+ // character_3d.html(ビューア)側でライブプレビューしながら編集する方式に
+ // していた。しかしジェネレータには元々3Dプレビュー機能が無く(2D画像+
+ // ランドマーク編集専用のcanvasのみ)、ビューア側で見た目確認しながら調整
+ // できることが利点だった。今回、体格によっては生メッシュが非常に大きくなり
+ // (1px/1px設定で数十万頂点)、ビューアがその生メッシュを保持したまま毎回
+ // 間引き直す設計がビューアを重くする原因になったため、この設計をやめ、
+ // 「生成」ボタンを押した時点でfinishFromIntermediate()まで完了させ、完成
+ // GLBだけをビューアに渡すよう戻した(js/idb.jsのコメント参照)。見た目確認
+ // しながらの調整はできなくなるが、値はここで数値入力して決め、結果は
+ // ビューアで確認する運用になる(ユーザー承認済み)。
+ {group:"モデル調整", key:"smooth_iters", label:"表面平滑化回数(体+アクセサリー共通)", type:"number", min:0, max:60, step:1, unit:"回"},
+ {group:"モデル調整", key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", type:"number", min:0, max:0.8, step:0.05, unit:""},
+ {group:"モデル調整", key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", type:"number", min:50, max:1000, step:10, unit:"KB"},
+ {group:"モデル調整", key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
+ {group:"モデル調整", key:"decimate_strength", label:"間引きの強さ(体+アクセサリー共通)", type:"number", min:0, max:1, step:0.01, unit:"",
+  desc:"誤差ベースの間引き強度(js/carving.jsのstrengthToMaxCost参照)。大きいほど強く間引かれ頂点数が減る。decimateがONの時のみ有効。"},
 ];
-// ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): smooth_iters/
-// rigid_soft_width/kb_per_face(Tier1)、decimate/decimate_strength(Tier2、
-// ★2026-07-11: 体+アクセサリー別だったbody_*/acc_*を統合。
-// ★2026-07-12: target_vertsをdecimate_strengthに置き換え)は、生成後の
-// character_3d.html(ビューア)側で彫刻をやり直さずライブ編集できるように
-// なったため、このPARAM_META(生成前の設定パネル)からは編集UIを削除した。
-// ただしgenParams自体(DEFAULT_GEN_PARAMSの値)は従来通りbuildJson()経由で
-// intermediateパッケージに含まれ、ビューアの初期値として使われる
-// (データは残す、UIのみ削除)。
-// ★2026-07-09(UIレビュー): arm_tolも同様の理由でUIから削除した。旧・行スキャン
-// 方式でしか使われておらず、現在の列スキャン方式(arm_circle)では一切参照されない
+// ★2026-07-15: seam_smooth_iters/color_grad_width/color_grad_strengthは
+// genParams(DEFAULT_GEN_PARAMS)ではなく別建ての変数(seamSmoothIters等、下記)
+// なので、上のPARAM_META(genParams専用の仕組み)には載せられない。継ぎ目角度
+// パネル(seamAngles/seamNoSide)と合わせてrenderSeamPanel()で個別に描画する。
+// ★2026-07-09(UIレビュー): arm_tolはUIから削除した。旧・行スキャン方式でしか
+// 使われておらず、現在の列スキャン方式(arm_circle)では一切参照されない
 // (js/common.jsのDEFAULT_GEN_PARAMSにはarm_tol:0.06のまま残す。互換性のため)。
 let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
 // カテゴリごとのアコーディオン開閉状態(既定は全部閉じる)。再描画(個別リセット等)を
@@ -729,6 +743,80 @@ function renderVoxPxHelperHtml(){
     '<button type="button" class="btn sm" id="voxFitPxBtn" style="margin-top:6px">縦方向ボクセルを1pxに合わせる(推奨値 '+fitVox.toFixed(5)+')</button>'+
     '</div>';
 }
+// ★2026-07-15(モデル調整機能のジェネレータ移植): character_3d.htmlの
+// 「フェーズ2」ライブ継ぎ目パネル(seamAngles/seamNoSide、BONE_GROUPS_V/
+// BONE_JP_Vを使ったボーン別編集+一括設定)をこちらに移植したもの。
+// BONE_GROUPS/BONE_JP/seamAngles/seamNoSide/SEAM_SIDE_DEFAULT_DEGは元々
+// このファイルに存在する(自動マスクタブのボーン選択等と共有)ため、新規に
+// 定義し直さずそのまま使う。ジェネレータには3Dプレビューが無いため、値を
+// 変えても再計算はせず(scheduleGenRecompute相当は無し)、生成ボタンを押した
+// 時点でfinishFromIntermediate()に渡る。
+let seamGroupOpen={}, seamBulkOpen=false;
+function seamRowHtml(label,key,v,ns){
+  return '<div class="acitem"><span class="nm">'+label+'</span>'+
+    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-seam-range="'+key+'" style="flex:1;min-width:40px">'+
+    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-seam-key="'+key+'" style="width:44px">°'+
+    '<label style="font-size:10.5px;color:var(--mut);margin-left:4px;white-space:nowrap">'+
+    '<input type="checkbox" data-seam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面</label>'+
+    '</div>';
+}
+function seamAccKeys(){ return accessories.map(a=>"acc:"+a.name); }
+function renderSeamBulkHtml(){
+  return '<details class="accgroup" data-seamgroup="一括設定"'+(seamBulkOpen?" open":"")+'>'+
+    '<summary><span>継ぎ目角度: 一括設定</span><span class="accCount">2項目</span></summary>'+
+    '<div class="accbody">'+
+    '<div class="acitem" style="margin-bottom:8px">'+
+    '<span class="nm">全パーツ一括</span>'+
+    '<input type="number" id="seamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°'+
+    '<button type="button" class="btn sm mint" id="seamBulkApply">全パーツに適用</button>'+
+    '</div>'+
+    '<div class="acitem" style="flex-wrap:wrap;row-gap:6px">'+
+    '<span class="nm" style="flex:1 1 100%">側面画像を使う(一括)</span>'+
+    '<button type="button" class="btn sm mint" id="seamSideAllOn" style="flex:1 1 auto">全パーツON</button>'+
+    '<button type="button" class="btn sm" id="seamSideAllOff" style="flex:1 1 auto">全パーツOFF</button>'+
+    '</div></div></details>';
+}
+function buildSeamGroupsHtml(){
+  const boneGroupsHtml=BONE_GROUPS.map(grp=>{
+    const rows=grp.bones.map(b=>{
+      const v=(seamAngles[b]!==undefined)?seamAngles[b]:SEAM_SIDE_DEFAULT_DEG;
+      return seamRowHtml(BONE_JP[b]||b,b,v,!!seamNoSide[b]);
+    }).join("");
+    const isOpen=!!seamGroupOpen[grp.label];
+    return '<details class="accgroup" data-seamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目角度: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }).join("");
+  const accKeys=seamAccKeys();
+  let accHtml="";
+  if(accKeys.length){
+    const rows=accKeys.map(key=>{
+      const v=(seamAngles[key]!==undefined)?seamAngles[key]:SEAM_SIDE_DEFAULT_DEG;
+      return seamRowHtml(key.replace(/^acc:/,""),key,v,!!seamNoSide[key]);
+    }).join("");
+    const isOpen=!!seamGroupOpen["アクセサリー"];
+    accHtml='<details class="accgroup" data-seamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
+      '<summary><span>継ぎ目角度: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }
+  return boneGroupsHtml+accHtml;
+}
+function renderSeamPanelHtml(){
+  const extraFields=[
+    {key:"seamSmoothIters", label:"継ぎ目の平滑化回数", val:seamSmoothIters, min:0,max:30,step:1,unit:"回"},
+    {key:"colorGradWidth", label:"色グラデーションの幅(境界からの距離)", val:colorGradWidth, min:0,max:1,step:0.01,unit:""},
+    {key:"colorGradStrength", label:"色グラデーションの強さ(最大ブレンド比率)", val:colorGradStrength, min:0,max:1,step:0.05,unit:""},
+  ].map(f=>'<div class="acform" style="margin-bottom:6px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">'+f.label+'</div>'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<input type="range" data-seamfield-range="'+f.key+'" value="'+f.val+'" min="'+f.min+'" max="'+f.max+'" step="'+f.step+'" style="flex:1;min-width:60px">'+
+    '<input type="number" data-seamfield="'+f.key+'" value="'+f.val+'" min="'+f.min+'" max="'+f.max+'" step="'+f.step+'" style="width:78px;flex:0 0 auto">'+
+    (f.unit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+f.unit+'</span>':"")+
+    '</div></div>').join("");
+  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">テクスチャ継ぎ目</div>'+
+    extraFields+renderSeamBulkHtml()+buildSeamGroupsHtml()+'</div>';
+}
 // ★2026-07-14追加(ユーザー指摘「設定値のモデル単位は全部px表記にしてほしい、
 // モデル単位だとわからない」): PARAM_METAでpxUnit:trueが付いた項目(元は
 // unit:"(model単位)"だった距離系パラメータ)は、model単位の生値はそのまま
@@ -786,6 +874,7 @@ function buildParamsPanelHtml(){
       '</summary><div class="accbody">'+items+
       (g==="断面の丸み具合"?renderPsqAccessoryOverridesHtml():"")+
       (g==="解像度/軽量化"?renderVoxPxHelperHtml():"")+
+      (g==="モデル調整"?renderSeamPanelHtml():"")+
       '</div></details>';
   }).join("");
 }
@@ -873,6 +962,73 @@ function wireParamsPanelEvents(el){
   [].forEach.call(el.querySelectorAll(".psqAccNum"),num=>{
     num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||2); };
   });
+  // テクスチャ継ぎ目パネル(renderSeamPanelHtml)の配線。
+  [].forEach.call(el.querySelectorAll("details.accgroup[data-seamgroup]"),d=>{
+    d.addEventListener("toggle",()=>{
+      if(d.dataset.seamgroup==="一括設定") seamBulkOpen=d.open;
+      else seamGroupOpen[d.dataset.seamgroup]=d.open;
+    });
+  });
+  [].forEach.call(el.querySelectorAll("[data-seamfield]"),inp=>{
+    const key=inp.dataset.seamfield;
+    inp.onchange=()=>{
+      const n=parseFloat(inp.value);
+      if(key==="seamSmoothIters") seamSmoothIters=isFinite(n)?n:0;
+      else if(key==="colorGradWidth") colorGradWidth=isFinite(n)?n:0;
+      else if(key==="colorGradStrength") colorGradStrength=isFinite(n)?n:0.5;
+      const rg=el.querySelector('[data-seamfield-range="'+key+'"]'); if(rg)rg.value=inp.value;
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-seamfield-range]"),rg=>{
+    const key=rg.dataset.seamfieldRange;
+    rg.oninput=()=>{
+      const n=parseFloat(rg.value);
+      if(key==="seamSmoothIters") seamSmoothIters=isFinite(n)?n:0;
+      else if(key==="colorGradWidth") colorGradWidth=isFinite(n)?n:0;
+      else if(key==="colorGradStrength") colorGradStrength=isFinite(n)?n:0.5;
+      const numEl=el.querySelector('[data-seamfield="'+key+'"]'); if(numEl)numEl.value=rg.value;
+    };
+  });
+  function setSeamAngle(key,n){
+    if(!isFinite(n)||n<1||n>89) return;
+    seamAngles[key]=n;
+  }
+  [].forEach.call(el.querySelectorAll("[data-seam-key]"),inp=>{
+    inp.onchange=()=>{
+      const key=inp.dataset.seamKey, n=parseInt(inp.value,10);
+      setSeamAngle(key,n);
+      const rg=el.querySelector('[data-seam-range="'+key+'"]'); if(rg)rg.value=inp.value;
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-seam-range]"),rg=>{
+    rg.oninput=()=>{
+      const key=rg.dataset.seamRange, n=parseInt(rg.value,10);
+      setSeamAngle(key,n);
+      const numEl=el.querySelector('[data-seam-key="'+key+'"]'); if(numEl)numEl.value=rg.value;
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-seam-side]"),cb=>{
+    cb.onchange=()=>{
+      const key=cb.dataset.seamSide;
+      if(cb.checked) delete seamNoSide[key]; else seamNoSide[key]=true;
+    };
+  });
+  const seamBulkApplyBtn=el.querySelector("#seamBulkApply");
+  if(seamBulkApplyBtn){
+    const accKeys=seamAccKeys();
+    seamBulkApplyBtn.onclick=()=>{
+      const v=parseInt(el.querySelector("#seamBulkVal").value,10);
+      if(!isFinite(v)||v<1||v>89) return;
+      BONES.concat(accKeys).forEach(b=>{ if(v===SEAM_SIDE_DEFAULT_DEG) delete seamAngles[b]; else seamAngles[b]=v; });
+      renderParamsPanel();
+    };
+    el.querySelector("#seamSideAllOn").onclick=()=>{ seamNoSide={}; renderParamsPanel(); };
+    el.querySelector("#seamSideAllOff").onclick=()=>{
+      BONES.forEach(b=>{ seamNoSide[b]=true; });
+      accKeys.forEach(k=>{ seamNoSide[k]=true; });
+      renderParamsPanel();
+    };
+  }
 }
 function renderParamsPanel(){
   const el=$("paramsPanel"); if(!el)return;
@@ -2281,28 +2437,33 @@ $("generateBtn").onclick=async()=>{
       }),
       colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength, genParams,
     };
-    // ★フェーズ1(2026-07-07〜): 「生成」は完成GLBまで作らず、重い彫刻(marching
-    // cubes)までの中間データ(中間パッケージ)を作ってビューアに渡す。ビューア側
-    // (character_3d.html)がP3D.finishFromIntermediate()で平滑化/間引き/
-    // テクスチャ焼き込み/GLB化を行う(フェーズ2でこの部分がライブパラメータ
-    // 編集UIに置き換わる)。
+    // ★2026-07-15(ユーザー指摘「1px/1pxにするとビューアが重すぎる、モデル調整
+    // 機能はジェネレータに移した方がいい」対応): 以前(フェーズ1〜2)は彫刻
+    // (marching cubes)までの中間データだけ作ってビューアに渡し、平滑化/間引き/
+    // テクスチャ焼き込み/GLB化はビューア側でライブパラメータ編集しながら行って
+    // いたが、生メッシュを保持したままの再計算がビューアを重くする原因になって
+    // いた。「生成」ボタンを押した時点でP3D.finishFromIntermediate()まで完了
+    // させ、完成GLBだけをビューアに渡すようにする(js/idb.jsのコメント参照)。
     const inter=await P3D.runToIntermediate(state, (label)=>{ $("genStage").textContent=label; });
-    const pkg={
-      landmarks_json: buildJson(),
+    const pkgForFinish={
       raw_unified: inter.rawUnified,
       parts_meta: inter.partsMeta,
       bled_canvases: inter.bledCanvases,
       pivots: inter.pivots,
       calib: inter.calib,
-      gen_params: Object.assign({},genParams),
-      seam_angles: Object.assign({},seamAngles),
-      seam_no_side: Object.assign({},seamNoSide),
-      seam_smooth_iters: seamSmoothIters,
-      color_grad_width: colorGradWidth,
-      color_grad_strength: colorGradStrength,
+    };
+    const liveParams={
+      gp: genParams, seamAngles, seamNoSide,
+      seamSmoothIters, colorGradWidth, colorGradStrength,
+    };
+    const glb=await P3D.finishFromIntermediate(pkgForFinish, liveParams,
+      (label)=>{ $("genStage").textContent=label; });
+    const pkg={
+      glb: glb,
+      landmarks_json: buildJson(),
       // ★2026-07-10: ビューアの「戻る」でジェネレータの自動保存セッションへ
-      // ライブ編集結果を書き戻す際、どのlocalStorageキー(通常/サンプルどれか)
-      // に書けばよいかをビューア側は知らないため、ここで教えておく。
+      // 遷移する際、どのlocalStorageキー(通常/サンプルどれか)を開けば
+      // よいかをビューア側は知らないため、ここで教えておく。
       session_mode: currentMode,
       session_sample_id: currentSampleId,
     };
