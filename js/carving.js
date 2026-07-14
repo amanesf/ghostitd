@@ -1103,9 +1103,20 @@ function carveRegion(opts){
         // 胴体扱いにすると腕の上下エッジの行だけ胴体奥行きの薄いヒレが付くため。
         // 手(手首から先)を腕より先に判定する(手首付近で両者が重なるため)。
         var zr=-1, exVal=-1, depthPsq=rowPsq;
+        // ★2026-07-15(ユーザー指摘「手や腕は正面だけ使ってほしい」対応):
+        // segLo/segHi(このセルが候補になるかどうかの外枠)はfront∪back画像の
+        // 和集合で決まるため、手のように指の間の隙間がfrontとbackで食い違う絵柄
+        // (backは正面と違うポーズ/簡略化した絵柄で描かれがち)だと、backにしか
+        // 無い絵柄がfrontの指の間の隙間を埋めてしまい、指が癒着して見えていた。
+        // 手/腕の「確信を持って手/腕と判定できた」列に限り、frontのその画素
+        // そのものに前景があるかを追加でチェックし、backだけにある絵柄は
+        // 無視する(手/腕以外の胴体等は従来通りfront∪backのまま)。
+        var frontPx = Math.round(xv*SCALE+CX);
+        var frontHasPixel = frontPx>=0 && frontPx<faW && !!fa[fy[iy3]*faW+frontPx];
         if(handProf && !isNaN(handProf.cy[ix])){
           var uh=Math.abs(myv-handProf.cy[ix]);
           if(uh<=handProf.ry[ix]){
+            if(!frontHasPixel) continue;
             // ★2026-07-04(改2): 手の奥行きはside計測もシルエット縦幅も使わず、
             // 設定値handDepthHwをそのまま採用する(ユーザー指定)。
             zr=Math.max(handDepthHw, EPS);
@@ -1128,6 +1139,7 @@ function carveRegion(opts){
           var ua=Math.abs(myv-armProf.cy[ix]);
           var armRy=armProf.ry[ix];
           if(ua<armRy){
+            if(!frontHasPixel) continue;
             zr=armProf.rz[ix];
             exVal=Math.pow(ua/armRy, psqArms); // 傾いた円柱の縦断面プロファイル
             depthPsq=psqArms;

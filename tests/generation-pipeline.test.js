@@ -143,9 +143,15 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 45度・側面視点での目視確認では丸みのカクつき等の劣化は確認されなかった。
 // body-only/with-accessoryとも彫刻結果(頂点分布)が変わるため、ハッシュを
 // 更新した。
+// ★2026-07-15(ユーザー指摘「手や腕は正面だけ使ってほしい」対応): 手/腕と
+// 確信を持って判定できた列について、front∪backの和集合ではなくfront単独の
+// 前景画素を追加でチェックするよう変更した(js/carving.jsのcarveRegion参照。
+// 指の間の隙間がfront/backで食い違う絵柄だと、backにしかない絵柄で指の間の
+// 隙間が塗り潰され指が癒着していた)。body-only/with-accessoryとも腕の
+// 彫刻結果が変わるため、ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 697988,
-  sha256: "7dacc315e157feb84dbbc6f0d0941eb8944f4e722b9c42f563ad25d9a00bf7da",
+  byteLength: 698860,
+  sha256: "95482ae27ba2a42fae812d65f3ecb781c02aeefb819ce1b8a6a02ff886d4d969",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -253,9 +259,11 @@ const EXPECTED_BODY_ONLY = {
 // ★2026-07-14(上のEXPECTED_BODY_ONLYコメント「縦横のボクセル解像度分離」
 // 参照): body_vox_xz新設によりwith-accessory側も彫刻結果が変わったため、
 // ハッシュを更新した(2816216→1222828バイト)。
+// ★2026-07-15: 上のEXPECTED_BODY_ONLYコメント(手/腕をfront単独判定に変更)
+// と同じ変更により、with-accessory側も彫刻結果が変わり、ハッシュを更新した。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1222828,
-  sha256: "8503f23f647dec9589183bfd7d6f6a4c232af5cbadee1f3e399137ff3fddce79",
+  byteLength: 1223284,
+  sha256: "85a6900791cfc04b083a7f494120d080bc0faf5655f0acb9567b1b5d4845c3d9",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
