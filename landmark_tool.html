@@ -760,7 +760,7 @@ function renderVoxPxHelperHtml(){
 // する(P3D.runCarvingStagesのestimateOnlyモード、js/pipeline.js参照)。
 function renderVertEstimateHtml(){
   return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
-    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">推定頂点数・メモリ(間引き前、体+全アクセサリー概算)</div>'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">推定頂点数・メモリ(体+全アクセサリー概算、間引き前後)</div>'+
     '<button type="button" class="btn sm" id="estimateVertBtn">推定を計算</button>'+
     '<div id="estimateVertResult" style="font-size:11px;color:var(--mut);margin-top:6px;line-height:1.6"></div>'+
     '</div>';
@@ -997,12 +997,16 @@ function wireParamsPanelEvents(el){
         };
         const est=await P3D.runCarvingStages(state, (label)=>{ resultEl.textContent="計算中: "+label; });
         const gb=(est.estimatedBytes/1e9).toFixed(2);
-        const danger=est.estimatedBytes>500*1024*1024;
+        const heavy=est.estimatedBytes>500*1024*1024;
+        const pct=genParams.decimate ? P3D.approxDecimateReductionPct(genParams.decimate_strength) : 0;
+        const afterVerts=Math.round(est.estimatedVertices*(1-pct/100));
         resultEl.innerHTML=
-          '推定頂点数: <b style="color:#7aa2ff">'+est.estimatedVertices.toLocaleString()+'</b>(間引き前)<br>'+
+          '推定頂点数(間引き前): <b style="color:#7aa2ff">'+est.estimatedVertices.toLocaleString()+'</b><br>'+
+          '推定頂点数(間引き後・目安): <b style="color:#7aa2ff">'+afterVerts.toLocaleString()+'</b>'+
+          (genParams.decimate?'(約'+pct.toFixed(0)+'%削減、雰囲気の目安であり正確な値ではありません)':'(間引きOFF)')+'<br>'+
           'グリッド: '+est.nx+'×'+est.ny+'×'+est.nz+' = '+est.gridCells.toLocaleString()+'セル、メモリ目安 '+
-          '<b style="color:'+(danger?'#ff6b6b':'#7aa2ff')+'">'+gb+'GB</b>'+
-          (danger?'<br><span style="color:#ff6b6b">⚠ この設定はメモリ不足(Array buffer allocation failed)でクラッシュする可能性が高いです。body_vox/body_vox_xzを大きくしてください。</span>':"");
+          '<b style="color:'+(heavy?'#ff6b6b':'#7aa2ff')+'">'+gb+'GB</b>'+
+          (heavy?'<br><span style="color:#ffb84d">⚠ この規模だと生成に数分〜数十分かかる場合があります。</span>':"");
       }catch(e){
         resultEl.textContent="計算に失敗しました: "+((e&&e.message)||e);
       }

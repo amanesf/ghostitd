@@ -337,6 +337,20 @@ function strengthToMaxCost(strength, V){
 }
 P3D.strengthToMaxCost = strengthToMaxCost;
 
+// 「間引きの強さ」→「だいたい何%頂点が減るか」の目安(概算)。実際の削減率は
+// メッシュの形状(平らな面が多いか、細かい凹凸が多いか)に強く依存し、厳密な
+// 計算にはメッシュ全体の間引きを実行する必要があるため、これは正確な予測では
+// ない。このセッション中の実測(strength=0.85で約85〜92%削減)と、
+// strengthToMaxCostのコメントにある実測(strength=1で約95%削減)を通る
+// べき乗カーブで補間した「雰囲気」の目安。生成前のUIで間引き後の頂点数感を
+// 大まかに掴むためだけに使う。
+function approxDecimateReductionPct(strength){
+  var s = Math.min(1, Math.max(0, strength||0));
+  if(s<=0) return 0;
+  return 95 * Math.pow(s, 0.683);
+}
+P3D.approxDecimateReductionPct = approxDecimateReductionPct;
+
 // gridClusterDecimate(非常時フォールバック)はセルサイズ方式のため誤差閾値を
 // 直接扱えない。「強さ」から目安の目標頂点数を作る簡易な換算式を別途用意する
 // (フォールバックは非常時のみ発動する想定のため、strengthToMaxCostほど
