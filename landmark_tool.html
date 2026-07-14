@@ -751,6 +751,20 @@ function renderVoxPxHelperHtml(){
 // 定義し直さずそのまま使う。ジェネレータには3Dプレビューが無いため、値を
 // 変えても再計算はせず(scheduleGenRecompute相当は無し)、生成ボタンを押した
 // 時点でfinishFromIntermediate()に渡る。
+// ★2026-07-16追加(ユーザー指摘「Array buffer allocation failedが出た、1px/1px
+// にしたからか?推定頂点数を出してほしい」対応): body_vox_xzも1pxにすると
+// グリッド(nx*ny*nz)がTポーズの腕先まで含む全体範囲を1pxで割った巨大なものに
+// なり(体格に対して不要に細かい)、field/ownerField(各Float32Array/
+// Int32Array)2本の確保だけで数GBに達してArrayBuffer確保が失敗することがある。
+// 実際に彫刻(marching cubes)を走らせる前に、この危険を数値で確認できるように
+// する(P3D.runCarvingStagesのestimateOnlyモード、js/pipeline.js参照)。
+function renderVertEstimateHtml(){
+  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">推定頂点数・メモリ(間引き前、体+全アクセサリー概算)</div>'+
+    '<button type="button" class="btn sm" id="estimateVertBtn">推定を計算</button>'+
+    '<div id="estimateVertResult" style="font-size:11px;color:var(--mut);margin-top:6px;line-height:1.6"></div>'+
+    '</div>';
+}
 let seamGroupOpen={}, seamBulkOpen=false;
 function seamRowHtml(label,key,v,ns){
   return '<div class="acitem"><span class="nm">'+label+'</span>'+
@@ -874,7 +888,7 @@ function buildParamsPanelHtml(){
       '</summary><div class="accbody">'+items+
       (g==="断面の丸み具合"?renderPsqAccessoryOverridesHtml():"")+
       (g==="解像度/軽量化"?renderVoxPxHelperHtml():"")+
-      (g==="モデル調整"?renderSeamPanelHtml():"")+
+      (g==="モデル調整"?(renderVertEstimateHtml()+renderSeamPanelHtml()):"")+
       '</div></details>';
   }).join("");
 }
@@ -962,6 +976,38 @@ function wireParamsPanelEvents(el){
   [].forEach.call(el.querySelectorAll(".psqAccNum"),num=>{
     num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||2); };
   });
+  // 推定頂点数・メモリ(renderVertEstimateHtml)の配線。
+  const estimateBtn=el.querySelector("#estimateVertBtn");
+  if(estimateBtn){
+    estimateBtn.onclick=async()=>{
+      const resultEl=el.querySelector("#estimateVertResult");
+      if(!points||!analysis){ resultEl.textContent="先に正面/側面/背面画像を読み込んでください。"; return; }
+      resultEl.textContent="計算中…";
+      try{
+        const state={
+          imgs, points, analysis, deriveFromPoints,
+          accessories: accessories.map(a=>{
+            const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
+              psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
+            out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
+            return out;
+          }),
+          colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength, genParams,
+          estimateOnly: true,
+        };
+        const est=await P3D.runCarvingStages(state, (label)=>{ resultEl.textContent="計算中: "+label; });
+        const gb=(est.estimatedBytes/1e9).toFixed(2);
+        const danger=est.estimatedBytes>500*1024*1024;
+        resultEl.innerHTML=
+          '推定頂点数: <b style="color:#7aa2ff">'+est.estimatedVertices.toLocaleString()+'</b>(間引き前)<br>'+
+          'グリッド: '+est.nx+'×'+est.ny+'×'+est.nz+' = '+est.gridCells.toLocaleString()+'セル、メモリ目安 '+
+          '<b style="color:'+(danger?'#ff6b6b':'#7aa2ff')+'">'+gb+'GB</b>'+
+          (danger?'<br><span style="color:#ff6b6b">⚠ この設定はメモリ不足(Array buffer allocation failed)でクラッシュする可能性が高いです。body_vox/body_vox_xzを大きくしてください。</span>':"");
+      }catch(e){
+        resultEl.textContent="計算に失敗しました: "+((e&&e.message)||e);
+      }
+    };
+  }
   // テクスチャ継ぎ目パネル(renderSeamPanelHtml)の配線。
   [].forEach.call(el.querySelectorAll("details.accgroup[data-seamgroup]"),d=>{
     d.addEventListener("toggle",()=>{

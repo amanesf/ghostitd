@@ -405,6 +405,41 @@ async function runCarvingStages(state, report){
   // 縦(Y、front/side/back画像の実測行)はbody_voxを使う(js/carving.jsの
   // buildGrid参照)。
   var sharedGrid = P3D.buildGrid(unionBounds[0], unionBounds[1], unionBounds[2], gp.body_vox_xz, gp.body_vox);
+
+  // ★2026-07-16追加(ユーザー指摘「Array buffer allocation failedが出た、
+  // 推定頂点数を出してほしい」対応): sharedGrid(nx*ny*nz)がそのまま
+  // carveSdfFieldでfield/ownerField(Float32Array/Int32Array、各4byte)2本の
+  // 確保サイズになる。1px/1px設定ではmxBounds/mzBoundsがTポーズの腕先まで
+  // 含む全体範囲を1pxで割るため、体格に対して不要に巨大なグリッドになり
+  // (例: nx≈1100×ny≈950×nz≈390≈4億セル×8byte≈3GB超)、ブラウザタブの
+  // ArrayBuffer確保上限を超えてクラッシュする。ここではそのグリッド自体は
+  // 確保せず、carveRegion(opts,{extentsOnly:true})で行ごとの実測幅・奥行き
+  // (front/back/side画像の実データ)だけを取り、各行の断面を楕円とみなした
+  // 周長(Ramanujan近似)をvoxel幅で割って積み上げることで、実際の
+  // marching cubesを走らせずに頂点数を概算する(体+全アクセサリー分)。
+  if(state.estimateOnly){
+    var gridCells = sharedGrid.nx*sharedGrid.ny*sharedGrid.nz;
+    var estimatedBytes = gridCells*8; // field(Float32)+ownerField(Int32)
+    var totalVerts=0;
+    [bodyBuilt].concat(accBuilt).forEach(function(part){
+      var res = P3D.carveRegion(Object.assign({}, part.carveOpts, {grid:sharedGrid, extentsOnly:true}));
+      res.smoothByRow.forEach(function(segs, iy){
+        var hdBands = res.hdByRow.get(iy);
+        if(!hdBands) return;
+        segs.forEach(function(seg){
+          var a=Math.max(seg[1],1e-6); // 半幅
+          hdBands.forEach(function(band){
+            var b=Math.max((band[0]+band[1])/2,1e-6); // 半奥行き(前後の平均)
+            var h=Math.pow((a-b)/(a+b),2);
+            var perim=Math.PI*(a+b)*(1+3*h/(10+Math.sqrt(4-3*h))); // 楕円周長のRamanujan近似
+            totalVerts += perim/gp.body_vox_xz;
+          });
+        });
+      });
+    });
+    return {gridCells:gridCells, estimatedBytes:estimatedBytes, estimatedVertices:Math.round(totalVerts),
+      nx:sharedGrid.nx, ny:sharedGrid.ny, nz:sharedGrid.nz};
+  }
   var regions = [{ownerId:0, opts:bodyBuilt.carveOpts}].concat(
     accBuilt.map(function(a,i){ return {ownerId:i+1, opts:a.carveOpts}; }));
   // ★2026-07-13追加(bone_bridge機能、ユーザー指摘「ツインテールの付け根の
@@ -452,6 +487,9 @@ async function runCarvingStages(state, report){
   return {sizes:sizes, prof:prof, core:core, SCALE:SCALE, pivots:pivots, bledCanvas:bledCanvas,
     unified:{V:unified.V, F:unified.F, owner:unified.owner}, partsMeta:partsMeta};
 }
+// ★2026-07-16追加: state.estimateOnly:trueでの頂点数概算(上記コメント参照)を
+// landmark_tool.htmlから呼べるように公開する。
+P3D.runCarvingStages = runCarvingStages;
 
 /**
  * フェーズ1: 中間データ契約。runCarvingStages()(prep〜accessories、重い

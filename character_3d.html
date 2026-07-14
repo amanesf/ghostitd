@@ -176,6 +176,7 @@
       <button class="btn" id="load2">別のモデルを開く</button>
       <button class="btn" id="download">モデルを保存</button>
     </div>
+    <div id="modelVertCount" style="font-size:11px;color:var(--mut);text-align:center"></div>
   </div>
 
   <!-- ★2026-07-15(モデル調整機能のジェネレータ移植): 間引き・継ぎ目角度等の
@@ -474,6 +475,13 @@ function loadGLB(buf,onLoaded,autoplayMotion){
     clearModel();
     model=gltf.scene; root.add(model);
     applyMeshMaterials(model);
+    // ★2026-07-16追加(ユーザー指摘「ビューアにも頂点数表示してほしい」):
+    // 読み込んだモデルの実頂点数(重複頂点も含む、GLBのPOSITIONそのまま)を
+    // メッシュ全体で合計して表示する。
+    let vertCount=0;
+    model.traverse(o=>{ if(o.isMesh && o.geometry && o.geometry.attributes.position) vertCount+=o.geometry.attributes.position.count; });
+    const vertEl=document.getElementById('modelVertCount');
+    if(vertEl) vertEl.textContent='頂点数: '+vertCount.toLocaleString();
     document.getElementById('drop').classList.add('hide');
     // 操作パネルはモデル読込後も自動では出さない(バーの開閉ボタンを
     // 押すまで非表示のまま。初期表示は常に非表示にしたいため)。
