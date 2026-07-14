@@ -157,12 +157,27 @@ async function runCarvingStages(state, report){
   // carveRegionの行スキャンに渡す(体はjs/visual_hull.jsのbuildBodyCarveOpts、
   // アクセサリーはjs/accessories.jsのbuildAccessoryCarveOptsList経由。
   // アクセサリー側はmask[v].alphaと同じ場所にmask[v].contとして載せる)。
+  // ★2026-07-18(手動マップの体ペイント対応): landmark_tool.htmlの「手動マップ」
+  // タブで体のシルエットを直接編集した場合、そのマスク(state.bodyMask[v])を
+  // 色分けマップからの自動分類より優先する(アクセサリーのa.mask[v]と同じ
+  // 優先順位)。未編集(state.bodyMask[v]が無い)面は従来通り自動分類のまま。
+  var bodyMaskAlpha={};
+  if(state.bodyMask){
+    var bodyMaskLoads=[];
+    views.forEach(function(v){
+      var bm=state.bodyMask[v];
+      if(bm && bm.maskDataUrl){
+        bodyMaskLoads.push(P3D.loadMaskAlphaAsync(bm.maskDataUrl, sizes[v].w, sizes[v].h).then(function(alpha){ bodyMaskAlpha[v]=alpha; }));
+      }
+    });
+    if(bodyMaskLoads.length) await Promise.all(bodyMaskLoads);
+  }
   var contFull={};
   views.forEach(function(v){
     var cm = state.colormaps && state.colormaps[v];
     if(!cm) throw new Error("色分けマップ("+v+")が見つかりません。front/side/backの3面とも色分けマップが必要です(ゴーストスキャナーで生成/アップロードしてから引き継いでください)。");
     var raw = P3D.classifySilhouetteRaw(cm.ctx, cm.w, cm.h, "#000000", accessoryColors);
-    var alpha = P3D.significantComponentsMask(raw.bodyRaw, cm.w, cm.h);
+    var alpha = bodyMaskAlpha[v] || P3D.significantComponentsMask(raw.bodyRaw, cm.w, cm.h);
     alphaFull[v] = P3D.fillHoles(alpha, cm.w, cm.h);
     if(gp.subpixel_edges){
       var contRes = P3D.classifySilhouetteCont(cm.ctx, cm.w, cm.h, "#000000", accessoryColors);

@@ -327,6 +327,11 @@
         <div id="paintTargetList" style="display:flex;gap:6px;flex-wrap:wrap;flex:1"></div>
       </div>
       <div class="acitem" style="margin-bottom:8px">
+        <span class="nm">ブラシ/消しゴム</span>
+        <button type="button" class="btn sm on" id="paintModeBrush" style="flex:0 0 auto">🖌 ブラシ</button>
+        <button type="button" class="btn sm" id="paintModeEraser" style="flex:0 0 auto">🧹 消しゴム</button>
+      </div>
+      <div class="acitem" style="margin-bottom:8px">
         <span class="nm">ブラシサイズ</span>
         <input type="range" id="paintBrushSlider" min="2" max="150" value="24" style="flex:1">
         <span id="paintBrushVal" style="width:36px;text-align:right;font-size:11px;color:var(--mut);flex:0 0 auto">24px</span>
@@ -369,7 +374,7 @@
         指定px以上の広い隙間や背景そのものには影響しません。</p>
       <div class="row">
         <button class="btn" id="paintUndo">↩ 元に戻す</button>
-        <button class="btn danger" id="paintClearView">この面を全消去</button>
+        <button class="btn danger" id="paintClearView">この対象をこの面で開いた時の状態に戻す</button>
       </div>
     </div>
 
@@ -1019,6 +1024,7 @@ function wireParamsPanelEvents(el){
             out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
             return out;
           }),
+          bodyMask: Object.keys(bodyMask).reduce((o,v)=>{ if(bodyMask[v]) o[v]={maskDataUrl:bodyMask[v].maskDataUrl,bbox:bodyMask[v].bbox}; return o; },{}),
           colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength, genParams,
           estimateOnly: true,
         };
@@ -1554,9 +1560,16 @@ function extractAllAccessoryMasks(){
     const accColors=withColor.map(a=>a.color);
     const raw=P3D.classifySilhouetteRaw(cm.ctx, cm.w, cm.h, "#000000", accColors);
     withColor.forEach((a,idx)=>{
+      a.mask=a.mask||{};
+      // ★2026-07-18(手動マップ独立ペイント層対応): 以前はcolormapがマスクの
+      // 唯一の情報源だったため、JSON読込のたびに無条件で再分類していても
+      // 常に同じ結果に収束していた。今は手動マップタブでcolormapとは独立に
+      // パーツごとの領域を編集できるため、JSONに保存済みのマスク(手動編集
+      // 結果を含む)がある面は上書きせず、まだマスクが無い面(新規追加された
+      // 色・面)だけをこの自動分類で補う。
+      if(a.mask[v] && a.mask[v].maskDataUrl) return;
       const comp=P3D.significantComponentsMask(raw.accRaw[idx], cm.w, cm.h);
       const m=P3D.packRawMaskToResult(comp, cm.w, cm.h);
-      a.mask=a.mask||{};
       if(m) a.mask[v]=m; else delete a.mask[v];
     });
     accessories.filter(a=>!a.color).forEach(a=>{ if(a.mask) delete a.mask[v]; });
@@ -1642,6 +1655,9 @@ function buildJson(){
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
+    // ★2026-07-18(手動マップの体ペイント対応): 体を手動マップタブで編集した
+    // 場合の独立ペイント層。accessories[].maskと同じ{maskDataUrl,bbox}形式。
+    body_mask:Object.keys(bodyMask).reduce((o,v)=>{ if(bodyMask[v]) o[v]={maskDataUrl:bodyMask[v].maskDataUrl,bbox:bodyMask[v].bbox}; return o; },{}),
     // ★2026-07-09: 色分けマップは書き出しにも含める(再読み込み時にマスクを
     // 再抽出できるようにするため。必須のため常に含む)。
     colormaps:(function(){
@@ -1701,6 +1717,21 @@ function applyLoadedJson(d){
     },{});
     return out;
   });
+  // ★2026-07-18(手動マップの体ペイント対応): 体の独立ペイント層(body_mask)を
+  // 読み込む。パーツごとのpaintAlpha/paintAlphaSeed(手動マップタブ内の
+  // 編集キャッシュ)はJSON読込のたびにリセットする。ensurePaintAlphaは
+  // タブを開いた時点でcolormapからの再分類をシードにするが、それでは保存済み
+  // (手動編集済み)のa.mask/bodyMaskが無視されてしまうため、
+  // primePaintAlphaFromSavedMasks()で保存内容を先読みしてpaintAlpha/
+  // paintAlphaSeedへ直接入れておく(タブを開く前に完了していれば、ensure側は
+  // 既にあるものをそのまま使うので再分類は起きない)。
+  bodyMask=Object.keys(d.body_mask||{}).reduce((o,v)=>{
+    const m=d.body_mask[v];
+    if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
+    return o;
+  },{});
+  paintAlpha={}; paintAlphaSeed={}; paintUndoStack=[];
+  primePaintAlphaFromSavedMasks();
   seamAngles=Object.assign({},d.seam_angles||{});
   seamNoSide=Object.assign({},d.seam_no_side||{});
   normalizeSeamSideDefaults();
@@ -1779,19 +1810,36 @@ function syncViewBtns(){
 }
 const VIEWJP={front:"正面",side:"側面(右)",leftSide:"側面(左)",back:"背面"};
 
-/* ---------- 手動マスク(色分けマップへ直接ブラシで塗る、2026-07-13追加) ----------
-   colormaps[v]という既存のグローバル状態(canvas)を直接書き換えるだけなので、
-   自動マスク抽出(extractAllAccessoryMasks)・保存/書き出し(buildJson、
-   saveNormalSessionImages)は無改修でそのまま効く。塗る対象の色は「体=黒」
-   固定+各accessoryが既に持つcolor(色分けマップ上の塗り分け色)をそのまま
-   使うため、最近傍色分類(classifySilhouetteRaw)による誤判定は起きない。 */
+/* ---------- 手動マスク(パーツごとに独立したペイント層、2026-07-13追加/
+   2026-07-18再設計) ----------
+   ★2026-07-18(ユーザー指摘「後ろ髪を拡張したらツインテールが上書きされる」
+   「色分けマップと手動マップは別々に保持してほしい」対応): 当初はcolormaps[v]
+   (体+全アクセサリー共有の1枚のcanvas)へ直接ブラシで塗る方式だったが、
+   1画素は1色(=1パーツ)にしかなれない共有ラスタだったため、あるパーツを
+   塗って拡張すると、その画素を以前占有していた別パーツの領域を実質的に
+   奪ってしまっていた(自動マスク抽出=classifySilhouetteRawが画素ごとに
+   最も近い1色だけを選ぶ最近傍分類のため)。
+   パーツ(体+各accessory)ごとに独立したUint8Arrayのペイント層(paintAlpha)
+   を持つ方式に変更した。各パーツのペイント層は、そのパーツのタブを最初に
+   開いた時点でcolormaps[v]を1回だけ最近傍分類(classifySilhouetteRaw)して
+   種(シード、paintAlphaSeed)を作り、以降はそのコピーを直接編集する
+   (ブラシ=1を立てる、消しゴム=0に戻す)。他パーツのペイント層は一切
+   参照・変更しないため、パーツ間の上書き事故が構造的に起きない。
+   colormaps[v]自体はこの機能からはもう変更されない(読み取り専用の種)。
+   編集結果はストローク完了のたびにaccessories[i].mask[v](体はbodyMask[v])
+   へ{maskDataUrl,bbox}として書き戻し、既存の保存/書き出し(buildJson)・
+   生成(js/pipeline.js)にそのまま乗せる(syncPaintAlphaToMask参照)。 */
 const PAINT_BODY_COLOR="#000000";
 let paintView="front";
 let paintTarget="body"; // "body" または accessories配列のindexを文字列化したもの
+let paintMode="brush"; // "brush"(塗る、alpha=1) | "eraser"(消す、alpha=0)
 let paintBrushSize=24;
-let paintUndoStack=[]; // {view, imageData}の配列(直近PAINT_UNDO_MAX手分)
+let paintUndoStack=[]; // {target, view, data:Uint8Array}の配列(直近PAINT_UNDO_MAX手分)
 const PAINT_UNDO_MAX=20;
 let paintDrawing=false, paintLastImgPt=null;
+let paintAlpha={}; // paintAlpha[target][view] = Uint8Array(w*h)、そのパーツの現在の編集状態
+let paintAlphaSeed={}; // paintAlphaSeed[target][view] = Uint8Array、開いた時点のスナップショット(「初期状態に戻す」用)
+let bodyMask={}; // bodyMask[view] = {maskDataUrl,bbox}(accessories[i].maskと同じ形式、体用)
 let paintZoom=1; // 表示倍率(1=コンテナ幅に合わせたフィット表示)。内部解像度は
                  // 常にimg.w×img.hのままなので、paintCanvasToImgPtの座標変換は
                  // ズーム値に関わらず変更不要(getBoundingClientRectの実測サイズを
@@ -1820,58 +1868,156 @@ function ensurePaintColormap(v){
   colormaps[v]={canvas:c,ctx:ctx,w:c.width,h:c.height};
   return colormaps[v];
 }
-function pushPaintUndo(v){
-  const cm=colormaps[v];
-  if(!cm) return;
-  paintUndoStack.push({view:v, imageData:cm.ctx.getImageData(0,0,cm.w,cm.h)});
+// この面のcolormapを体+全paintableアクセサリーで一括分類し、各対象の
+// 生マスク(Uint8Array)を{target:mask}の形で返す(1回の分類で全対象ぶん
+// まとめて求めることで、対象を切り替えるたびに再分類しなくて済む)。
+// ★2026-07-18バグ修正: 最近傍分類の生の結果(raw.bodyRaw/raw.accRaw)を
+// そのままシードにすると、既存のextractAllAccessoryMasks()/
+// bodyAlphaFromColormap()が捨てているノイズ(孤立した小さな誤分類画素)まで
+// シードに含んでしまい、タブを開いただけで既存の保存済みマスクよりわずかに
+// 大きい領域が「初期状態」として扱われてしまう(何もしなくても再保存すると
+// マスクが変わる不具合)。それぞれ同じフィルタ(significantComponentsMask、
+// 体はさらにfillHoles)をかけてから使う。
+function classifyRawForView(v){
+  const cm=ensurePaintColormap(v);
+  if(!cm) return null;
+  const accs=paintableAccessories();
+  const raw=P3D.classifySilhouetteRaw(cm.ctx, cm.w, cm.h, PAINT_BODY_COLOR, accs.map(x=>x.a.color));
+  const byTarget={body:P3D.fillHoles(P3D.significantComponentsMask(raw.bodyRaw, cm.w, cm.h), cm.w, cm.h)};
+  accs.forEach((x,idx)=>{ byTarget[String(x.i)]=P3D.significantComponentsMask(raw.accRaw[idx], cm.w, cm.h); });
+  return byTarget;
+}
+// target(=paintTargetと同じ形式のキー、"body"またはaccessories index文字列)の
+// この面での編集可能ペイント層を返す。まだ無ければ、この面の全対象ぶんを
+// 一括で最近傍分類してシード(paintAlphaSeed、「初期状態に戻す」の復元先)を
+// 作り、そのコピーをpaintAlphaとして返す。
+function ensurePaintAlpha(target, v){
+  if(paintAlpha[target] && paintAlpha[target][v]) return paintAlpha[target][v];
+  const im=imgs[v];
+  if(!im) return null;
+  const byTarget=classifyRawForView(v);
+  if(byTarget){
+    Object.keys(byTarget).forEach(t=>{
+      paintAlpha[t]=paintAlpha[t]||{};
+      paintAlphaSeed[t]=paintAlphaSeed[t]||{};
+      if(!paintAlpha[t][v]){
+        paintAlpha[t][v]=byTarget[t];
+        paintAlphaSeed[t][v]=byTarget[t].slice();
+      }
+    });
+  }
+  paintAlpha[target]=paintAlpha[target]||{};
+  if(!paintAlpha[target][v]) paintAlpha[target][v]=new Uint8Array(im.w*im.h);
+  return paintAlpha[target][v];
+}
+// ★2026-07-18(手動マップの保存/復元対応): JSON読込直後に呼ぶ。保存済みの
+// a.mask[v]/bodyMask[v](=前回の手動編集結果を含む)を、colormapからの
+// 再分類を待たずに直接paintAlpha/paintAlphaSeedへデコードしておくことで、
+// 手動マップタブを開いた時に保存内容がそのまま復元されるようにする
+// (ensurePaintAlphaはpaintAlpha[target][v]が既にあればそれを使うだけで、
+// 再分類は行わない)。
+async function primePaintAlphaFromSavedMasks(){
+  const jobs=[];
+  function prime(target,v,m){
+    const im=imgs[v];
+    if(!im||!m||!m.maskDataUrl) return;
+    jobs.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, im.w, im.h).then(alpha=>{
+      paintAlpha[target]=paintAlpha[target]||{};
+      paintAlphaSeed[target]=paintAlphaSeed[target]||{};
+      paintAlpha[target][v]=alpha;
+      paintAlphaSeed[target][v]=alpha.slice();
+    }));
+  }
+  Object.keys(bodyMask).forEach(v=>prime("body",v,bodyMask[v]));
+  accessories.forEach((a,i)=>{
+    Object.keys(a.mask||{}).forEach(v=>prime(String(i),v,a.mask[v]));
+  });
+  if(jobs.length) await Promise.all(jobs);
+}
+function pushPaintUndo(target,v){
+  const arr=ensurePaintAlpha(target,v);
+  if(!arr) return;
+  paintUndoStack.push({target:target, view:v, data:arr.slice()});
   if(paintUndoStack.length>PAINT_UNDO_MAX) paintUndoStack.shift();
 }
-function paintStampCircle(v,x,y,r,colorHex){
-  const cm=colormaps[v]; if(!cm) return;
-  cm.ctx.save();
-  cm.ctx.fillStyle=colorHex;
-  cm.ctx.beginPath();
-  cm.ctx.arc(x,y,r,0,Math.PI*2);
-  cm.ctx.fill();
-  cm.ctx.restore();
+function paintAlphaStampCircle(arr,w,h,x,y,r,val){
+  const x0=Math.max(0,Math.floor(x-r)), x1=Math.min(w-1,Math.ceil(x+r));
+  const y0=Math.max(0,Math.floor(y-r)), y1=Math.min(h-1,Math.ceil(y+r));
+  const r2=r*r;
+  for(let py=y0;py<=y1;py++){
+    const dy=py-y;
+    for(let px=x0;px<=x1;px++){
+      const dx=px-x;
+      if(dx*dx+dy*dy<=r2) arr[py*w+px]=val;
+    }
+  }
 }
 // ドラッグ中はpointermoveの間隔が空くと点線状になるため、前回点から補間して
-// 一定間隔でスタンプする。
-function paintStrokeTo(v,x,y,r,colorHex){
-  if(!paintLastImgPt){ paintStampCircle(v,x,y,r,colorHex); paintLastImgPt=[x,y]; return; }
+// 一定間隔でスタンプする。val: 1=ブラシ(塗る)、0=消しゴム(消す)。
+function paintStrokeTo(v,x,y,r,val){
+  const arr=ensurePaintAlpha(paintTarget,v);
+  if(!arr) return;
+  const im=imgs[v];
+  if(!paintLastImgPt){ paintAlphaStampCircle(arr,im.w,im.h,x,y,r,val); paintLastImgPt=[x,y]; return; }
   const lx=paintLastImgPt[0], ly=paintLastImgPt[1];
   const dist=Math.hypot(x-lx,y-ly);
   const step=Math.max(r*0.5,1);
   const n=Math.max(1,Math.ceil(dist/step));
   for(let i=1;i<=n;i++){
     const t=i/n;
-    paintStampCircle(v, lx+(x-lx)*t, ly+(y-ly)*t, r, colorHex);
+    paintAlphaStampCircle(arr,im.w,im.h, lx+(x-lx)*t, ly+(y-ly)*t, r, val);
   }
   paintLastImgPt=[x,y];
 }
-// 塗り終わり(1ストローク完了)・アンドゥ・全消去の後に共通で呼ぶ:
-// 自動マスクを再抽出し、パネル全体(面/対象一覧/キャンバス)を再描画する。
+// targetの現在のpaintAlpha[v]を、既存の保存/生成が読む{maskDataUrl,bbox}
+// 形式へ書き戻す(accessoriesはa.mask[v]、体はbodyMask[v])。あわせて
+// .alphaも(このセッション内だけの高速参照用に)一緒に持たせておく
+// (buildJson側はmaskDataUrl/bboxだけを抜き出して保存するため、余分な
+// .alphaフィールドがJSONへ漏れることはない)。
+function syncPaintAlphaToMask(target,v){
+  const arr=paintAlpha[target] && paintAlpha[target][v];
+  const im=imgs[v];
+  if(!arr || !im) return;
+  const packed=P3D.packRawMaskToResult(arr, im.w, im.h);
+  if(target==="body"){
+    bodyMask[v] = packed ? Object.assign({}, packed, {alpha:arr}) : null;
+  }else{
+    const a=accessories[+target];
+    if(!a) return;
+    a.mask=a.mask||{};
+    if(packed) a.mask[v]=Object.assign({}, packed, {alpha:arr});
+    else delete a.mask[v];
+  }
+}
+// 塗り終わり(1ストローク完了)・アンドゥ・初期状態への復元の後に共通で呼ぶ:
+// 編集中の対象/面だけをmaskへ書き戻し、パネル全体(面/対象一覧/キャンバス)を
+// 再描画する。★2026-07-18: 以前はここでextractAllAccessoryMasks()(colormap
+// 全体を毎回再分類)を呼んでいたが、それだと人が塗った内容が次の分類結果で
+// 上書きされてしまうため廃止した。
 function refreshAfterPaintChange(){
-  extractAllAccessoryMasks();
+  syncPaintAlphaToMask(paintTarget, paintView);
   resyncAnalysisToProfile();
   renderPaintTab();
 }
 function paintUndo(){
   const entry=paintUndoStack.pop();
   if(!entry) return;
-  const cm=ensurePaintColormap(entry.view);
-  if(!cm) return;
-  cm.ctx.putImageData(entry.imageData,0,0);
-  paintView=entry.view;
-  refreshAfterPaintChange();
+  paintAlpha[entry.target]=paintAlpha[entry.target]||{};
+  paintAlpha[entry.target][entry.view]=entry.data;
+  paintTarget=entry.target; paintView=entry.view;
+  syncPaintAlphaToMask(entry.target, entry.view);
+  resyncAnalysisToProfile();
+  renderPaintTab();
 }
-function paintClearCurrentView(){
-  const cm=colormaps[paintView];
-  if(!cm) return;
-  if(!confirm("この面("+(VIEWJP[paintView]||paintView)+")の色分けマップを全て背景(白)に戻します。よろしいですか？")) return;
-  pushPaintUndo(paintView);
-  cm.ctx.fillStyle="#ffffff";
-  cm.ctx.fillRect(0,0,cm.w,cm.h);
+// ★2026-07-18(名称変更): 以前は「この面を全消去」(色分けマップを白へ)
+// だったが、パーツごとに独立したペイント層になったことで「このタブを開いた
+// 時点の状態(=最初のシード)に戻す」という意味に変わった。
+function paintResetCurrentTarget(){
+  const seed=paintAlphaSeed[paintTarget] && paintAlphaSeed[paintTarget][paintView];
+  if(!seed) return;
+  if(!confirm("「"+paintTargetLabelText()+"」の"+(VIEWJP[paintView]||paintView)+"面の編集を、最初に開いた時の状態に戻します。よろしいですか？")) return;
+  pushPaintUndo(paintTarget,paintView);
+  paintAlpha[paintTarget][paintView]=seed.slice();
   refreshAfterPaintChange();
 }
 function paintTargetLabelText(){
@@ -1895,25 +2041,29 @@ function paintTargetLabelText(){
 // 色が塗られている範囲)の内側だけで、他パーツの領域を対象色に置き換える
 // 形に制限する。これにより「本当の輪郭(合計シルエットの外周)」を超えて
 // 拡張されることはなくなる。
+// ★2026-07-18再設計: 以前はcolormaps[view](共有canvas)へ対象の色を直接
+// 書き込んでいたため、拡張が他パーツの領域を上書きしてしまい得た。
+// パーツごとに独立したペイント層になったので、対象自身のpaintAlpha配列
+// だけをBFSで拡張する(他パーツの層には一切触れない)。「本当の輪郭」の
+// 判定(どこまでが合計シルエットの内側か)には、読み取り専用の種として
+// 残っているcolormaps[view]を引き続き使う。
 function expandTargetContour(){
-  const cm=colormaps[paintView];
-  if(!cm) return;
-  const colorHex=paintTargetColorHex();
-  if(!colorHex) return;
+  const im=imgs[paintView];
+  if(!im) return;
+  const arr=ensurePaintAlpha(paintTarget,paintView);
+  if(!arr) return;
   const px=parseInt($("paintExpandPx").value,10)||0;
   if(px<=0) return;
+  const cm=ensurePaintColormap(paintView);
+  if(!cm) return;
   const accColors=accessories.filter(a=>a.color).map(a=>a.color);
   const candidates=[P3D.hexToRgb("#ffffff"), P3D.hexToRgb("#000000")].concat(accColors.map(P3D.hexToRgb));
-  const targetIdx=(paintTarget==="body") ? 1 : (accColors.indexOf(colorHex)+2);
-  if(targetIdx<1) return;
   const w=cm.w, h=cm.h, n=w*h;
-  const labels=P3D.classifyColorsNearest(cm.ctx, w, h, candidates);
-  const mask=new Uint8Array(n);
-  for(let i=0;i<n;i++){ mask[i]=(labels[i]===targetIdx)?1:0; }
+  const labels=P3D.classifyColorsNearest(cm.ctx, w, h, candidates); // 0=背景
   const dist=new Int32Array(n).fill(-1);
   const queue=new Int32Array(n);
   let qHead=0, qTail=0;
-  for(let i=0;i<n;i++){ if(mask[i]){ dist[i]=0; queue[qTail++]=i; } }
+  for(let i=0;i<n;i++){ if(arr[i]){ dist[i]=0; queue[qTail++]=i; } }
   if(qTail===0){
     alert("この面にはまだ「"+paintTargetLabelText()+"」の領域がありません。先にブラシで少し塗ってから拡張してください。");
     return;
@@ -1932,16 +2082,10 @@ function expandTargetContour(){
       if(dist[nidx]===-1){ dist[nidx]=d+1; queue[qTail++]=nidx; }
     }
   }
-  pushPaintUndo(paintView);
-  const rgb=P3D.hexToRgb(colorHex);
-  const id=cm.ctx.getImageData(0,0,w,h);
-  const data=id.data;
+  pushPaintUndo(paintTarget,paintView);
   for(let i=0;i<n;i++){
-    if(!mask[i] && dist[i]!==-1 && dist[i]<=px){
-      data[i*4]=rgb[0]; data[i*4+1]=rgb[1]; data[i*4+2]=rgb[2]; data[i*4+3]=255;
-    }
+    if(!arr[i] && dist[i]!==-1 && dist[i]<=px) arr[i]=1;
   }
-  cm.ctx.putImageData(id,0,0);
   refreshAfterPaintChange();
 }
 // ★2026-07-14追加(ユーザー要望「パーツ間の設定距離に応じて塞ぐ機能」):
@@ -1959,15 +2103,27 @@ function expandTargetContour(){
 //     前景の色(nearestLabel)で塗る。
 // 結果として、幅がR以下の細い隙間だけが埋まり、外周の広い背景やR超の
 // 大きい隙間には影響しない(標準的なクロージングの性質)。
+// ★2026-07-18再設計: 「隙間塞ぎ」は元々、対象を選ばず面全体を見て複数パーツに
+// またがって塞ぐ操作のため、パーツごとに独立したペイント層になった後も
+// 対象をまたぐ処理自体は残す必要がある。ただし書き込み先はもうcolormaps[view]
+// (共有canvas)ではなく、塞いだ画素の塗り先として選ばれた対象自身のpaintAlpha
+// 配列にする(各対象の現在のペイント層から合成ラベルを作り、新たに塞がれた
+// 画素だけをそれぞれの対象へ書き戻す)。
 function autoCloseGaps(){
-  const cm=colormaps[paintView];
-  if(!cm) return;
+  const im=imgs[paintView];
+  if(!im) return;
   const R=parseInt($("paintCloseGapPx").value,10)||0;
   if(R<=0) return;
-  const accColors=accessories.filter(a=>a.color).map(a=>a.color);
-  const candidates=[P3D.hexToRgb("#ffffff"), P3D.hexToRgb("#000000")].concat(accColors.map(P3D.hexToRgb));
-  const w=cm.w, h=cm.h, n=w*h;
-  const labels=P3D.classifyColorsNearest(cm.ctx, w, h, candidates); // 0=背景,1=体,2+=アクセサリー
+  const w=im.w, h=im.h, n=w*h;
+  const accs=paintableAccessories();
+  const targetKeys=["body"].concat(accs.map(x=>String(x.i)));
+  const targetArrs=targetKeys.map(t=>ensurePaintAlpha(t,paintView));
+  // 各対象の現在のペイント層から合成ラベル(0=背景,1=体,2+=アクセサリー)を作る。
+  // 複数の対象が同じ画素を持つ(=既に手動で重なって塗られている)場合は、
+  // 配列順(体→アクセサリー順)で後勝ちにする(隙間塞ぎの対象選定にしか
+  // 使わないため、既存の重なりそのものには影響しない)。
+  const labels=new Int32Array(n);
+  targetArrs.forEach((arr,k)=>{ if(!arr) return; for(let i=0;i<n;i++){ if(arr[i]) labels[i]=k+1; } });
   const dx8=[-1,0,1,-1,1,-1,0,1], dy8=[-1,-1,-1,0,0,1,1,1];
 
   // 1) dilate: 前景から半径R以内の背景画素へ広がりつつ、最も近い前景ラベルを伝搬
@@ -2011,28 +2167,27 @@ function autoCloseGaps(){
     }
   }
 
-  const rgbAcc=accColors.map(P3D.hexToRgb);
-  const id=cm.ctx.getImageData(0,0,w,h);
-  const data=id.data;
-  let changed=0;
+  // 塞ぐ画素を対象ごとに集計する(先に変更点だけリスト化し、対象ごとの
+  // アンドゥスナップショットを取ってから反映する)。
+  const pending=[]; // [targetsIdx(0始まり), pixelIdx]
   for(let i=0;i<n;i++){
     if(labels[i]!==0) continue; // 元々前景の画素は変更しない
     const survivesErosion = dilated[i] && (dist2[i]===-1 || dist2[i]>R);
     if(!survivesErosion) continue;
     const lb=nearestLabel[i];
-    if(lb<1) continue;
-    const rgb=(lb===1) ? [0,0,0] : rgbAcc[lb-2];
-    if(!rgb) continue;
-    data[i*4]=rgb[0]; data[i*4+1]=rgb[1]; data[i*4+2]=rgb[2]; data[i*4+3]=255;
-    changed++;
+    if(lb<1 || !targetArrs[lb-1]) continue;
+    pending.push([lb-1,i]);
   }
-  if(changed===0){
+  if(pending.length===0){
     alert("この面には、指定した距離("+R+"px)以内で塞げる隙間が見つかりませんでした。");
     return;
   }
-  pushPaintUndo(paintView);
-  cm.ctx.putImageData(id,0,0);
-  refreshAfterPaintChange();
+  const changedTargets=new Set(pending.map(p=>targetKeys[p[0]]));
+  changedTargets.forEach(t=>pushPaintUndo(t,paintView));
+  pending.forEach(([tIdx,i])=>{ targetArrs[tIdx][i]=1; });
+  changedTargets.forEach(t=>syncPaintAlphaToMask(t,paintView));
+  resyncAnalysisToProfile();
+  renderPaintTab();
 }
 function paintCanvasToImgPt(canvas,e){
   const rc=canvas.getBoundingClientRect();
@@ -2064,7 +2219,7 @@ function renderPaintTargetList(){
     '<span class="sw" style="background:'+a.color+'"></span>'+(a.name||"(無名)")+'</button>').join("");
   wrap.innerHTML=html;
   [].forEach.call(wrap.querySelectorAll(".paintChip"),b=>{
-    b.onclick=()=>{ paintTarget=b.dataset.t; renderPaintTargetList(); };
+    b.onclick=()=>{ paintTarget=b.dataset.t; paintLastImgPt=null; renderPaintTargetList(); renderPaintCanvas(); };
   });
 }
 // コンテナ幅にフィットさせる基準倍率(paintZoom=1の時の実表示倍率)。
@@ -2103,25 +2258,38 @@ function renderPaintCanvas(){
     return;
   }
   if(hint) hint.textContent="";
-  const cm=ensurePaintColormap(paintView);
   const canvas=document.createElement("canvas");
   canvas.id="paintCanvas";
   canvas.width=im.w; canvas.height=im.h;
   const ctx=canvas.getContext("2d");
   ctx.drawImage(im.el,0,0,im.w,im.h);
-  if(cm){ ctx.save(); ctx.globalAlpha=0.55; ctx.drawImage(cm.canvas,0,0,im.w,im.h); ctx.restore(); }
+  drawPaintOverlay(ctx);
   wrap.innerHTML=""; wrap.appendChild(canvas);
   applyPaintCanvasSize();
   wirePaintCanvasEvents(canvas);
 }
+// ★2026-07-18再設計: 以前はcolormaps[view](体+全アクセサリー共有の1枚の
+// canvas)をそのまま重ねていたが、パーツごとに独立したペイント層になった
+// ため、表示側も「今開いている対象(paintTarget)自身の層だけ」を、その対象の
+// 色で塗って重ねる形に変更した(他パーツの層はここでは一切見えない)。
+function drawPaintOverlay(ctx){
+  const im=imgs[paintView];
+  if(!im) return;
+  const arr=ensurePaintAlpha(paintTarget,paintView);
+  if(!arr) return;
+  const colorHex=paintTargetColorHex();
+  const maskCanvas=alphaToMaskCanvas(arr,im.w,im.h);
+  const tinted=tintMaskCanvas(maskCanvas,im.w,im.h,colorHex);
+  ctx.save(); ctx.globalAlpha=0.55; ctx.drawImage(tinted,0,0,im.w,im.h); ctx.restore();
+}
 function wirePaintCanvasEvents(canvas){
   const ctx=canvas.getContext("2d");
   function redrawComposite(){
-    const im=imgs[paintView], cm=colormaps[paintView];
+    const im=imgs[paintView];
     if(!im) return;
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.drawImage(im.el,0,0,im.w,im.h);
-    if(cm){ ctx.save(); ctx.globalAlpha=0.55; ctx.drawImage(cm.canvas,0,0,im.w,im.h); ctx.restore(); }
+    drawPaintOverlay(ctx);
     // ★2026-07-13追加: 塗りペンのサイズが分かるよう、ポインタ位置にブラシ半径の
     // 円を重ね描きする(白地+黒地どちらの上でも見えるよう二重線にする)。線の
     // 太さはpaintCurScaleで割ることで、ズーム倍率に関わらず画面上ほぼ一定の
@@ -2132,30 +2300,25 @@ function wirePaintCanvasEvents(canvas){
       ctx.save();
       ctx.lineWidth=lw*1.6; ctx.strokeStyle="rgba(255,255,255,.95)";
       ctx.beginPath(); ctx.arc(hx,hy,paintBrushSize,0,Math.PI*2); ctx.stroke();
-      ctx.lineWidth=lw; ctx.strokeStyle="rgba(0,0,0,.95)";
+      ctx.lineWidth=lw; ctx.strokeStyle=(paintMode==="eraser")?"rgba(255,60,60,.95)":"rgba(0,0,0,.95)";
       ctx.beginPath(); ctx.arc(hx,hy,paintBrushSize,0,Math.PI*2); ctx.stroke();
       ctx.restore();
     }
   }
   canvas.addEventListener("pointerdown",e=>{
-    const colorHex=paintTargetColorHex();
-    if(!colorHex) return;
-    const cm=ensurePaintColormap(paintView);
-    if(!cm) return;
     try{canvas.setPointerCapture(e.pointerId);}catch(_){}
-    pushPaintUndo(paintView);
+    pushPaintUndo(paintTarget,paintView);
     paintDrawing=true; paintLastImgPt=null;
     const p=paintCanvasToImgPt(canvas,e);
     paintHoverPt=p;
-    paintStrokeTo(paintView,p[0],p[1],paintBrushSize,colorHex);
+    paintStrokeTo(paintView,p[0],p[1],paintBrushSize,paintMode==="eraser"?0:1);
     redrawComposite();
   });
   canvas.addEventListener("pointermove",e=>{
     const p=paintCanvasToImgPt(canvas,e);
     paintHoverPt=p;
     if(paintDrawing){
-      const colorHex=paintTargetColorHex();
-      if(colorHex) paintStrokeTo(paintView,p[0],p[1],paintBrushSize,colorHex);
+      paintStrokeTo(paintView,p[0],p[1],paintBrushSize,paintMode==="eraser"?0:1);
     }
     redrawComposite();
   });
@@ -2183,16 +2346,43 @@ if($("paintBrushSlider")){
   };
 }
 if($("paintUndo")) $("paintUndo").onclick=paintUndo;
-if($("paintClearView")) $("paintClearView").onclick=paintClearCurrentView;
+if($("paintClearView")) $("paintClearView").onclick=paintResetCurrentTarget;
+function setPaintMode(m){
+  paintMode=m;
+  if($("paintModeBrush")) $("paintModeBrush").classList.toggle("on",m==="brush");
+  if($("paintModeEraser")) $("paintModeEraser").classList.toggle("on",m==="eraser");
+}
+if($("paintModeBrush")) $("paintModeBrush").onclick=()=>setPaintMode("brush");
+if($("paintModeEraser")) $("paintModeEraser").onclick=()=>setPaintMode("eraser");
 if($("paintExpandBtn")) $("paintExpandBtn").onclick=expandTargetContour;
 if($("paintCloseGapBtn")) $("paintCloseGapBtn").onclick=autoCloseGaps;
 if($("paintZoomIn")) $("paintZoomIn").onclick=()=>setPaintZoom(paintZoom*1.25);
 if($("paintZoomOut")) $("paintZoomOut").onclick=()=>setPaintZoom(paintZoom/1.25);
 if($("paintZoomReset")) $("paintZoomReset").onclick=()=>setPaintZoom(1);
-if($("paintPanUp")) $("paintPanUp").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollTop-=paintPanStepY(); };
-if($("paintPanDown")) $("paintPanDown").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollTop+=paintPanStepY(); };
-if($("paintPanLeft")) $("paintPanLeft").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollLeft-=paintPanStepX(); };
-if($("paintPanRight")) $("paintPanRight").onclick=()=>{ const w=$("paintCanvasWrap"); if(w) w.scrollLeft+=paintPanStepX(); };
+// ★2026-07-18(ユーザー指摘「スマホ/タブレットで上下左右ボタンが効かない」):
+// .onclickは合成click(タッチ→click変換)に依存するため、環境によっては
+// 反応しない/遅延することがある。ランドマーク移動ボタン(nLeft/nUp/nDown/
+// nRight、holdBtn参照)と同じpointerdownベースの確実な方式に揃える
+// (押しっぱなしでの連続パンにも対応する)。
+function holdPanBtn(id,axis,sign){
+  var b=$(id); if(!b) return;
+  var t=null;
+  var run=function(){
+    var w=$("paintCanvasWrap"); if(!w) return;
+    if(axis==="y") w.scrollTop+=sign*paintPanStepY();
+    else w.scrollLeft+=sign*paintPanStepX();
+  };
+  var start=function(e){ if(b.disabled)return; e.preventDefault(); run(); t=setInterval(run,120); };
+  var stop=function(){ if(t){clearInterval(t);t=null;} };
+  b.addEventListener("pointerdown",start);
+  b.addEventListener("pointerup",stop);
+  b.addEventListener("pointerleave",stop);
+  b.addEventListener("pointercancel",stop);
+}
+holdPanBtn("paintPanUp","y",-1);
+holdPanBtn("paintPanDown","y",1);
+holdPanBtn("paintPanLeft","x",-1);
+holdPanBtn("paintPanRight","x",1);
 
 // 「自動マスク」タブ: front/side/backの画像に、色分けマップ由来のマスク
 // (acc.mask[view].maskDataUrl、白RGB+アルファ=前景のラスタ)を重ね描きした
@@ -2512,6 +2702,7 @@ $("generateBtn").onclick=async()=>{
         out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
         return out;
       }),
+      bodyMask: Object.keys(bodyMask).reduce((o,v)=>{ if(bodyMask[v]) o[v]={maskDataUrl:bodyMask[v].maskDataUrl,bbox:bodyMask[v].bbox}; return o; },{}),
       colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength, genParams,
     };
     // ★2026-07-15(ユーザー指摘「1px/1pxにするとビューアが重すぎる、モデル調整
