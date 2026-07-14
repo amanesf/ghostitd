@@ -78,6 +78,7 @@
 				const v = new THREE.Vector3().fromBufferAttribute( positionAttribute, i );
 				const vertex = new Vertex( v, i );
 				if ( weightAttribute ) vertex.weight = weightAttribute.getX( i );
+				vertex.__idx = vertices.length;
 				vertices.push( vertex );
 
 			} // add faces
@@ -107,6 +108,7 @@
 					const c = index.getX( i + 2 );
 					if ( a === b || b === c || a === c ) continue;
 					const triangle = new Triangle( vertices[ a ], vertices[ b ], vertices[ c ], a, b, c );
+					triangle.__idx = faces.length;
 					faces.push( triangle );
 
 				}
@@ -120,6 +122,7 @@
 					const c = i + 2;
 					if ( a === b || b === c || a === c ) continue;
 					const triangle = new Triangle( vertices[ a ], vertices[ b ], vertices[ c ], a, b, c );
+					triangle.__idx = faces.length;
 					faces.push( triangle );
 
 				}
@@ -211,6 +214,30 @@
 
 		var k = array.indexOf( object );
 		if ( k > - 1 ) array.splice( k, 1 );
+
+	}
+
+	// ★2026-07-14追加(3DtoolJS): vertices/faces(メッシュ全体を通した大域配列)への
+	// removeFromArray()はindexOf+spliceでO(現在の配列長)かかり、collapse()の
+	// たびに呼ばれるため合計でO(頂点数の二乗)級になっていた(100万頂点級の
+	// メッシュで間引きが数十分かかる主因)。要素に自分の現在位置(__idx)を
+	// 持たせておき、削除時は末尾要素とswapしてpopするO(1)版に置き換える。
+	// neighbors/v.faces等の局所的な(頂点の次数に比例した小さい)配列は対象外
+	// (indexOf+splice のまま、次数は小さいためコスト上問題ない)。
+	function removeFromArrayFast( array, object ) {
+
+		const idx = object.__idx;
+		const last = array.length - 1;
+
+		if ( idx !== last ) {
+
+			const moved = array[ last ];
+			array[ idx ] = moved;
+			moved.__idx = idx;
+
+		}
+
+		array.pop();
 
 	}
 
@@ -336,14 +363,14 @@
 
 		}
 
-		removeFromArray( vertices, v );
+		removeFromArrayFast( vertices, v );
 		v.__removed = true; // CostHeap.popValid()が既に消えた頂点の古いエントリを読み捨てるためのフラグ
 
 	}
 
 	function removeFace( f, faces ) {
 
-		removeFromArray( faces, f );
+		removeFromArrayFast( faces, f );
 		if ( f.v1 ) removeFromArray( f.v1.faces, f );
 		if ( f.v2 ) removeFromArray( f.v2.faces, f );
 		if ( f.v3 ) removeFromArray( f.v3.faces, f ); // TODO optimize this!

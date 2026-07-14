@@ -149,9 +149,21 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 指の間の隙間がfront/backで食い違う絵柄だと、backにしかない絵柄で指の間の
 // 隙間が塗り潰され指が癒着していた)。body-only/with-accessoryとも腕の
 // 彫刻結果が変わるため、ハッシュを更新した。
+// ★2026-07-17(パフォーマンス改善): js/vendor/SimplifyModifier.jsの
+// vertices/faces(メッシュ全体を通した大域配列)からの削除がindexOf+spliceで
+// O(現在の配列長)かかり、collapse()のたびに呼ばれるため合計でO(頂点数の
+// 二乗)級になっていた(1px/1px設定・約120万頂点の実測で間引き段階だけで
+// 約40分かかっていた主因)。swap-and-pop方式(削除対象を末尾要素とswapして
+// popする)によりO(1)に置き換えた(ベンチマーク実測: 12.5万頂点で33秒→
+// 4.9秒、98万頂点で(旧方式はタイムアウトするほど遅いため未計測)→35秒、
+// ほぼ線形スケールに改善)。生き残る頂点・面の「集合」は変わらないが、
+// 配列内の並び順が変わったことで、間引き終盤の僅差タイブレークで極めて
+// 近接した(位置差1e-5オーダー)頂点がどちらか一方だけ選ばれる箇所が
+// ごく少数(実測23,713頂点中7〜8点、0.03%)生じるため、ハッシュを更新した
+// (見た目上の劣化は無いことを確認済み)。
 const EXPECTED_BODY_ONLY = {
   byteLength: 698860,
-  sha256: "95482ae27ba2a42fae812d65f3ecb781c02aeefb819ce1b8a6a02ff886d4d969",
+  sha256: "6e31a01dfa8896696bee70eaa7a42eb324f71775de623aefa002491e46157c46",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -261,9 +273,12 @@ const EXPECTED_BODY_ONLY = {
 // ハッシュを更新した(2816216→1222828バイト)。
 // ★2026-07-15: 上のEXPECTED_BODY_ONLYコメント(手/腕をfront単独判定に変更)
 // と同じ変更により、with-accessory側も彫刻結果が変わり、ハッシュを更新した。
+// ★2026-07-17: 上のEXPECTED_BODY_ONLYコメント(SimplifyModifierのswap-and-pop化)
+// と同じ変更により、with-accessory側も間引き終盤の僅差タイブレークが変わり
+// ハッシュを更新した。
 const EXPECTED_WITH_ACCESSORY = {
   byteLength: 1223284,
-  sha256: "85a6900791cfc04b083a7f494120d080bc0faf5655f0acb9567b1b5d4845c3d9",
+  sha256: "7d76fbd885c6de5a498bd5a8977fb3febd4c6f41bca03a48c9fc8f2e143db07d",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
