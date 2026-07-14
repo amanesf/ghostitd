@@ -526,118 +526,111 @@ const COLOR_GRAD_STRENGTH_DEFAULT=0.5;
 const DEFAULT_GEN_PARAMS=P3D.DEFAULT_GEN_PARAMS;
 // group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
 // (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
+// ★2026-07-17(設定タブ整理): 従来は「輪郭抽出」「解像度/軽量化」「断面の
+// 丸み具合」「顔の彫刻」「パーツ境界」「ノイズ・ガタつき対策」「腕の彫刻」
+// 「手の彫刻」「エッジ処理」「背面/側面ズレ補正」「モデル調整」の11区分
+// あったが、処理工程の段階でグループ分けしていたため、同じ部位(腕・顔等)の
+// 設定が複数区分に分散し、名前だけでは何に効くのか分かりにくいという指摘を
+// 受けた(ユーザーとの棚卸し会話参照)。「最終的に何に対する処理か」を軸に
+// 6区分へ再編した:
+//   1. 画像読み取り: 入力の3枚絵(front/side/back)そのものの読み取り・位置合わせ
+//   2. モデルへの画像貼り付け: 彫刻済みモデルへ焼き込むテクスチャの処理
+//   3. モデルの細かさ: ボクセル解像度・間引きなど最終モデルの頂点数/重さ
+//   4. モデルの形: 断面の丸み・腕/手の彫刻方式など、狙った形状そのもの
+//   5. モデル補正: 抽出時の不具合(パーツ間の隙間等)を後から直す設定
+//   6. 動き方(スキニング): アニメーション時の関節の変形
+// あわせて、実サンプルで検証した結果「意味がない」と判断した項目
+// (face_sculpt/eye_socket_*、bone_bridge、track_win/track_gap_close_px/
+// depth_gap_close_px)を機能ごと削除した(js/common.js DEFAULT_GEN_PARAMS
+// 参照)。
 const PARAM_META=[
- // ★2026-07-10: 体+全アクセサリーを1つの共有ボクセルグリッドで統合彫刻する
- // 方式に変更したため(js/pipeline.jsのrunCarvingStages参照)、グリッド解像度は
- // body_vox/body_vox_xz(2026-07-14に縦横分離)のみで決まるようになった。
- // acc_vox(旧・アクセサリー単体の解像度)は統合彫刻では使われなくなったため
- // UIから削除した(データ自体はDEFAULT_GEN_PARAMSに残すが、編集しても効果が
- // 無いUIを表示し続けるとユーザーを混乱させるため)。
- {group:"輪郭抽出", key:"subpixel_edges", label:"色分けマップ境界のサブピクセル補正", type:"checkbox",
+ // ---- 1. 画像読み取り ----
+ {group:"画像読み取り", key:"subpixel_edges", label:"色分けマップ境界のサブピクセル補正", type:"checkbox",
   desc:"ONだと、色分けマップ上の体・各アクセサリー・背景の境界(最近傍色分類による確定的な境界)を、アンチエイリアスで混ざった実際の色から1px未満の精度で補間する。OFFだと従来通り整数px単位の境界になる(輪郭がわずかにガタつく)。以前の輝度しきい値ベースのサブピクセル補正は色分けマップで不安定になった実績があるため、様子を見て問題があればOFFに戻せるようにしている。"},
+ {group:"画像読み取り", key:"back_offset_x", label:"背面画像 左右ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"背面写真は前面写真とは別に撮影/作画されるため、前面基準の彫り出し/貼り付けにpx単位のズレが残ることがある。正の値で背面の彫り出し/テクスチャ参照位置を右へ、負の値で左へずらす。実際のビューアで見た目を確認しながら調整する。"},
+ {group:"画像読み取り", key:"back_offset_y", label:"背面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はback_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"画像読み取り", key:"side_offset_x", label:"側面画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"側面写真の奥行き(前後)方向の基準ズレを補正する。正の値で奥行きの参照位置を右へ、負の値で左へずらす。"},
+ {group:"画像読み取り", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"画像読み取り", key:"leftside_offset_x", label:"側面(左)画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"左右非対称キャラ用のleftSide(左向き側面)画像のズレ補正。意味・使い方はside_offset_xと同じ(mask.leftSideを持つアクセサリーだけに影響する。全身の奥行きは常にside(右)画像のみを使い、leftSideは使わない)。"},
+ {group:"画像読み取り", key:"leftside_offset_y", label:"側面(左)画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+
+ // ---- 2. モデルへの画像貼り付け ----
+ // ★2026-07-17修正(ユーザー指摘): 以前の説明は「輪郭のディテールがわずかに
+ // 丸まる」としていたが誤りだった。にじみ(bleedEdges)は焼き込むテクスチャ
+ // 画像だけを加工する処理で、3Dモデルの輪郭(切り抜き/シルエット)は
+ // classifySilhouetteRaw由来の別処理で独立に決まる。にじみの効果は
+ // テクスチャのUV継ぎ目でのはみ出し防止マージンがどこまで届くかだけであり、
+ // 3D形状には一切影響しない。
+ {group:"モデルへの画像貼り付け", key:"alpha_dilate", label:"テクスチャのにじみマージン", type:"number", min:0, max:30, step:1, unit:"px",
+  desc:"テクスチャに焼き込む色にじみ(UV継ぎ目でのはみ出し防止マージン)がどこまで届くかの量。3Dモデルの輪郭(切り抜き形状)には影響しない、あくまでテクスチャ画像の色の広がりだけの設定。"},
+ {group:"モデルへの画像貼り付け", key:"bleed_inset_px", label:"にじみの起点を内側へずらす量", type:"number", min:0, max:15, step:1, unit:"px",
+  desc:"縁の色にじみ(上のマージン)は既定で輪郭ぎりぎりの画素を起点に外側へ伸ばすため、元イラストが輪郭を黒い縁取りストロークで描いていると、その黒色までにじんで縁取りが太って見えることがある。この値を増やすと、輪郭からこの分だけ内側(縁取りより内側の本来の塗り色)を起点ににじませるようになる。0で従来通り輪郭ぎりぎりから。"},
+ {group:"モデルへの画像貼り付け", key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", type:"number", min:50, max:1000, step:10, unit:"KB"},
+
+ // ---- 3. モデルの細かさ ----
  // ★2026-07-14追加(ユーザー指摘「横方向は490頂点も要らない、丸みは数式で
  // 合成してるだけだから細かく作る必要ない。縦方向は画像の実測値だから重要」):
  // 縦(Y、高さ方向)と横/奥行き(X・Z)の解像度を分離した(js/carving.jsの
  // buildGrid参照)。縦は各行がfront/side/back画像の実測データそのものだが、
  // 横/奥行きは各行の断面をsuperellipse数式で合成しているだけの近似形状
  // なので、縦ほど細かくしても実質的な情報は増えない。
- {group:"解像度/軽量化", key:"body_vox", label:"ボクセル解像度(縦・高さ方向)", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)", pxUnit:true,
+ {group:"モデルの細かさ", key:"body_vox", label:"ボクセル解像度(縦・高さ方向)", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)", pxUnit:true,
   desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。front/side/back画像の実測行をそのままサンプルする縦(Y、高さ)方向の解像度。「ボクセルを1pxに合わせる」ボタンで元画像のpx解像度にちょうど合わせられる(これ以上細かくしても元画像に存在しない情報を彫るだけで無駄)。"},
- {group:"解像度/軽量化", key:"body_vox_xz", label:"ボクセル解像度(横・奥行き方向)", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
-  desc:"各行の断面(幅・奥行き)はなめらかな数式(superellipse)で合成しているだけの近似形状のため、縦方向ほど細かくしても見た目はほとんど変わらず、頂点数・メモリだけを無駄に消費する。既定値は縦解像度の4倍(=横方向の頂点数はおおよそ4分の1)。大きくしすぎると断面が多角形っぽくカクついて見える。"},
- {group:"断面の丸み具合", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ // ★2026-07-17修正(ユーザー指摘「髪の毛先とか細かくしないと表現できない」):
+ // 以前の説明は「縦方向ほど細かくしても見た目はほとんど変わらない」として
+ // いたが不正確だった。js/carving.jsのbuildWidthTracksはこの値より狭い
+ // (=細い)行セグメントを丸ごとノイズとして棄却するため、太い部位(胴体・脚
+ // 等)には確かに影響が薄い一方、髪の毛先のように元々細い部分はこの値が
+ // 粗いと物理的に消滅する。
+ {group:"モデルの細かさ", key:"body_vox_xz", label:"ボクセル解像度(横・奥行き方向)", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
+  desc:"太い部位(胴体・脚等)の断面は数式(superellipse)で合成しているだけの近似形状なので、この値を細かくしても見た目はほとんど変わらない。ただし、この値より細い(狭い)部分(髪の毛先等)はノイズとみなして丸ごと消えるため、細部を残したい場合は小さくする必要がある。既定値は縦解像度の4倍。大きくしすぎると太い部位の断面が多角形っぽくカクつき、かつ細い部分が消える。"},
+ {group:"モデルの細かさ", key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
+ {group:"モデルの細かさ", key:"decimate_strength", label:"間引きの強さ(体+アクセサリー共通)", type:"number", min:0, max:1, step:0.01, unit:"",
+  desc:"目標頂点数ではなく、間引きで許容する形状のズレの上限(誤差ベース、js/carving.jsのstrengthToMaxCost参照)。内部では「辺の長さ×その辺を挟む面同士の法線がなす角度」をコストとし、コストが低い(=目立たない)辺から間引く。大きいほど許容誤差が指数的に増え強く間引かれる。decimateがONの時のみ有効。"},
+
+ // ---- 4. モデルの形 ----
+ {group:"モデルの形", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく(専門的には「スーパー楕円指数」と呼ぶ形状パラメータ)。"},
- {group:"断面の丸み具合", key:"psq_torso", label:"胴体の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"モデルの形", key:"psq_torso", label:"胴体の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"首〜腰(胸/腹/腰)の断面形状。2に近いほど楕円(丸み)に近づき、大きくすると四角形に近づく(角ばった衣装等で有効な場合がある)。腕/脚が胴体に接続する遷移帯の形状にも使われる。"},
- {group:"断面の丸み具合", key:"psq_legs", label:"脚の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"モデルの形", key:"psq_legs", label:"脚の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"腰から下(脚)の断面形状。左右対称なので左右で共通の1個の値。意味はpsq_torsoと同じ。"},
- {group:"断面の丸み具合", key:"psq_arms", label:"腕の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"モデルの形", key:"psq_arms", label:"腕の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"肩→肘→手首の円形断面(arm_circle有効時)に使う指数。左右対称なので左右で共通の1個の値。2に近いほど円形に近く自然な腕になる。"},
- {group:"断面の丸み具合", key:"psq_hands", label:"手の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+ {group:"モデルの形", key:"psq_hands", label:"手の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
   desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
- {group:"顔の彫刻", key:"face_sculpt", label:"目窩を彫る", type:"checkbox",
-  desc:"ONだと「目L」「目R」ランドマークを中心に、彫刻済みの頭部表面へ局所的な凹みを彫る(front/back/sideどのシルエット輪郭にも現れない内部形状なので、輪郭=元イラストの実測データとは矛盾しない)。頭部は他の部位と同じ行ごとの断面で彫るため、OFFのままだとのっぺりした顔になりやすい。"},
- {group:"顔の彫刻", key:"eye_socket_depth", label:"目窩の深さ", type:"number", min:0, max:0.03, step:0.001, unit:"(model単位)", pxUnit:true,
-  desc:"目のランドマークを中心に、彫刻済みの表面をどれだけ内側(-z)へ凹ませるか(中心での最大値。周囲へなだらかに0まで減衰する)。face_sculptがONの時のみ有効。"},
- {group:"顔の彫刻", key:"eye_socket_radius_x", label:"目窩の横幅", type:"number", min:0.005, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
-  desc:"目窩の凹みの左右方向の広がり(このランドマークからの楕円形footprintの半径)。face_sculptがONの時のみ有効。"},
- {group:"顔の彫刻", key:"eye_socket_radius_y", label:"目窩の縦幅", type:"number", min:0.005, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
-  desc:"目窩の凹みの上下方向の広がり(このランドマークからの楕円形footprintの半径)。face_sculptがONの時のみ有効。"},
+ {group:"モデルの形", key:"arm_circle", label:"腕をボーンに沿った円筒形にする", type:"checkbox",
+  desc:"ONだと肩→肘→手首の骨線に沿って、front画像の各列で腕の縦(y)方向の太さを測り、それを奥行き(z)に適用した円形断面で彫る(side計測は腕に使わない。腕が板状/胴体並みの厚みになるのを防ぐ)。OFFにすると従来通りside計測の奥行きをそのまま使う。"},
+ {group:"モデルの形", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)", pxUnit:true,
+  desc:"腕の円形断面の半径(縦幅から傾き補正した値)の上限。これを超える列は腕とみなさない(骨線が肩の付け根など胴体内部を通る列を誤って円形化するのを防ぐ)。小さくしすぎると太い袖の腕が拾われなくなる。arm_circleがONの時のみ有効。"},
+ {group:"モデルの形", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
+  desc:"ONだと手首から先(手)を、side計測の奥行き(その高さの胴体・腰の厚み)ではなく、front絵柄のシルエットをhand_depthの薄い奥行きでそのまま押し出した板として彫る。OFFだと従来通りside計測の奥行きになる。"},
+ {group:"モデルの形", key:"hand_depth", label:"手の厚み(半分の値)", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)", pxUnit:true,
+  desc:"手の押し出しの厚みの半分(全厚はこの2倍)。side計測やシルエット幅に関係なく、手の奥行きは常にこの設定値になる。hand_extrudeがONの時のみ有効。"},
+
+ // ---- 5. モデル補正 ----
  // ★2026-07-12追加(ユーザー指摘「45度から見たらパーツ間隙間が開く」対応):
  // 体+全アクセサリーは1つの共有グリッドへ統合彫刻されるが、各パーツの
  // フィールドはそのパーツ自身のfront/side/back画像だけから独立に作られる
  // ため、3方向どの投影でも輪郭が一致して見えても斜め方向には「どちらの
  // パーツの表面も届いていない」隙間ができることがある(js/carving.jsの
- // carveSdfField/carveUnifiedRegions参照)。彫刻(marching cubes)そのものに
- // 関わる設定のため、character_3d.htmlのライブ編集パネルではなく生成前の
- // ここ(PARAM_META)にのみ置く。
- // ★2026-07-13追加(ユーザー指摘「ツインテールの付け根で隙間が空く」対応):
- // ツインテールのように遮蔽でシルエットの一部が欠落するケース
- // (js/carving.jsのcomputeRowExtents/computeBoneBridgeRows参照)を橋渡しする。
- // ★2026-07-14: 同様の目的だった「パーツ境界をなじませる」(owner_blend)
- // 機能は、実測(163,982頂点のサンプル)で該当ボクセルがわずか34頂点分しか
- // なく体感できる効果がほぼ無いことが分かったため機能ごと削除した
- // (ユーザー指摘「効果がなさすぎる」)。
- {group:"パーツ境界", key:"bone_bridge", label:"遮蔽で欠けたパーツを橋渡しする", type:"checkbox",
-  desc:"ツインテールが後ろ髪の一部を覆い隠す場合のように、front/side/back画像で1つのパーツが別のパーツに隠れて輪郭が欠落すると、隠れた範囲の彫刻データそのものが無くなり、彫刻結果に隙間が残ることがある。ONにすると、ボーン(付け根の骨、例えばツインテールと後ろ髪はともに頭)を共有するパーツ同士に限り、幅(front/back)と奥行き(side)の両方で同時に隙間なく隣接している箇所だけを「本当に3D的に接している」と判定して橋渡しする(ボーン共有+多方向同時隣接の二重確認により、無関係なパーツ同士が誤って連結されるのを防ぐ)。橋渡し範囲は隙間/重なりの近傍だけに絞ってあり、幅・奥行き両方が重なっている箇所は誤爆防止のため対象外にしている。ただし体はbonesを持たず常に全アクセサリーの橋渡し候補になるため、まだ稀に意図しない箇所が繋がる可能性がある実験的機能。"},
- // ★2026-07-14追加(ユーザー要望「手動マップではなく、モデル生成時に隙間を
- // 埋める機能がほしい。設定した距離をパーツ間だけ塞ぐ」): bone_bridgeが
- // ボーン共有+行単位の粗い外縁近似で「隣接」を判定していたのに対し、こちらは
- // ボクセルグリッド上の本物の3次元距離だけで判定するシンプルな方式にした
- // (js/carving.jsのcloseInterPartGaps参照)。
- {group:"パーツ境界", key:"part_gap_close", label:"パーツ間の隙間を距離で塞ぐ", type:"checkbox",
-  desc:"まだどのパーツも彫刻データを持たない空ボクセルのうち、異なる2パーツ以上の表面から同時に「パーツ間の隙間を塞ぐ距離」以内に届いている(=パーツとパーツに挟まれた細い隙間の中にある)ボクセルだけを実体で埋める。ボーンや行単位の近似は使わず、ボクセルグリッド上の実測3次元距離だけで判定するため、bone_bridgeで見つかったような「粗い近似による誤判定」が起きにくい。同一パーツ内の凹みや、1パーツだけに近い外周(輪郭そのもの)には影響しない。"},
- {group:"パーツ境界", key:"part_gap_close_dist", label:"パーツ間の隙間を塞ぐ距離", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
+ // carveSdfField/carveUnifiedRegions参照)。
+ {group:"モデル補正", key:"part_gap_close", label:"パーツ間の隙間を距離で塞ぐ", type:"checkbox",
+  desc:"まだどのパーツも彫刻データを持たない空ボクセルのうち、異なる2パーツ以上の表面から同時に「パーツ間の隙間を塞ぐ距離」以内に届いている(=パーツとパーツに挟まれた細い隙間の中にある)ボクセルだけを実体で埋める。ボクセルグリッド上の実測3次元距離だけで判定する。同一パーツ内の凹みや、1パーツだけに近い外周(輪郭そのもの)には影響しない。"},
+ {group:"モデル補正", key:"part_gap_close_dist", label:"パーツ間の隙間を塞ぐ距離", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
   desc:"この距離以内で2パーツ以上に挟まれている隙間を塞ぐ。大きいほど広い隙間まで塞げるが、離れた無関係なパーツ同士まで誤って繋がるリスクが増える。part_gap_closeがONの時のみ有効。"},
- {group:"ノイズ・ガタつき対策", key:"track_win", label:"横方向のノイズ平滑化幅", type:"number", min:1, max:31, step:2, unit:"行",
-  desc:"幅方向(front/back)のセグメント測定に適用する。大きくすると測定ノイズは減るが細かい起伏も均されて鈍る。小さくすると細部の形状は残るがノイズによる凸凹が出やすい。※奥行き(side計測)には適用されない(顎先のような数行の突出が消えるため)。"},
- {group:"ノイズ・ガタつき対策", key:"track_gap_close_px", label:"房の分断を埋める幅", type:"number", min:0, max:20, step:1, unit:"px",
-  desc:"髪の房などで、手前の房が奥の房を隠す描き方の交差部分に色分けマップ上で数px〜十数px幅の隙間が残っていると、そこで別の房(track)として分断され、3Dにしたときに絵では気にならなかった隙間がそのまま立体的な溝になって見える。この値より狭い隙間は同じ房として繋げて彫る。0で無効(隙間があればそのまま別々の房として彫る)。大きくしすぎると本来別々の房(左右のツインテール等)まで融合する恐れがある。"},
- {group:"ノイズ・ガタつき対策", key:"depth_gap_close_px", label:"奥行きの分断を埋める幅", type:"number", min:0, max:20, step:1, unit:"px",
-  desc:"側面の色分けマップ上で、奥行き方向に複数の塊(例: 前髪の房が手前、顔がその奥に覗く)が並んでいるとき、この値より狭い隙間は「顎先と首の間」のような実在の小さい凹みとみなして同じ塊として繋げ、1枚の連続した奥行きで彫る。この値より広い隙間は本当に別々の塊とみなし、それぞれ独立した奥行きスラブとして彫る(房の手前に別の奥行きの顔が覗くような形になる)。0で無効(隙間があれば常に別々の塊として彫る)。大きくしすぎると本来分かれているべき房と顔が奥行き方向で融合する。"},
- {group:"腕の彫刻", key:"arm_circle", label:"腕をボーンに沿った円筒形にする", type:"checkbox",
-  desc:"ONだと肩→肘→手首の骨線に沿って、front画像の各列で腕の縦(y)方向の太さを測り、それを奥行き(z)に適用した円形断面で彫る(side計測は腕に使わない。腕が板状/胴体並みの厚みになるのを防ぐ)。OFFにすると従来通りside計測の奥行きをそのまま使う。"},
- {group:"腕の彫刻", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)", pxUnit:true,
-  desc:"腕の円形断面の半径(縦幅から傾き補正した値)の上限。これを超える列は腕とみなさない(骨線が肩の付け根など胴体内部を通る列を誤って円形化するのを防ぐ)。小さくしすぎると太い袖の腕が拾われなくなる。arm_circleがONの時のみ有効。"},
- {group:"手の彫刻", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
-  desc:"ONだと手首から先(手)を、side計測の奥行き(その高さの胴体・腰の厚み)ではなく、front絵柄のシルエットをhand_depthの薄い奥行きでそのまま押し出した板として彫る。OFFだと従来通りside計測の奥行きになる。"},
- {group:"手の彫刻", key:"hand_depth", label:"手の厚み(半分の値)", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)", pxUnit:true,
-  desc:"手の押し出しの厚みの半分(全厚はこの2倍)。side計測やシルエット幅に関係なく、手の奥行きは常にこの設定値になる。hand_extrudeがONの時のみ有効。"},
- {group:"エッジ処理", key:"alpha_dilate", label:"縁の色にじみの膨張量", type:"number", min:0, max:30, step:1, unit:"px",
-  desc:"増やすとテクスチャ縁の透明の隙間(拡大縮小時ににじみが出るのを防ぐ処理)が広がるが、輪郭のディテールがわずかに丸まる。"},
- {group:"エッジ処理", key:"bleed_inset_px", label:"にじみの起点を内側へずらす量", type:"number", min:0, max:15, step:1, unit:"px",
-  desc:"縁の色にじみ(上の膨張量)は既定で輪郭ぎりぎりの画素を起点に外側へ伸ばすため、元イラストが輪郭を黒い縁取りストロークで描いていると、その黒色までにじんで縁取りが太って見えることがある。この値を増やすと、輪郭からこの分だけ内側(縁取りより内側の本来の塗り色)を起点ににじませるようになる。0で従来通り輪郭ぎりぎりから。"},
- {group:"背面/側面ズレ補正", key:"back_offset_x", label:"背面画像 左右ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
-  desc:"背面写真は前面写真とは別に撮影/作画されるため、前面基準の彫り出し/貼り付けにpx単位のズレが残ることがある。正の値で背面の彫り出し/テクスチャ参照位置を右へ、負の値で左へずらす。実際のビューアで見た目を確認しながら調整する。"},
- {group:"背面/側面ズレ補正", key:"back_offset_y", label:"背面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
-  desc:"意味はback_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
- {group:"背面/側面ズレ補正", key:"side_offset_x", label:"側面画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
-  desc:"側面写真の奥行き(前後)方向の基準ズレを補正する。正の値で奥行きの参照位置を右へ、負の値で左へずらす。"},
- {group:"背面/側面ズレ補正", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
-  desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
- {group:"背面/側面ズレ補正", key:"leftside_offset_x", label:"側面(左)画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
-  desc:"左右非対称キャラ用のleftSide(左向き側面)画像のズレ補正。意味・使い方はside_offset_xと同じ(mask.leftSideを持つアクセサリーだけに影響する。全身の奥行きは常にside(右)画像のみを使い、leftSideは使わない)。"},
- {group:"背面/側面ズレ補正", key:"leftside_offset_y", label:"側面(左)画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
-  desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
- // ★2026-07-15(ユーザー指摘「1px/1pxにするとビューアが重すぎる、間引き等の
- // モデル調整機能はジェネレータに移した方がいい」対応): 2026-07-07〜07-12は
- // 「生成」を彫刻直後の生メッシュまでで止め、平滑化/間引き/継ぎ目調整は
- // character_3d.html(ビューア)側でライブプレビューしながら編集する方式に
- // していた。しかしジェネレータには元々3Dプレビュー機能が無く(2D画像+
- // ランドマーク編集専用のcanvasのみ)、ビューア側で見た目確認しながら調整
- // できることが利点だった。今回、体格によっては生メッシュが非常に大きくなり
- // (1px/1px設定で数十万頂点)、ビューアがその生メッシュを保持したまま毎回
- // 間引き直す設計がビューアを重くする原因になったため、この設計をやめ、
- // 「生成」ボタンを押した時点でfinishFromIntermediate()まで完了させ、完成
- // GLBだけをビューアに渡すよう戻した(js/idb.jsのコメント参照)。見た目確認
- // しながらの調整はできなくなるが、値はここで数値入力して決め、結果は
- // ビューアで確認する運用になる(ユーザー承認済み)。
- {group:"モデル調整", key:"smooth_iters", label:"表面平滑化回数(体+アクセサリー共通)", type:"number", min:0, max:60, step:1, unit:"回"},
- {group:"モデル調整", key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", type:"number", min:0, max:0.8, step:0.05, unit:""},
- {group:"モデル調整", key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", type:"number", min:50, max:1000, step:10, unit:"KB"},
- {group:"モデル調整", key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
- {group:"モデル調整", key:"decimate_strength", label:"間引きの強さ(体+アクセサリー共通)", type:"number", min:0, max:1, step:0.01, unit:"",
-  desc:"誤差ベースの間引き強度(js/carving.jsのstrengthToMaxCost参照)。大きいほど強く間引かれ頂点数が減る。decimateがONの時のみ有効。"},
+ {group:"モデル補正", key:"smooth_iters", label:"表面平滑化回数(体+アクセサリー共通)", type:"number", min:0, max:60, step:1, unit:"回",
+  desc:"ボクセル化(marching cubes)特有の階段状のガタつきを均す回数。増やすほど滑らかになるが、細かい造形も鈍る。"},
+
+ // ---- 6. 動き方(スキニング) ----
+ {group:"動き方(スキニング)", key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", type:"number", min:0, max:0.8, step:0.05, unit:"",
+  desc:"アニメーションで動かした時、関節周りがどれだけ柔らかく変形するか(0で完全に剛体的、大きいほど滑らかに変形する)。"},
 ];
 // ★2026-07-15: seam_smooth_iters/color_grad_width/color_grad_strengthは
 // genParams(DEFAULT_GEN_PARAMS)ではなく別建ての変数(seamSmoothIters等、下記)
@@ -652,13 +645,18 @@ let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
 let paramGroupOpen={};
 
 /* ---------- フェーズ0: 2Dプレビュー(パラメータ展開中に効果をその場表示) ---------- */
-// PARAM_META上のグループ名 -> {view:自動切替先, keys:関連パラメータ}。
-// 「純粋な2D画像処理だけで完結する」パラメータ群のみが対象(彫刻/メッシュ
-// 系パラメータのグループはここに含めない)。
+// PARAM_META上のグループ名 -> {view:自動切替先}。「純粋な2D画像処理だけで
+// 完結する」パラメータ群のみが対象(彫刻/メッシュ系パラメータのグループは
+// ここに含めない)。
+// ★2026-07-17(設定タブ整理): 「画像読み取り」グループ(背面/側面ズレ補正)は
+// プレビュー対象から外した。このプレビューはview(front/back/side等)を
+// グループ単位で1つに固定していたため、side_offset_x/y・leftside_offset_x/y
+// を編集してもプレビューは常にback画像のままで反映されず(back_offset_x/y
+// しか実際には機能していなかった)、ユーザー指摘により発覚した不具合。
+// 項目ごとにviewを切り替える作りに直すのは規模が大きいため、正しく直せる
+// までは廃止する。
 const PREVIEW_GROUPS={
-  "エッジ処理":{view:"front",keys:["alpha_dilate"]},
-  "背面/側面ズレ補正":{view:"back",keys:["back_offset_x","back_offset_y","side_offset_x","side_offset_y"]},
-  "ノイズ・ガタつき対策":{view:"front",keys:["track_win"]},
+  "モデルへの画像貼り付け":{view:"front"},
 };
 let previewActiveGroup=null; // 現在プレビュー中のPARAM_METAグループ名(展開中のグループ)
 // プレビュー画像のキャッシュ(同一view+パラメータで毎フレーム再計算しない
@@ -670,12 +668,41 @@ function previewCacheKey(view){
 // ★2026-07-09: 体シルエットの2値化を色分けマップ方式に統一したため、プレビュー
 // もbodyAlphaFromColormap(最近傍色分類)を使う(white_thr/除外マスク/輪郭線
 // 除去プレビューは全て廃止)。
+// ★2026-07-17修正(ユーザー指摘「にじみは本来全身+全アクセサリーなのに
+// 体だけでにじんでいる」): 実際のパイプライン(js/pipeline.jsのbleedFgAlpha
+// 参照)はbleedEdgesの前景に体だけでなく全アクセサリーのマスクも和集合で
+// 含めているが、このプレビューは体のシルエットだけを前景として使っていた。
+// アクセサリーのmaskDataUrlはImage読み込みが非同期のため、読み込み済みの
+// ものだけをキャッシュ(accMaskImgCache)から都度合成し、未読み込みのものは
+// 読み込み完了時にプレビューキャッシュを無効化して再描画を促す。
+let accMaskImgCache={}; // "view:accIndex" -> HTMLImageElement(読み込み済み)
+function unionAlphaWithAccessories(view, cm){
+  const alpha=bodyAlphaFromColormap(cm);
+  accessories.forEach((a,i)=>{
+    const m=a.mask&&a.mask[view];
+    if(!m||!m.maskDataUrl)return;
+    const ck=view+":"+i;
+    const cached=accMaskImgCache[ck];
+    if(cached && cached!=="loading" && cached.complete){
+      const c=document.createElement("canvas"); c.width=cm.w; c.height=cm.h;
+      const cx=c.getContext("2d"); cx.drawImage(cached,0,0,cm.w,cm.h);
+      const id=cx.getImageData(0,0,cm.w,cm.h).data;
+      for(let p=0;p<alpha.length;p++){ if(id[p*4+3]>127) alpha[p]=1; }
+    }else if(!cached){
+      accMaskImgCache[ck]="loading"; // 読み込み中(complete判定を再度triggerしないための仮登録)
+      const mi=new Image();
+      mi.onload=()=>{ accMaskImgCache[ck]=mi; previewCache.key=null; if(previewModeActive())draw(); };
+      mi.src=m.maskDataUrl;
+    }
+  });
+  return alpha;
+}
 function buildPreviewCanvas(view){
   const img=imgs[view]; const cm=colormaps[view]; if(!img||!cm)return null;
   const key=previewCacheKey(view);
   if(previewCache.key===key && previewCache.view===view) return previewCache;
   try{
-    const alpha=bodyAlphaFromColormap(cm);
+    const alpha=unionAlphaWithAccessories(view, cm);
     const rgba=P3D.imageToImageData(img.el, img.w, img.h).data;
     const bled=P3D.bleedEdges(rgba, img.w, img.h, alpha, genParams.alpha_dilate, genParams.bleed_inset_px);
     const c=document.createElement("canvas");c.width=img.w;c.height=img.h;
@@ -701,7 +728,7 @@ function paramGroupChanged(g){
 }
 // ★2026-07-11: アクセサリー個別の「断面の丸み(psq)」は、以前は自動マスクタブの
 // アクセサリー別カードに置かれていたが、マスク抽出(色分けマップの切り抜き)には
-// 一切影響しない3D彫刻専用パラメータなので、こちらの設定値タブ(断面の丸み具合
+// 一切影響しない3D彫刻専用パラメータなので、こちらの設定値タブ(モデルの形
 // グループ)へ移動した。PARAM_METAは1キー=1パラメータのフラットな配列だが、
 // これはアクセサリーごとに複数値を持つため、同グループの末尾に特別に追加描画する。
 // ★2026-07-12(ユーザー指摘「まとめて設定は意味がない」): アクセサリーごとに
@@ -768,16 +795,16 @@ function renderVertEstimateHtml(){
 let seamGroupOpen={}, seamBulkOpen=false;
 function seamRowHtml(label,key,v,ns){
   return '<div class="acitem"><span class="nm">'+label+'</span>'+
-    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-seam-range="'+key+'" style="flex:1;min-width:40px">'+
-    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-seam-key="'+key+'" style="width:44px">°'+
-    '<label style="font-size:10.5px;color:var(--mut);margin-left:4px;white-space:nowrap">'+
-    '<input type="checkbox" data-seam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面</label>'+
+    '<label style="font-size:10.5px;color:var(--mut);margin-right:6px;white-space:nowrap">'+
+    '<input type="checkbox" data-seam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面画像を使う</label>'+
+    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-seam-range="'+key+'" style="flex:1;min-width:40px" title="使う場合の切替角度">'+
+    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-seam-key="'+key+'" style="width:44px" title="使う場合の切替角度">°'+
     '</div>';
 }
 function seamAccKeys(){ return accessories.map(a=>"acc:"+a.name); }
 function renderSeamBulkHtml(){
   return '<details class="accgroup" data-seamgroup="一括設定"'+(seamBulkOpen?" open":"")+'>'+
-    '<summary><span>継ぎ目角度: 一括設定</span><span class="accCount">2項目</span></summary>'+
+    '<summary><span>側面画像の利用: 一括設定</span><span class="accCount">2項目</span></summary>'+
     '<div class="accbody">'+
     '<div class="acitem" style="margin-bottom:8px">'+
     '<span class="nm">全パーツ一括</span>'+
@@ -798,7 +825,7 @@ function buildSeamGroupsHtml(){
     }).join("");
     const isOpen=!!seamGroupOpen[grp.label];
     return '<details class="accgroup" data-seamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
-      '<summary><span>継ぎ目角度: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
+      '<summary><span>側面画像の利用: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
       '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
   }).join("");
   const accKeys=seamAccKeys();
@@ -810,7 +837,7 @@ function buildSeamGroupsHtml(){
     }).join("");
     const isOpen=!!seamGroupOpen["アクセサリー"];
     accHtml='<details class="accgroup" data-seamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
-      '<summary><span>継ぎ目角度: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
+      '<summary><span>側面画像の利用: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
       '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
   }
   return boneGroupsHtml+accHtml;
@@ -828,7 +855,7 @@ function renderSeamPanelHtml(){
     (f.unit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+f.unit+'</span>':"")+
     '</div></div>').join("");
   return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
-    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">テクスチャ継ぎ目</div>'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">側面画像の利用(パーツごとに使うか・使う場合の切替角度)</div>'+
     extraFields+renderSeamBulkHtml()+buildSeamGroupsHtml()+'</div>';
 }
 // ★2026-07-14追加(ユーザー指摘「設定値のモデル単位は全部px表記にしてほしい、
@@ -886,9 +913,9 @@ function buildParamsPanelHtml(){
       '<span class="accCount">'+itemList.length+'項目</span>'+
       '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
       '</summary><div class="accbody">'+items+
-      (g==="断面の丸み具合"?renderPsqAccessoryOverridesHtml():"")+
-      (g==="解像度/軽量化"?renderVoxPxHelperHtml():"")+
-      (g==="モデル調整"?(renderVertEstimateHtml()+renderSeamPanelHtml()):"")+
+      (g==="モデルの形"?renderPsqAccessoryOverridesHtml():"")+
+      (g==="モデルの細かさ"?(renderVoxPxHelperHtml()+renderVertEstimateHtml()):"")+
+      (g==="モデルへの画像貼り付け"?renderSeamPanelHtml():"")+
       '</div></details>';
   }).join("");
 }
@@ -2185,7 +2212,7 @@ function buildAutomaskItemHtml(a, idx){
   // 変更しない前提のため、再抽出はJSON読込時のextractAllAccessoryMasks()の
   // みで十分)。
   // ★2026-07-11: 断面の丸み(psq)個別設定UIは、マスク抽出に一切影響しない
-  // 3D彫刻専用パラメータのため、設定値タブ(断面の丸み具合グループ)へ移動した
+  // 3D彫刻専用パラメータのため、設定値タブ(モデルの形グループ)へ移動した
   // (renderPsqAccessoryOverridesHtml参照)。
   return '<div class="acform" style="margin-bottom:8px">'+
     '<span class="tag">自動マスク / 面: '+views.join(",")+'</span>'+

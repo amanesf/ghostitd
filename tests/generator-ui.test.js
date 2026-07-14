@@ -98,6 +98,9 @@ async function testEditorTabsAndOverlays(server, browser) {
 // パネル(旧character_3d.htmlの「フェーズ2」ライブ編集パネル)をこちらに
 // 移植した。3Dプレビューは無い(ユーザー承認済み)ため、再計算ではなく
 // genParams/seamAngles/seamNoSideへ正しく値が書き込まれることだけを確認する。
+// ★2026-07-17(設定タブ整理): 「モデル調整」グループは「モデルの細かさ」
+// (間引き)と「モデルへの画像貼り付け」(継ぎ目角度=側面画像の利用パネル)に
+// 分割された。
 async function testModelAdjustAndSeamPanel(server, browser) {
   const { page, errors } = await openPage(browser, server.url + "/landmark_tool.html");
   await page.click("#modeSampleBtn b");
@@ -108,9 +111,9 @@ async function testModelAdjustAndSeamPanel(server, browser) {
   await page.click('.tabbtn[data-tab="params"]');
   await page.waitForTimeout(150);
 
-  const modelAdjustGroup = await page.$('details.accgroup[data-accgroup="モデル調整"]');
-  assert.ok(modelAdjustGroup, "モデル調整 accordion group should exist");
-  await modelAdjustGroup.click();
+  const finenessGroup = await page.$('details.accgroup[data-accgroup="モデルの細かさ"]');
+  assert.ok(finenessGroup, "モデルの細かさ accordion group should exist");
+  await finenessGroup.click();
   await page.waitForTimeout(150);
 
   // decimate_strength(PARAM_META、genParams直結)。onchangeが例外なく走ることを確認する。
@@ -118,6 +121,11 @@ async function testModelAdjustAndSeamPanel(server, browser) {
   assert.ok(decimateInput, "decimate_strength number input should be present");
   await decimateInput.evaluate((el) => { el.value = "0.5"; el.dispatchEvent(new Event("change")); });
   await page.waitForTimeout(100);
+
+  const pasteGroup = await page.$('details.accgroup[data-accgroup="モデルへの画像貼り付け"]');
+  assert.ok(pasteGroup, "モデルへの画像貼り付け accordion group should exist");
+  await pasteGroup.click();
+  await page.waitForTimeout(150);
 
   // 継ぎ目角度パネル(buildSeamGroupsHtml/wireParamsPanelEvents)
   const seamGroup = await page.$('details.accgroup[data-seamgroup]:not([data-seamgroup="一括設定"])');
