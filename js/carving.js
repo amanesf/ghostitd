@@ -830,7 +830,13 @@ function carveRegion(opts){
     });
     return smoothByRow;
   }
-  var smoothByRow = buildWidthTracks();
+  // ★2026-07-16追加(ストリーミング彫刻): ウィンドウ処理で同じリージョンの
+  // carveRegionを複数回(ウィンドウの数だけ)呼ぶようになったため、
+  // buildWidthTracks/buildDepthByRow(front/back/side画像の行スキャン、
+  // ウィンドウに関わらず結果は同じ)を毎回re-scanすると無駄に遅い。
+  // opts.precomputedRowsが渡されていれば、carveUnifiedRegionsが全ウィンドウ
+  // 処理の前に1回だけ計算した結果を使い回す。
+  var smoothByRow = opts.precomputedRows ? opts.precomputedRows.smoothByRow : buildWidthTracks();
 
   // ---- 2) 行ごとの奥行き(side画像) ----
   // ★2026-07-12(ユーザー指摘「房が分かれているところの顔が切り抜けてない」
@@ -902,7 +908,7 @@ function carveRegion(opts){
     }
     return hdByRow;
   }
-  var hdByRow = buildDepthByRow();
+  var hdByRow = opts.precomputedRows ? opts.precomputedRows.hdByRow : buildDepthByRow();
 
   // ★2026-07-13追加(bone_bridge機能、ツインテール付け根の隙間対策):
   // smoothByRow(幅、行ごとのx方向segs)/hdByRow(奥行き、行ごとのz方向bands)は
@@ -1016,11 +1022,11 @@ function carveRegion(opts){
       var fx=eye[0], fy=eye[1];
       var ix0=Math.max(0, Math.floor((fx-rx-mxMin)/(mxMax-mxMin)*(nx-1)));
       var ix1=Math.min(nx-1, Math.ceil((fx+rx-mxMin)/(mxMax-mxMin)*(nx-1)));
-      var iy0=Math.max(0, Math.floor((fy-ry-myMin)/(myMax-myMin)*(ny-1)));
-      var iy1=Math.min(ny-1, Math.ceil((fy+ry-myMin)/(myMax-myMin)*(ny-1)));
+      var iy0=Math.max(0, rowRangeStart, Math.floor((fy-ry-myMin)/(myMax-myMin)*(ny-1)));
+      var iy1=Math.min(ny-1, rowRangeEnd, Math.ceil((fy+ry-myMin)/(myMax-myMin)*(ny-1)));
       for(var iyb=iy0; iyb<=iy1; iyb++){
         var dy=(my[iyb]-fy)/ry;
-        var rowOff=iyb*strideY;
+        var rowOff=(iyb-rowRangeStart)*strideY;
         for(var ixb=ix0; ixb<=ix1; ixb++){
           var dx=(mx[ixb]-fx)/rx;
           var w2=dx*dx+dy*dy;
@@ -1046,6 +1052,14 @@ function carveRegion(opts){
 
   // ---- 3) 疑似SDFフィールドを彫る(ローカルbbox最適化) ----
   var strideY=nx*nz, strideX=nz;
+  // ★2026-07-16追加(ストリーミング彫刻、STREAMING_CARVING_PLAN.md参照):
+  // opts.rowRangeが渡された場合、field/ownerFieldは全ny行分ではなく
+  // [rowRangeStart, rowRangeEnd](グローバル行番号、両端含む)の範囲だけの
+  // 小さい配列(呼び出し元=carveUnifiedRegionsのウィンドウ処理が確保)。
+  // 行の添字計算は全てrowRangeStartを引いたローカル行番号で行う。
+  // 省略時はrowRangeStart=0・rowRangeEnd=ny-1で、従来と完全に同じ動作になる。
+  var rowRangeStart = opts.rowRange ? opts.rowRange[0] : 0;
+  var rowRangeEnd = opts.rowRange ? opts.rowRange[1] : ny-1;
   // ★2026-07-10(体+アクセサリー統合彫刻対応): opts.accumulateが渡された
   // 場合は新規fieldを割り付けず、呼び出し元(carveUnifiedRegions)が全パーツ
   // 共有で持つfield/ownerFieldへ直接max-combineで書き込む。ownerFieldには
@@ -1066,19 +1080,19 @@ function carveRegion(opts){
     return (rows && rows.has(iy3)) ? bridgeK : 0;
   }
   function carveSdfField(){
-  var field = sharedField || new Float32Array(ny*nx*nz).fill(-1.0);
+  var field = sharedField || new Float32Array((rowRangeEnd-rowRangeStart+1)*nx*nz).fill(-1.0);
   var ownerField = sharedOwnerField;
   // このbboxの外側は必ずval<=-1相当なので無視できる(psqが小さいほどbboxを
   // 広めに取る必要があるため、使用しうる指数のうち最小値で安全側に倒す)
   var psqMin = Math.min(psqHead,psqTorso,psqLegs,psqArms,psqHands);
   var boundFactor = Math.pow(2, 1/psqMin);
 
-  for(var iy3=0; iy3<ny; iy3++){
+  for(var iy3=rowRangeStart; iy3<=rowRangeEnd; iy3++){
     var hdBands=hdByRow.get(iy3);
     if(!hdBands) continue;
     var segsRow=smoothByRow.get(iy3);
     if(!segsRow) continue;
-    var rowOff=iy3*strideY;
+    var rowOff=(iy3-rowRangeStart)*strideY;
     var myv=my[iy3];
     var rowPsq=regionPsq(myv); // 腕/手プロファイル対象外の列(頭/胴体/脚)で使う指数
     // ★2026-07-12: 1行に複数の奥行き区間(帯)がある場合(例: 前髪の房が手前、
@@ -1346,10 +1360,19 @@ function fillIntervalForAxis(a, b, eps){
   if(b[1]<a[0]) return [b[1]-eps, a[0]+eps];
   return [Math.max(a[0],b[0]), Math.min(a[1],b[1])];
 }
-function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, grid, vox){
+// ★2026-07-16追加(ストリーミング彫刻): rowRangeが渡された場合、
+// field/ownerFieldは全ny行分ではなく[rowRangeStart,rowRangeEnd]
+// (グローバル行番号、両端含む)だけの小さい配列(carveUnifiedRegionsの
+// ウィンドウ処理が確保)。bridgeRows自体はグローバル行番号のまま(軽量な
+// extentsOnly事前パスで全体を一度に計算済み)なので、この範囲外の行は
+// スキップし、範囲内の行だけローカル行番号に変換して書き込む。
+// rowRange省略時は従来通り(全行がグローバル=ローカル)。
+function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, grid, vox, rowRange){
   var nx=grid.nx, nz=grid.nz, mx=grid.mx, mz=grid.mz;
   var mxMin=grid.mxMin, mxMax=grid.mxMax, mzMin=grid.mzMin, mzMax=grid.mzMax;
   var strideY=nx*nz, strideX=nz;
+  var rowRangeStart = rowRange ? rowRange[0] : 0;
+  var rowRangeEnd = rowRange ? rowRange[1] : (grid.ny!==undefined ? grid.ny-1 : Infinity);
   var eps = Math.max((vox||0.003)*2, 1e-6); // computeBoneBridgeRowsの隣接判定epsと揃える
   bridgeRows.forEach(function(rows, key){
     var parts = key.split(",");
@@ -1357,6 +1380,7 @@ function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, g
     var extA = rowExtentsByOwner.get(oa), extB = rowExtentsByOwner.get(ob);
     if(!extA || !extB) return;
     rows.forEach(function(iy){
+      if(iy<rowRangeStart || iy>rowRangeEnd) return; // このウィンドウの範囲外
       var xa=extA.xExtent[iy], xb=extB.xExtent[iy];
       var za=extA.zExtent[iy], zb=extB.zExtent[iy];
       if(!xa || !xb || !za || !zb) return;
@@ -1382,7 +1406,7 @@ function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, g
       var izLo=Math.max(0, Math.floor((zLo-mzMin)/(mzMax-mzMin)*(nz-1)));
       var izHi=Math.min(nz-1, Math.ceil((zHi-mzMin)/(mzMax-mzMin)*(nz-1)));
       if(ixLo>ixHi || izLo>izHi) return;
-      var rowOff=iy*strideY;
+      var rowOff=(iy-rowRangeStart)*strideY;
       var xaCx=(xa[0]+xa[1])/2, xbCx=(xb[0]+xb[1])/2;
       for(var ix=ixLo; ix<=ixHi; ix++){
         var xv=mx[ix];
@@ -1537,75 +1561,135 @@ P3D.closeInterPartGaps = closeInterPartGaps;
 // 超えるケースがあったため、かなり緩めの値にし、確信度の高い(=ボーン共有+
 // 幅と奥行き両方で隣接確認済み)行にだけ適用する。
 var BONE_BRIDGE_K = 5.0;
+// ★2026-07-16追加(ストリーミング彫刻、STREAMING_CARVING_PLAN.md参照): 1
+// ウィンドウあたりのfield+ownerField確保サイズの上限目安。body_vox/
+// body_vox_xzを両方1px相当にすると、共有field/ownerFieldの一括確保
+// (nx*ny*nz*8byte)が数GBに達しArrayBuffer確保に失敗する
+// (Array buffer allocation failed)。Y方向を、この予算に収まる行数の
+// ウィンドウに分割して彫刻+marching cubesを繰り返し、頂点/面だけを
+// グローバルなメッシュへ蓄積することでこれを回避する(サーフェスメッシュ
+// 自体は密グリッドよりずっと小さいため、間引き以降の処理は変更不要)。
+var STREAMING_FIELD_BUDGET_BYTES = 300*1024*1024;
 function carveUnifiedRegions(regions, sharedGrid, minFragFrac, boneBridgeCandidates, partGapCloseDist){
   var nx=sharedGrid.nx, ny=sharedGrid.ny, nz=sharedGrid.nz;
-  var field = new Float32Array(ny*nx*nz).fill(-1.0);
-  var ownerField = new Int32Array(ny*nx*nz).fill(-1);
 
-  var bridgeRows = null;
+  // ★2026-07-16追加(ストリーミング彫刻): 各リージョンのsmoothByRow/hdByRow
+  // (front/back/side画像の行スキャン結果)は、ウィンドウ処理で同じリージョンの
+  // carveRegionを複数回(ウィンドウの数だけ)呼んでも値は変わらない(入力画像は
+  // ウィンドウに依存しない)。全ウィンドウ処理の前に1回だけ計算してキャッシュし、
+  // (a)bone_bridgeの行範囲計算 (b)各ウィンドウのcarveSdfField呼び出し
+  // の両方で使い回す(js/carving.jsのopts.precomputedRows参照)。これが無いと
+  // ウィンドウの数だけ画像の行スキャンが重複し、無駄に遅くなる。
+  var precomputedRowsByOwner = new Map();
+  regions.forEach(function(r){
+    precomputedRowsByOwner.set(r.ownerId, carveRegion(Object.assign({}, r.opts, {grid:sharedGrid, extentsOnly:true})));
+  });
+  function extentsFromPrecomputed(pre){
+    var ny2=pre.ny, xExtent=new Array(ny2).fill(null), zExtent=new Array(ny2).fill(null);
+    pre.smoothByRow.forEach(function(segs, iy){
+      var lo=Infinity, hi=-Infinity;
+      for(var i=0;i<segs.length;i++){ var cx=segs[i][0], hw=segs[i][1]; if(cx-hw<lo)lo=cx-hw; if(cx+hw>hi)hi=cx+hw; }
+      if(lo<=hi) xExtent[iy]=[lo,hi];
+    });
+    pre.hdByRow.forEach(function(bands, iy){
+      var lo=Infinity, hi=-Infinity;
+      for(var i=0;i<bands.length;i++){ var hdFront=bands[i][0], hdBack=bands[i][1], zc=bands[i][2]; if(zc-hdBack<lo)lo=zc-hdBack; if(zc+hdFront>hi)hi=zc+hdFront; }
+      if(lo<=hi) zExtent[iy]=[lo,hi];
+    });
+    return {ny:ny2, xExtent:xExtent, zExtent:zExtent};
+  }
+
+  var bridgeRows = null, rowExtentsByOwner = null;
+  var voxForEps = regions.length ? (regions[0].opts.vox||0.003) : 0.003;
   if(boneBridgeCandidates && boneBridgeCandidates.size){
     var neededOwners = new Set();
     boneBridgeCandidates.forEach(function(key){
       var parts = key.split(",");
       neededOwners.add(parseInt(parts[0],10)); neededOwners.add(parseInt(parts[1],10));
     });
-    var rowExtentsByOwner = new Map();
+    rowExtentsByOwner = new Map();
     regions.forEach(function(r){
       if(!neededOwners.has(r.ownerId)) return;
-      rowExtentsByOwner.set(r.ownerId, computeRowExtents(r.opts, sharedGrid));
+      rowExtentsByOwner.set(r.ownerId, extentsFromPrecomputed(precomputedRowsByOwner.get(r.ownerId)));
     });
-    var voxForEps = regions.length ? (regions[0].opts.vox||0.003) : 0.003;
     bridgeRows = computeBoneBridgeRows(boneBridgeCandidates, rowExtentsByOwner, ny, voxForEps);
   }
+  var voxForGapClose = regions.length ? (regions[0].opts.vox||0.003) : 0.003;
 
-  regions.forEach(function(r){
-    var opts = Object.assign({}, r.opts, {
-      grid: sharedGrid,
-      accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId,
-        bridgeRows:bridgeRows, bridgeK:BONE_BRIDGE_K},
+  // ウィンドウの行数をメモリ予算から決める。既定の粗い設定ではグリッド
+  // 全体が予算に収まり、windowRows>=nyになる(=ウィンドウ1個、従来と
+  // 完全に同じ1回のmarching cubesに自動的に収束する安全弁)。
+  var windowRows = Math.max(8, Math.floor(STREAMING_FIELD_BUDGET_BYTES/(nx*nz*8)));
+  if(windowRows > ny) windowRows = ny;
+
+  var mcCache = null;
+  var globalVerts=[], globalFaces=[], globalOwner=[];
+
+  for(var winStart=0; winStart<ny-1; winStart += (windowRows-1)){
+    var winEnd = Math.min(winStart+windowRows-1, ny-1); // このウィンドウのfield行範囲(グローバル行番号、両端含む)
+    var winRows = winEnd-winStart+1;
+    var field = new Float32Array(winRows*nx*nz).fill(-1.0);
+    var ownerField = new Int32Array(winRows*nx*nz).fill(-1);
+
+    regions.forEach(function(r){
+      var opts = Object.assign({}, r.opts, {
+        grid: sharedGrid,
+        rowRange: [winStart, winEnd],
+        precomputedRows: precomputedRowsByOwner.get(r.ownerId),
+        accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId,
+          bridgeRows:bridgeRows, bridgeK:BONE_BRIDGE_K},
+      });
+      carveRegion(opts);
     });
-    carveRegion(opts);
-  });
 
-  // ★2026-07-13追加(bone_bridge機能、実機検証で判明): 確定橋渡し行でも、
-  // 2パーツが実際に同じボクセルを取り合う(競合する)ケースはごく僅かで
-  // (実測: 163,982頂点サンプルで後ろ髪⇔ツインテール間はわずか5〜69ボクセル)、
-  // 可視化される隙間の大部分は「どちらのパーツも一度も書き込んでいない、
-  // 本当に何もない空隙(field=-1のまま)」だった。carveSdfField内の
-  // smooth-maxブレンドは既存の2値を橋渡しするだけなので、データそのものが
-  // 無い空隙には無力(実機の45度視点スクリーンショットで隙間が埋まって
-  // いないことを確認して発覚)。確定橋渡し行では、2パーツの外縁が作る
-  // 外接範囲のうち、まだ何も書き込まれていないボクセルへ直接「橋渡し用の
-  // 実体」を書き込む。
-  if(bridgeRows && bridgeRows.size){
-    applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, sharedGrid, voxForEps);
+    // ★2026-07-13追加(bone_bridge機能、実機検証で判明): 確定橋渡し行でも、
+    // 2パーツが実際に同じボクセルを取り合う(競合する)ケースはごく僅かで
+    // (実測: 163,982頂点サンプルで後ろ髪⇔ツインテール間はわずか5〜69ボクセル)、
+    // 可視化される隙間の大部分は「どちらのパーツも一度も書き込んでいない、
+    // 本当に何もない空隙(field=-1のまま)」だった。carveSdfField内の
+    // smooth-maxブレンドは既存の2値を橋渡しするだけなので、データそのものが
+    // 無い空隙には無力(実機の45度視点スクリーンショットで隙間が埋まって
+    // いないことを確認して発覚)。確定橋渡し行では、2パーツの外縁が作る
+    // 外接範囲のうち、まだ何も書き込まれていないボクセルへ直接「橋渡し用の
+    // 実体」を書き込む。
+    if(bridgeRows && bridgeRows.size){
+      applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, sharedGrid, voxForEps, [winStart, winEnd]);
+    }
+
+    // ★2026-07-14追加(part_gap_close機能): ボーン共有や行単位の近似を介さず、
+    // 純粋なボクセルグリッド上の3次元距離だけで異なるパーツ間の隙間を塞ぐ
+    // (closeInterPartGaps参照)。★このウィンドウのfield/ownerField自体を
+    // グリッドの全てとみなして自己完結で動く(BFSの探索半径がウィンドウを
+    // またぐケースは範囲外として扱われる。STREAMING_CARVING_PLAN.mdの既知の
+    // 制限事項参照)。
+    if(partGapCloseDist>0){
+      closeInterPartGaps(field, ownerField, Object.assign({}, sharedGrid, {ny:winRows}), voxForGapClose, partGapCloseDist);
+    }
+
+    var mc = P3D.marchingCubes(field, winRows, nx, nz, 0.0, ownerField, {
+      rowOffset: winStart, cache: mcCache, vertBase: globalVerts.length/3,
+    });
+    mcCache = mc.cache;
+    for(var vi=0; vi<mc.verts.length; vi++) globalVerts.push(mc.verts[vi]);
+    for(var fi=0; fi<mc.faces.length; fi++) globalFaces.push(mc.faces[fi]);
+    if(mc.vertOwner) for(var oi=0; oi<mc.vertOwner.length; oi++) globalOwner.push(mc.vertOwner[oi]);
+
+    if(winEnd>=ny-1) break;
   }
 
-  // ★2026-07-14追加(part_gap_close機能): ボーン共有や行単位の近似を介さず、
-  // 純粋なボクセルグリッド上の3次元距離だけで異なるパーツ間の隙間を塞ぐ
-  // (closeInterPartGaps参照)。
-  if(partGapCloseDist>0){
-    var voxForGapClose = regions.length ? (regions[0].opts.vox||0.003) : 0.003;
-    closeInterPartGaps(field, ownerField, sharedGrid, voxForGapClose, partGapCloseDist);
-  }
-
-  var anyPositive=false, cntPos=0;
-  for(var i=0;i<field.length;i++){ if(field[i]>0){ cntPos++; if(cntPos>=8){anyPositive=true;break;} } }
-  if(!anyPositive) return null;
-
-  var mc = P3D.marchingCubes(field, ny, nx, nz, 0.0, ownerField);
-  if(!mc.verts.length) return null;
-  var nvtx=mc.verts.length/3;
+  if(!globalVerts.length) return null;
+  var nvtx=globalVerts.length/3;
   var mxMin=sharedGrid.mxMin,mxMax=sharedGrid.mxMax,myMin=sharedGrid.myMin,myMax=sharedGrid.myMax,mzMin=sharedGrid.mzMin,mzMax=sharedGrid.mzMax;
   var V=new Float32Array(nvtx*3);
-  for(var vi=0; vi<nvtx; vi++){
-    var iyF=mc.verts[vi*3], ixF=mc.verts[vi*3+1], izF=mc.verts[vi*3+2];
-    V[vi*3]   = ixF/(nx-1)*(mxMax-mxMin)+mxMin;
-    V[vi*3+1] = iyF/(ny-1)*(myMax-myMin)+myMin;
-    V[vi*3+2] = izF/(nz-1)*(mzMax-mzMin)+mzMin;
+  for(var vidx=0; vidx<nvtx; vidx++){
+    var iyF=globalVerts[vidx*3], ixF=globalVerts[vidx*3+1], izF=globalVerts[vidx*3+2];
+    V[vidx*3]   = ixF/(nx-1)*(mxMax-mxMin)+mxMin;
+    V[vidx*3+1] = iyF/(ny-1)*(myMax-myMin)+myMin;
+    V[vidx*3+2] = izF/(nz-1)*(mzMax-mzMin)+mzMin;
   }
-  var F=mc.faces;
-  var dropped=dropSmallFragments(V,F,minFragFrac,{owner:mc.vertOwner});
+  var F=Uint32Array.from(globalFaces);
+  var owner=Int32Array.from(globalOwner);
+  var dropped=dropSmallFragments(V,F,minFragFrac,{owner:owner});
   return {V:dropped.V, F:dropped.F, owner:dropped.extra.owner};
 }
 P3D.carveUnifiedRegions = carveUnifiedRegions;

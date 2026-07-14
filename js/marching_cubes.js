@@ -117,16 +117,36 @@ var triTable = [
 //   (値が大きい方、=そのエッジでは実際にそのパーツが表面を作った側)の
 //   owner」を厳密にその頂点のownerとして返す(色サンプリング等の曖昧な
 //   事後推定を一切使わない、彫刻に使った座標系そのものからの判定)。
-// 戻り値: {verts: Float32Array(N*3, [iy,ix,iz]のindex空間), faces: Uint32Array(M*3),
-//   vertOwner: Int32Array(N) | undefined(ownerField未指定時)}
-function marchingCubes(field, ny, nx, nz, isolevel, ownerField){
+// opts(省略可、★2026-07-16追加、STREAMING_CARVING_PLAN.md参照): Y方向に
+//   グリッドをウィンドウ分割して複数回呼ぶ場合に使う。
+//   - rowOffset: このfieldの行0が全体の何行目に当たるか(既定0)。エッジの
+//     キャッシュキーと出力頂点座標はグローバル行番号(iy+rowOffset)で作る
+//     (field/ownerFieldの値参照自体はローカルiyのまま)。これにより、
+//     戻り値のverts(Y座標)はrowOffset無指定時と同じ「グローバルなindex
+//     空間座標」になり、呼び出し側はny(グローバル)を使った変換式を
+//     ウィンドウの有無に関わらずそのまま使える。
+//   - cache: 複数回の呼び出しをまたいで使い回すMap(呼び出し側が保持し、
+//     次の呼び出しにそのまま渡す)。ウィンドウの境界行(隣接ウィンドウが
+//     共有する行)上のエッジが両ウィンドウから同じキーで参照されるため、
+//     頂点が重複生成されない(位置は同じでも別indexになる継ぎ目を防ぐ)。
+//     省略時は毎回新規(従来通り)。
+//   - vertBase: 新規頂点に割り当てるグローバルindexの開始値(既定0、
+//     呼び出し側が持つ蓄積済み頂点数)。
+// 戻り値: {verts: Float32Array(N*3, グローバルindex空間座標。このfieldで
+//   新規に作った頂点だけを含む。vertBaseから始まる連番がfaces中のindexに
+//   対応する)、faces: Uint32Array(M*3、既にグローバルindex)、
+//   vertOwner: Int32Array(N) | undefined、cache: 更新後のcache(次回に渡す用)}
+function marchingCubes(field, ny, nx, nz, isolevel, ownerField, opts){
   isolevel = (isolevel===undefined) ? 0.0 : isolevel;
+  opts = opts || {};
+  var rowOffset = opts.rowOffset||0;
+  var vertBase = opts.vertBase||0;
   var strideY = nx*nz, strideX = nz;
   var verts=[], faces=[], vertOwner=ownerField?[]:null;
   // エッジごとに生成済み頂点indexをキャッシュ(同じエッジを共有する隣接セルで
   // 頂点を再利用し、頂点数を減らす)。key = セル(iy,ix,iz)+edge番号。
   // 汎用的にMap<string,int>でキャッシュする(コード量優先、速度は後で必要なら最適化)。
-  var cache = new Map();
+  var cache = opts.cache || new Map();
   function vid(iy,ix,iz){ return iy*strideY+ix*strideX+iz; }
   function getVal(iy,ix,iz){ return field[vid(iy,ix,iz)]; }
   // 頂点補間: 2点(p1,p2、それぞれ[iy,ix,iz]のindex座標)とその値からisolevelを
@@ -179,20 +199,26 @@ function marchingCubes(field, ny, nx, nz, isolevel, ownerField){
           if(!(edgeMask & (1<<e))) continue;
           var p0i=edgeVerts[e][0], p1i=edgeVerts[e][1];
           var o0=cornerOff[p0i], o1=cornerOff[p1i];
-          var c0=[iy+o0[0], ix+o0[1], iz+o0[2]];
-          var c1=[iy+o1[0], ix+o1[1], iz+o1[2]];
+          // c0Local/c1Local: このfield(ウィンドウ)内でのローカル座標(値参照用)。
+          // c0/c1: rowOffsetを足したグローバル座標(キャッシュキー・出力座標用)。
+          // rowOffset省略時(既定0)は両者が一致し、従来と完全に同じ結果になる。
+          var c0Local=[iy+o0[0], ix+o0[1], iz+o0[2]];
+          var c1Local=[iy+o1[0], ix+o1[1], iz+o1[2]];
+          var c0=[c0Local[0]+rowOffset, c0Local[1], c0Local[2]];
+          var c1=[c1Local[0]+rowOffset, c1Local[1], c1Local[2]];
           var key=canonicalEdgeKey(c0,c1);
           var existing=cache.get(key);
           if(existing===undefined){
             var val0=cval[p0i], val1=cval[p1i];
             var pos=vertexInterp(c0,val0,c1,val1);
-            existing=verts.length/3;
+            existing=vertBase + verts.length/3;
             verts.push(pos[0],pos[1],pos[2]);
             if(vertOwner){
               // isolevelを跨ぐ2点のうち内側(値が大きい方=実際に表面を
-              // 形作ったパーツ)のownerをこの頂点のownerとして採用する。
-              var innerC = (val0>=val1) ? c0 : c1;
-              vertOwner.push(ownerField[vid(innerC[0],innerC[1],innerC[2])]);
+              // 形作ったパーツ)のownerをこの頂点のownerとして採用する
+              // (ownerFieldの参照はローカル座標で行う)。
+              var innerCLocal = (val0>=val1) ? c0Local : c1Local;
+              vertOwner.push(ownerField[vid(innerCLocal[0],innerCLocal[1],innerCLocal[2])]);
             }
             cache.set(key, existing);
           }
@@ -209,6 +235,7 @@ function marchingCubes(field, ny, nx, nz, isolevel, ownerField){
     verts: Float32Array.from(verts),
     faces: Uint32Array.from(faces),
     vertOwner: vertOwner ? Int32Array.from(vertOwner) : undefined,
+    cache: cache,
   };
 }
 P3D.marchingCubes = marchingCubes;
