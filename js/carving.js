@@ -10,20 +10,6 @@ var P3D = global.P3D = global.P3D || {};
 var Common = P3D; // common.jsの関数はP3D直下にあるので、そのままローカル別名として使う
 var EPS = 1e-4;
 
-function medianFilter(vals, win){
-  var n=vals.length;
-  if(n<3) return vals.slice();
-  var k=win>>1;
-  var out=new Array(n);
-  for(var i=0;i<n;i++){
-    var a=Math.max(0,i-k), b=Math.min(n,i+k+1);
-    var slice=vals.slice(a,b).slice().sort(function(x,y){return x-y;});
-    var m=slice.length;
-    out[i]= (m%2) ? slice[m>>1] : (slice[(m>>1)-1]+slice[m>>1])/2;
-  }
-  return out;
-}
-
 function intersectIntervals(runs, allowed){
   if(!allowed || !allowed.length) return runs;
   var out=[];
@@ -587,66 +573,6 @@ function labelConnectedComponents(mask, W, H){
 P3D.buildCombinedFrontRaster = buildCombinedFrontRaster;
 P3D.labelConnectedComponents = labelConnectedComponents;
 
-// ★2026-07-11追加(ユーザー指摘「パーツ内部にまで隙間だらけ」対応の実測調査で
-// 判明): 同一アクセサリー(例: 左ツインテール)の中で、絵柄上は1本の続いた
-// 房なのに、交差して見える箇所(手前の房が奥の房を隠す描き方)で数px〜十数px
-// 幅の実際の背景色の隙間が色分けマップに残っていることが、実サンプル画像の
-// 検証(front colormap上で連結成分を数える)で確認できた。この隙間は
-// labelConnectedComponents(8連結)にとっては「本当に別の塊」に見えるため、
-// carveRegionのtrack判定で別トラック(=奥行きを別々に測る)に分かれ、3D化
-// すると絵では気にならなかった数pxの隙間がそのまま立体的な溝になって見える
-// (体とアクセサリーの境目の隙間とは別の、同一パーツ内部の分断)。
-// dilate→erode(モルフォロジー closing、正方形構造要素の分離可能な箱型実装)で
-// track判定用のラスタだけを閉じ、この程度の細い隙間を「同じ房」として扱える
-// ようにする(実測値は彫刻に使うfa/ba自体には手を加えない、あくまで
-// どの塊を同じtrackとみなすかの判定だけに使う)。
-function dilateMask(mask, w, h, r){
-  if(!(r>0)) return mask;
-  var tmp=new Uint8Array(w*h);
-  for(var y=0;y<h;y++){
-    var rowOff=y*w;
-    for(var x=0;x<w;x++){
-      var v=0, xlo=Math.max(0,x-r), xhi=Math.min(w-1,x+r);
-      for(var xx=xlo; xx<=xhi && !v; xx++){ if(mask[rowOff+xx]) v=1; }
-      tmp[rowOff+x]=v;
-    }
-  }
-  var out=new Uint8Array(w*h);
-  for(var x2=0;x2<w;x2++){
-    for(var y2=0;y2<h;y2++){
-      var v2=0, ylo=Math.max(0,y2-r), yhi=Math.min(h-1,y2+r);
-      for(var yy=ylo; yy<=yhi && !v2; yy++){ if(tmp[yy*w+x2]) v2=1; }
-      out[y2*w+x2]=v2;
-    }
-  }
-  return out;
-}
-function erodeMask(mask, w, h, r){
-  if(!(r>0)) return mask;
-  var tmp=new Uint8Array(w*h);
-  for(var y=0;y<h;y++){
-    var rowOff=y*w;
-    for(var x=0;x<w;x++){
-      var v=1, xlo=Math.max(0,x-r), xhi=Math.min(w-1,x+r);
-      for(var xx=xlo; xx<=xhi && v; xx++){ if(!mask[rowOff+xx]) v=0; }
-      tmp[rowOff+x]=v;
-    }
-  }
-  var out=new Uint8Array(w*h);
-  for(var x2=0;x2<w;x2++){
-    for(var y2=0;y2<h;y2++){
-      var v2=1, ylo=Math.max(0,y2-r), yhi=Math.min(h-1,y2+r);
-      for(var yy=ylo; yy<=yhi && v2; yy++){ if(!mask[yy*w+x2]) v2=0; }
-      out[y2*w+x2]=v2;
-    }
-  }
-  return out;
-}
-function morphCloseMask(mask, w, h, r){
-  return (r>0) ? erodeMask(dilateMask(mask,w,h,r), w, h, r) : mask;
-}
-P3D.morphCloseMask = morphCloseMask;
-
 // linspace(min,max,n)相当(n>=2前提、Python np.linspaceと同じ: 端点を含みn-1等分)
 function linspace(a,b,n){
   var out=new Float64Array(n);
@@ -697,7 +623,7 @@ P3D.buildGrid = buildGrid;
  *   faCont,baCont,saCont: 連続値配列(Float32Array、サブピクセル補正用、無ければnull)
  *   SCALE,CX,YBOT,SYTOP,SYBOT,SIDE_REF: キャリブレーション値
  *   mxBounds,myBounds,mzBounds: [min,max]
- *   vox, trackWin, smoothIters
+ *   vox, smoothIters
  *   psqHead,psqTorso,psqLegs,psqArms,psqHands: 部位別の断面スーパー楕円指数
  *     (neckY/hipsYで行(myv)がどの部位相当かを判定してpsqHead/psqTorso/psqLegs
  *     を使い分ける。neckY/hipsY省略時は常にpsqTorsoを使う=アクセサリー等の
@@ -719,17 +645,7 @@ function carveRegion(opts){
   var faCont=opts.faCont, baCont=opts.baCont, saCont=opts.saCont;
   var SCALE=opts.SCALE, CX=opts.CX, YBOT=opts.YBOT, SYTOP=opts.SYTOP, SYBOT=opts.SYBOT, SIDE_REF=opts.SIDE_REF;
   var mxB=opts.mxBounds, myB=opts.myBounds, mzB=opts.mzBounds;
-  // ★2026-07-10: trackGap(track追跡時の行の許容ギャップ)は、track判定を
-  // 連結成分ラベリングに置き換えたことで不要になった(位相的に繋がっている
-  // かどうかで判定するため、行数ベースの許容ギャップという概念自体が無い)。
-  var vox=opts.vox, trackWin=opts.trackWin;
-  // ★2026-07-11追加: 房どうしが交差して見える描き方(手前の房が奥の房を隠す)
-  // で色分けマップに残る数px〜十数px幅の隙間を、track判定(連結成分ラベリング)
-  // の前にモルフォロジーclosingで埋めるための半径(px)。0で無効(従来通り)。
-  var trackGapClosePx=opts.trackGapClosePx||0;
-  // ★2026-07-12追加: track_gap_close_pxと同じ考え方をside画像の奥行き測定にも
-  // 適用するための半径(px)。buildDepthByRowで使う(下記参照)。
-  var depthGapClosePx=opts.depthGapClosePx||0;
+  var vox=opts.vox;
   var psqHead=opts.psqHead, psqTorso=opts.psqTorso, psqLegs=opts.psqLegs;
   var psqArms=opts.psqArms, psqHands=opts.psqHands;
   var neckY=opts.neckY, hipsY=opts.hipsY;
@@ -794,8 +710,7 @@ function carveRegion(opts){
   // ラスタの連結成分ラベリング(labelConnectedComponents、画像全体に対する
   // 厳密な位相判定)でtrackを決めることで、この誤結合を構造的に排除する。
   var combinedRaster = buildCombinedFrontRaster(fa, ba, faW, faH, backOffsetX, backOffsetY);
-  var labelRaster = trackGapClosePx>0 ? morphCloseMask(combinedRaster, faW, faH, trackGapClosePx) : combinedRaster;
-  var trackLabels = labelConnectedComponents(labelRaster, faW, faH);
+  var trackLabels = labelConnectedComponents(combinedRaster, faW, faH);
   function buildWidthTracks(){
     var tracksByLabel=new Map(); // label -> {rows:[],cx:[],hw:[]}
     var fallbackSeq=0;
@@ -835,11 +750,10 @@ function carveRegion(opts){
     }
     var smoothByRow=new Map(); // iy -> [[cx,hw],...]
     tracksByLabel.forEach(function(tr3){
-      var scx=medianFilter(tr3.cx, trackWin), shw=medianFilter(tr3.hw, trackWin);
       for(var i2=0;i2<tr3.rows.length;i2++){
         var iyk=tr3.rows[i2];
         if(!smoothByRow.has(iyk)) smoothByRow.set(iyk, []);
-        smoothByRow.get(iyk).push([scx[i2], shw[i2]]);
+        smoothByRow.get(iyk).push([tr3.cx[i2], tr3.hw[i2]]);
       }
     });
     return smoothByRow;
@@ -860,11 +774,10 @@ function carveRegion(opts){
   // 別の連結成分にはならない(体+アクセサリー全体が1つの巨大な連結成分に
   // なりやすいのと同じ理由)。そのため連結成分ベースでは房と顔がグループ
   // 分けされず、修正が効かなかった(実測で確認済み)。
-  // 位相的な連結性ではなく、行内のrunどうしの「pxでの隙間の大きさ」だけで
-  // 判定する(depth_gap_close_pxより狭い隙間は同じ帯として結合、それ以上は
-  // 別々の帯として保持)。顎先/首のような実在の小さい凹みはこの値未満の
-  // 隙間で埋まり従来通り1本の区間になり、房と顔のように隙間が大きいケースは
-  // 分断されたまま複数の奥行き区間として彫られる。
+  // ★2026-07-17(設定タブ整理): depth_gap_close_pxによるrun統合(隙間が
+  // 狭ければ同じ帯とみなす)は廃止し、常に行内のrunをそれぞれ別々の奥行き
+  // 帯として扱う。顎先/首のような実在の小さい凹みが再び分断される可能性が
+  // あることは把握した上で、ユーザーの判断により削除した。
   function buildDepthByRow(){
   var depthRows=[]; // [iy, [[hdFront,hdBack,zc], ...]]
   for(var iy2=0; iy2<ny; iy2++){
@@ -873,16 +786,7 @@ function carveRegion(opts){
     var saPx = saCont ? Common.findRunsSubpixel(saRow, rowOf1d(saCont,saW,rowPx2), whiteThr) : Common.findRuns(saRow);
     if(!saPx.length) continue;
     saPx = saPx.slice().sort(function(p,q){return p[0]-q[0];});
-    // pxの隙間がdepthGapClosePx以下で隣接するrunどうしを同じ帯にまとめる
-    // (px空間でグループ化、モデル座標変換前に行う)。
-    var pxGroups=[[saPx[0]]];
-    for(var k1=1;k1<saPx.length;k1++){
-      var prevGroup=pxGroups[pxGroups.length-1];
-      var prevHi=prevGroup[prevGroup.length-1][1];
-      var gapPx=saPx[k1][0]-prevHi;
-      if(gapPx<=depthGapClosePx) prevGroup.push(saPx[k1]);
-      else pxGroups.push([saPx[k1]]);
-    }
+    var pxGroups = saPx.map(function(p){ return [p]; });
     var bands=[];
     for(var g=0; g<pxGroups.length; g++){
       var zrunsMz = pxGroups[g].map(function(pq){ return [(pq[0]-SIDE_REF-sideOffsetX)/SCALE, (pq[1]-SIDE_REF-sideOffsetX)/SCALE]; });
@@ -924,14 +828,12 @@ function carveRegion(opts){
   }
   var hdByRow = opts.precomputedRows ? opts.precomputedRows.hdByRow : buildDepthByRow();
 
-  // ★2026-07-13追加(bone_bridge機能、ツインテール付け根の隙間対策):
   // smoothByRow(幅、行ごとのx方向segs)/hdByRow(奥行き、行ごとのz方向bands)は
   // このパーツ自身のシルエットだけから求まる行ごとの外形で、以降の腕/手
   // プロファイルやSDFフィールド書き込みには依存しない。opts.extentsOnlyが
-  // 立っている場合はここで打ち切り、この2つ(と行→y変換のny/my)だけを返す。
-  // P3D.computeRowExtentsが2パーツの行ごとの外縁(x範囲・z範囲)を比較して
-  // 「同じ行で幅・奥行き両方が同時に隣接しているか」を判定するために使う
-  // (js/pipeline.jsのrunCarvingStages、carveUnifiedRegions参照)。
+  // 立っている場合はここで打ち切り、この2つ(と行→y変換のny/my)だけを返す
+  // (密グリッドを確保しない軽量な事前パス。推定頂点数の計算や、
+  // carveUnifiedRegionsのsmoothByRow/hdByRowキャッシュに使う)。
   if(opts.extentsOnly){
     return {smoothByRow:smoothByRow, hdByRow:hdByRow, ny:ny, my:my};
   }
@@ -1009,61 +911,6 @@ function carveRegion(opts){
   var armProf = armLines ? buildBoneProfiles(armLines, armMaxHw, true) : null;
   var handProf = handLines ? buildBoneProfiles(handLines, handMaxHw, false) : null;
 
-  // ★2026-07-11追加(顔の立体感対応、ユーザー指摘「顔がのっぺりしている」):
-  // 頭部も他の部位と同じ「行(y)ごとのスーパー楕円断面」で彫っているため、
-  // 立体感はside画像のその行1行ぶんの前後端にしか依存せず出にくい。これは
-  // 平滑化の強さとは無関係な、行ベース彫刻という方式そのものの限界。
-  // ★2026-07-11(検討の結果、鼻ではなく目窩を対象にした): 当初は鼻先
-  // ランドマークに同様の加算式の突起を実装したが、鼻は顔の中心線上にあり
-  // side画像のその高さの行スキャンから既に実測の奥行きが出ている(ユーザー
-  // 指摘)。そこへ独自パラメータの突起を追加で盛ると、実測の側面イラストと
-  // 食い違う奥行きになってしまうため撤回した。目窩(眼球が収まる凹み)は
-  // front/back/sideどのシルエット輪郭にも現れない内部形状のため、局所的に
-  // 凹ませても輪郭(=元イラストの実測データ)とは矛盾しない。
-  // eye_L/eye_Rランドマーク(js/pipeline.jsのbuildDerivedLandmarksでpx→
-  // model座標に変換済み)を中心に、彫刻済みのfieldの表層だけを局所的に
-  // 凹ませる(min-combineで下げるだけ=既存の奥行きより外側に何かを足す
-  // ことは無い→輪郭を壊すリスクが無い)。opts.grid越しに共有fieldへ蓄積
-  // するcarveUnifiedRegions経由の呼び出しでも、body(ownerId=0)の
-  // carveOptsにだけfaceSculptを渡すことで自然にbodyだけに効く
-  // (アクセサリー側はfaceSculpt未設定のため)。
-  function applyEyeSocketRecess(field, fs){
-    var rx=Math.max(fs.eyeSocketRadiusX,EPS), ry=Math.max(fs.eyeSocketRadiusY,EPS);
-    var depth=fs.eyeSocketDepth;
-    if(!(depth>0)) return;
-    [fs.eyeL, fs.eyeR].forEach(function(eye){
-      if(!eye) return;
-      var fx=eye[0], fy=eye[1];
-      var ix0=Math.max(0, Math.floor((fx-rx-mxMin)/(mxMax-mxMin)*(nx-1)));
-      var ix1=Math.min(nx-1, Math.ceil((fx+rx-mxMin)/(mxMax-mxMin)*(nx-1)));
-      var iy0=Math.max(0, rowRangeStart, Math.floor((fy-ry-myMin)/(myMax-myMin)*(ny-1)));
-      var iy1=Math.min(ny-1, rowRangeEnd, Math.ceil((fy+ry-myMin)/(myMax-myMin)*(ny-1)));
-      for(var iyb=iy0; iyb<=iy1; iyb++){
-        var dy=(my[iyb]-fy)/ry;
-        var rowOff=(iyb-rowRangeStart)*strideY;
-        for(var ixb=ix0; ixb<=ix1; ixb++){
-          var dx=(mx[ixb]-fx)/rx;
-          var w2=dx*dx+dy*dy;
-          if(w2>=1) continue; // 楕円footprintの外
-          var recessAmt=depth*(1-w2); // 中心で最大depth、footprint縁でゼロになる凹み量
-          var base=rowOff+ixb*strideX;
-          // この列(ixb,iyb)の現在の最前面(+z側、front方向)の表面位置を探す。
-          var surfIz=-1;
-          for(var izs=nz-1; izs>=0; izs--){ if(field[base+izs]>0){ surfIz=izs; break; } }
-          if(surfIz<0) continue; // この列にまだ何も彫られていない(頭部シルエット外)
-          var zSurf=mz[surfIz];
-          var izLo=Math.max(0, Math.floor((zSurf-recessAmt-mzMin)/(mzMax-mzMin)*(nz-1)));
-          for(var izb=izLo; izb<=surfIz; izb++){
-            var t=(zSurf-mz[izb])/recessAmt; // 0(元の表面)→1(凹みの底)
-            var val=-t;
-            var idx=base+izb;
-            if(val<field[idx]) field[idx]=val;
-          }
-        }
-      }
-    });
-  }
-
   // ---- 3) 疑似SDFフィールドを彫る(ローカルbbox最適化) ----
   var strideY=nx*nz, strideX=nz;
   // ★2026-07-16追加(ストリーミング彫刻、STREAMING_CARVING_PLAN.md参照):
@@ -1082,17 +929,6 @@ function carveRegion(opts){
   var sharedField = accumulate ? accumulate.field : null;
   var sharedOwnerField = accumulate ? accumulate.ownerField : null;
   var ownerId = accumulate ? accumulate.ownerId : 0;
-  // ★2026-07-13追加(bone_bridge機能): Map<"oa,ob", Set<iy>>。P3D.computeBoneBridgeRows
-  // 参照。このパーツ(ownerId)と競合相手のペアがここに載っていて、かつ現在の行(iy3)が
-  // そのSetに含まれる場合だけ、通常のseamBlendKの代わりにbridgeK(ずっと緩い)を使う。
-  var bridgeRows = accumulate ? accumulate.bridgeRows : null;
-  var bridgeK = accumulate ? (accumulate.bridgeK||0) : 0;
-  function bridgeKFor(otherOwnerId, iy3){
-    if(!bridgeRows || otherOwnerId<0) return 0;
-    var key = ownerId<otherOwnerId ? (ownerId+","+otherOwnerId) : (otherOwnerId+","+ownerId);
-    var rows = bridgeRows.get(key);
-    return (rows && rows.has(iy3)) ? bridgeK : 0;
-  }
   function carveSdfField(){
   var field = sharedField || new Float32Array((rowRangeEnd-rowRangeStart+1)*nx*nz).fill(-1.0);
   var ownerField = sharedOwnerField;
@@ -1209,41 +1045,13 @@ function carveRegion(opts){
           }
           var val=1.0-(exVal+ez);
           var idx=base+iz;
-          // ★2026-07-13追加(bone_bridge機能): front/side/back画像はパーツ
-          // ごとに独立にフィールドを作るため、3方向どの投影でも輪郭は一致
-          // して見えても斜め方向には「どちらのパーツの表面も届いていない
-          // (両方負)」隙間が実際にでき得る(詳細はSIMPLIFY_DECIMATE_PLAN.md
-          // 後の45度視点隙間の調査参照)。ボーン共有+多方向同時隣接で確定
-          // した橋渡し行(bridgeRows)でのみ、異なるパーツ同士が競合するセル
-          // (ownerField[idx]がこのパーツと異なる)に限り、単純max
-          // (force winner-take-all)の代わりにpolynomial smooth-max
-          // (Inigo Quilezのsmooth-min/maxを符号反転、val>0=inside系のため)
-          // で橋渡しする。同一パーツ内の複数奥行き帯(前髪が顔の手前にある等)
-          // はownerが一致するため常にelse分岐(従来通りの単純max)を通り、
-          // 意図的な奥行きの分離が損なわれることはない。
-          // ★2026-07-14: 同様の目的だったowner_blend機能(競合ボクセルのみ
-          // 常時smooth-maxで橋渡し)は、実測で該当ボクセルがわずかしかなく
-          // 効果がほぼ無いことが分かったため機能ごと削除し、bridgeKのみ
-          // (確定橋渡し行だけに限定)を残した。
           var prevVal=field[idx];
-          var effK = 0;
-          if(ownerField && ownerField[idx]!==-1 && ownerField[idx]!==ownerId){
-            effK = bridgeKFor(ownerField[idx], iy3);
-          }
-          if(effK>0 && Math.max(val,prevVal)>-effK){
-            var h=Math.max(effK-Math.abs(val-prevVal), 0.0)/effK;
-            var blended=Math.max(val,prevVal)+h*h*effK*0.25;
-            if(val>prevVal){ field[idx]=blended; ownerField[idx]=ownerId; }
-            else if(blended>prevVal){ field[idx]=blended; } // ownerは既存の勝者のまま
-          }else{
-            if(val>prevVal){ field[idx]=val; if(ownerField) ownerField[idx]=ownerId; }
-          }
+          if(val>prevVal){ field[idx]=val; if(ownerField) ownerField[idx]=ownerId; }
         }
       }
     }
     }
   }
-  if(opts.faceSculpt) applyEyeSocketRecess(field, opts.faceSculpt);
   return field;
   }
   var field = carveSdfField();
@@ -1279,164 +1087,6 @@ function carveRegion(opts){
   return {V:V, F:F}; // 法線計算・decimationは呼び出し側(visual_hull.js/accessories.js)で行う
 }
 P3D.carveRegion = carveRegion;
-
-// ★2026-07-13追加(bone_bridge機能、ツインテール付け根の隙間対策):
-// carveRegion(opts, {extentsOnly:true})を呼び、smoothByRow/hdByRowから
-// 行(iy)ごとのx範囲(幅、front/back由来)とz範囲(奥行き、side由来)だけを
-// 取り出す。SDFフィールドは一切書かない軽量な事前パス。
-// 戻り値: {ny, xExtent:Array(ny)([xMin,xMax]|null), zExtent:Array(ny)([zMin,zMax]|null)}
-function computeRowExtents(carveOpts, sharedGrid){
-  var res = carveRegion(Object.assign({}, carveOpts, {grid:sharedGrid, extentsOnly:true}));
-  var ny = res.ny;
-  var xExtent = new Array(ny).fill(null);
-  var zExtent = new Array(ny).fill(null);
-  res.smoothByRow.forEach(function(segs, iy){
-    var lo=Infinity, hi=-Infinity;
-    for(var i=0;i<segs.length;i++){
-      var cx=segs[i][0], hw=segs[i][1];
-      if(cx-hw<lo) lo=cx-hw;
-      if(cx+hw>hi) hi=cx+hw;
-    }
-    if(lo<=hi) xExtent[iy]=[lo,hi];
-  });
-  res.hdByRow.forEach(function(bands, iy){
-    var lo=Infinity, hi=-Infinity;
-    for(var i=0;i<bands.length;i++){
-      var hdFront=bands[i][0], hdBack=bands[i][1], zc=bands[i][2];
-      if(zc-hdBack<lo) lo=zc-hdBack;
-      if(zc+hdFront>hi) hi=zc+hdFront;
-    }
-    if(lo<=hi) zExtent[iy]=[lo,hi];
-  });
-  return {ny:ny, xExtent:xExtent, zExtent:zExtent};
-}
-P3D.computeRowExtents = computeRowExtents;
-
-// ふたつの区間が触れている(隙間がeps以下、重なっていてもよい)かどうか。
-function intervalsAdjacent(a, b, eps){
-  if(!a || !b) return false;
-  var gap = Math.max(a[0]-b[1], b[0]-a[1]);
-  return gap<=eps;
-}
-
-// ★2026-07-13追加(bone_bridge機能): candidatePairs(js/pipeline.jsのbones
-// 共有フィルタ済み、"oa,ob"形式の文字列Set)の各ペアについて、rowExtentsByOwner
-// (ownerId -> computeRowExtentsの戻り値)を突き合わせ、「幅(x)・奥行き(z)の
-// 両方で同時に隙間なく隣接している行」だけを確定橋渡し行として集める
-// (ユーザー指摘「複数方向で同時に隣接する場合のみ」「間に挟まれるのではなく
-// 隣り合う場合」)。
-// 戻り値: Map<"oa,ob", Set<iy>>
-function computeBoneBridgeRows(candidatePairs, rowExtentsByOwner, ny, vox){
-  var eps = Math.max(vox*2, 1e-6);
-  var bridgeRows = new Map();
-  candidatePairs.forEach(function(key){
-    var parts = key.split(",");
-    var oa = parseInt(parts[0],10), ob = parseInt(parts[1],10);
-    var extA = rowExtentsByOwner.get(oa), extB = rowExtentsByOwner.get(ob);
-    if(!extA || !extB) return;
-    var rows = new Set();
-    for(var iy=0; iy<ny; iy++){
-      var xAdj = intervalsAdjacent(extA.xExtent[iy], extB.xExtent[iy], eps);
-      var zAdj = intervalsAdjacent(extA.zExtent[iy], extB.zExtent[iy], eps);
-      if(xAdj && zAdj) rows.add(iy);
-    }
-    if(rows.size) bridgeRows.set(key, rows);
-  });
-  return bridgeRows;
-}
-P3D.computeBoneBridgeRows = computeBoneBridgeRows;
-
-// ★2026-07-13追加(bone_bridge機能): 確定橋渡し行(computeBoneBridgeRows)の
-// うち、まだどのパーツも書き込んでいない(field===-1のまま)ボクセルへ、
-// 2パーツの外縁(xExtent/zExtent)が作る外接範囲内に限って橋渡し用の実体
-// (BONE_BRIDGE_FILL_VAL)を書き込む。carveSdfField内のsmooth-maxブレンド
-// (bridgeK)は既に両パーツが書き込んだボクセル同士の値を橋渡しするだけ
-// なので、どちらも書き込んでいない空隙には効かない(実機検証で判明、
-// SIMPLIFY_DECIMATE_PLAN.md後の一連の調査参照)。
-// ★2026-07-14修正(ユーザー指摘「四角形になって意味不明、境目をつなぐだけで
-// いい」): 当初の実装はxLo/xHiとzLo/zHiを両パーツの外縁の"和集合"(union)で
-// 計算していたため、前髪⇔顔・後ろ髪⇔顔のように境界が広く連続しているペアでは、
-// 行ごとにほぼ頭部の断面丸ごとに近い範囲を塗りつぶしてしまい、巨大な箱が
-// 大量に出現する結果になっていた(ツインテール付け根のような点的な小さい
-// 欠けでは目立たなかった副作用が、広い連続境界で顕在化した)。fillIntervalFor
-// Axisで軸ごとに「隙間があればその隙間(幅約eps)だけ」「重なっていれば
-// その重なり(交差)だけ」を対象にするよう修正し、和集合ではなく実際の
-// 隙間/重なりの近傍だけを埋めるようにした。これにより、点的な欠け(ツイン
-// テール付け根)では小さいパッチに、連続的な境界(前髪⇔顔等)では「隙間の
-// 軸だけ薄い帯・重なっている軸は交差幅のまま」という細い"膜"状の橋渡しに
-// なり、どちらの場合も「境目をつなぐだけ」に近い結果になる。
-var BONE_BRIDGE_FILL_VAL = 0.3;
-// 区間a,bのうち、実際に埋めるべき範囲(隙間があればその隙間の近傍のみ、
-// 重なっていればその重なり=交差のみ)を返す。どちらの場合も両区間の
-// 和集合よりずっと狭い範囲になる。
-function fillIntervalForAxis(a, b, eps){
-  if(a[1]<b[0]) return [a[1]-eps, b[0]+eps];
-  if(b[1]<a[0]) return [b[1]-eps, a[0]+eps];
-  return [Math.max(a[0],b[0]), Math.min(a[1],b[1])];
-}
-// ★2026-07-16追加(ストリーミング彫刻): rowRangeが渡された場合、
-// field/ownerFieldは全ny行分ではなく[rowRangeStart,rowRangeEnd]
-// (グローバル行番号、両端含む)だけの小さい配列(carveUnifiedRegionsの
-// ウィンドウ処理が確保)。bridgeRows自体はグローバル行番号のまま(軽量な
-// extentsOnly事前パスで全体を一度に計算済み)なので、この範囲外の行は
-// スキップし、範囲内の行だけローカル行番号に変換して書き込む。
-// rowRange省略時は従来通り(全行がグローバル=ローカル)。
-function applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, grid, vox, rowRange){
-  var nx=grid.nx, nz=grid.nz, mx=grid.mx, mz=grid.mz;
-  var mxMin=grid.mxMin, mxMax=grid.mxMax, mzMin=grid.mzMin, mzMax=grid.mzMax;
-  var strideY=nx*nz, strideX=nz;
-  var rowRangeStart = rowRange ? rowRange[0] : 0;
-  var rowRangeEnd = rowRange ? rowRange[1] : (grid.ny!==undefined ? grid.ny-1 : Infinity);
-  var eps = Math.max((vox||0.003)*2, 1e-6); // computeBoneBridgeRowsの隣接判定epsと揃える
-  bridgeRows.forEach(function(rows, key){
-    var parts = key.split(",");
-    var oa = parseInt(parts[0],10), ob = parseInt(parts[1],10);
-    var extA = rowExtentsByOwner.get(oa), extB = rowExtentsByOwner.get(ob);
-    if(!extA || !extB) return;
-    rows.forEach(function(iy){
-      if(iy<rowRangeStart || iy>rowRangeEnd) return; // このウィンドウの範囲外
-      var xa=extA.xExtent[iy], xb=extB.xExtent[iy];
-      var za=extA.zExtent[iy], zb=extB.zExtent[iy];
-      if(!xa || !xb || !za || !zb) return;
-      // ★2026-07-14修正(実機デバッグで判明): x・z両方の区間が"重なっている"
-      // (隙間ではない)行は、体のように大きいパーツと、その上に乗る/被さる
-      // アクセサリー(前髪・マフラー等)のバウンディング範囲がたまたま両軸とも
-      // 大きく重なっているだけの偽陽性である可能性が高い(実測: 体⇔前髪は
-      // 該当した全36行でx・z両方が常に重なっており、埋める範囲が最大10cm×7.7cm
-      // にもなっていた。体⇔マフラーも同様に最大16.8cm×9.3cmの大きな塊になり、
-      // 顎付近に無関係な色のパッチが出る不具合の原因だった)。前髪⇔後ろ髪の
-      // ように「幅(x)は常に重なるが奥行き(z)は常に隙間」という一貫したパターン
-      // (=薄い膜状の正当な継ぎ目)や、ツインテール付け根のように「両軸とも
-      // 隙間」という点的なパターンは、片方の軸だけ"重なり"かどちらの軸も"隙間"
-      // なので影響を受けない。両軸とも"重なり"の行だけを埋め対象から除外する。
-      var xOverlap = xa[1]>=xb[0] && xb[1]>=xa[0];
-      var zOverlap = za[1]>=zb[0] && zb[1]>=za[0];
-      if(xOverlap && zOverlap) return;
-      var xi=fillIntervalForAxis(xa,xb,eps), zi=fillIntervalForAxis(za,zb,eps);
-      var xLo=xi[0], xHi=xi[1], zLo=zi[0], zHi=zi[1];
-      if(xLo>=xHi || zLo>=zHi) return;
-      var ixLo=Math.max(0, Math.floor((xLo-mxMin)/(mxMax-mxMin)*(nx-1)));
-      var ixHi=Math.min(nx-1, Math.ceil((xHi-mxMin)/(mxMax-mxMin)*(nx-1)));
-      var izLo=Math.max(0, Math.floor((zLo-mzMin)/(mzMax-mzMin)*(nz-1)));
-      var izHi=Math.min(nz-1, Math.ceil((zHi-mzMin)/(mzMax-mzMin)*(nz-1)));
-      if(ixLo>ixHi || izLo>izHi) return;
-      var rowOff=(iy-rowRangeStart)*strideY;
-      var xaCx=(xa[0]+xa[1])/2, xbCx=(xb[0]+xb[1])/2;
-      for(var ix=ixLo; ix<=ixHi; ix++){
-        var xv=mx[ix];
-        var nearerOwner = (Math.abs(xv-xaCx)<=Math.abs(xv-xbCx)) ? oa : ob;
-        var base=rowOff+ix*strideX;
-        for(var iz=izLo; iz<=izHi; iz++){
-          var idx=base+iz;
-          if(field[idx]!==-1) continue; // 既にどちらか(または他パーツ)が書き込み済みのボクセルは上書きしない
-          field[idx]=BONE_BRIDGE_FILL_VAL;
-          ownerField[idx]=nearerOwner;
-        }
-      }
-    });
-  });
-}
-P3D.applyBoneBridgeFill = applyBoneBridgeFill;
 
 // ★2026-07-14追加(part_gap_close機能、ユーザー要望「モデル生成時に、設定した
 // 距離でパーツ間の隙間を塞ぐ機能」): bone_bridgeはボーン共有+行単位の粗い
@@ -1561,20 +1211,12 @@ P3D.closeInterPartGaps = closeInterPartGaps;
  *   (呼び出し側で対応表を持つこと)。
  * sharedGrid: buildGrid()の戻り値(体+全アクセサリーの外接範囲で作ったもの)
  * minFragFrac: dropSmallFragmentsの閾値(未指定時0.05)
- * boneBridgeCandidates: 省略可。Set<"oa,ob">(oa<ob)。bone_bridge機能
- *   (ツインテール付け根の隙間対策)で橋渡し候補にするownerIdペア
- *   (js/pipeline.jsのrunCarvingStages参照)。
  * partGapCloseDist: 省略可(model単位、0または未指定で無効)。part_gap_close機能
  *   (js/carving.jsのcloseInterPartGaps参照)で、異なる2パーツ以上の表面から
  *   同時にこの距離以内にある空ボクセルを埋める閾値。
  * 戻り値: {V,F,owner} (owner: Int32Array、頂点ごとのownerId) または
  *   null(彫れなかった場合)
  */
-// ★2026-07-13追加(bone_bridge機能): 確定橋渡し行(computeBoneBridgeRows)の
-// ボクセルで使うブレンド半径。実測でツインテール-後ろ髪間はval差が2を
-// 超えるケースがあったため、かなり緩めの値にし、確信度の高い(=ボーン共有+
-// 幅と奥行き両方で隣接確認済み)行にだけ適用する。
-var BONE_BRIDGE_K = 5.0;
 // ★2026-07-16追加(ストリーミング彫刻、STREAMING_CARVING_PLAN.md参照): 1
 // ウィンドウあたりのfield+ownerField確保サイズの上限目安。body_vox/
 // body_vox_xzを両方1px相当にすると、共有field/ownerFieldの一括確保
@@ -1584,50 +1226,20 @@ var BONE_BRIDGE_K = 5.0;
 // グローバルなメッシュへ蓄積することでこれを回避する(サーフェスメッシュ
 // 自体は密グリッドよりずっと小さいため、間引き以降の処理は変更不要)。
 var STREAMING_FIELD_BUDGET_BYTES = 300*1024*1024;
-function carveUnifiedRegions(regions, sharedGrid, minFragFrac, boneBridgeCandidates, partGapCloseDist){
+function carveUnifiedRegions(regions, sharedGrid, minFragFrac, partGapCloseDist){
   var nx=sharedGrid.nx, ny=sharedGrid.ny, nz=sharedGrid.nz;
 
   // ★2026-07-16追加(ストリーミング彫刻): 各リージョンのsmoothByRow/hdByRow
   // (front/back/side画像の行スキャン結果)は、ウィンドウ処理で同じリージョンの
   // carveRegionを複数回(ウィンドウの数だけ)呼んでも値は変わらない(入力画像は
   // ウィンドウに依存しない)。全ウィンドウ処理の前に1回だけ計算してキャッシュし、
-  // (a)bone_bridgeの行範囲計算 (b)各ウィンドウのcarveSdfField呼び出し
-  // の両方で使い回す(js/carving.jsのopts.precomputedRows参照)。これが無いと
-  // ウィンドウの数だけ画像の行スキャンが重複し、無駄に遅くなる。
+  // 各ウィンドウのcarveSdfField呼び出しで使い回す(js/carving.jsの
+  // opts.precomputedRows参照)。これが無いとウィンドウの数だけ画像の行スキャンが
+  // 重複し、無駄に遅くなる。
   var precomputedRowsByOwner = new Map();
   regions.forEach(function(r){
     precomputedRowsByOwner.set(r.ownerId, carveRegion(Object.assign({}, r.opts, {grid:sharedGrid, extentsOnly:true})));
   });
-  function extentsFromPrecomputed(pre){
-    var ny2=pre.ny, xExtent=new Array(ny2).fill(null), zExtent=new Array(ny2).fill(null);
-    pre.smoothByRow.forEach(function(segs, iy){
-      var lo=Infinity, hi=-Infinity;
-      for(var i=0;i<segs.length;i++){ var cx=segs[i][0], hw=segs[i][1]; if(cx-hw<lo)lo=cx-hw; if(cx+hw>hi)hi=cx+hw; }
-      if(lo<=hi) xExtent[iy]=[lo,hi];
-    });
-    pre.hdByRow.forEach(function(bands, iy){
-      var lo=Infinity, hi=-Infinity;
-      for(var i=0;i<bands.length;i++){ var hdFront=bands[i][0], hdBack=bands[i][1], zc=bands[i][2]; if(zc-hdBack<lo)lo=zc-hdBack; if(zc+hdFront>hi)hi=zc+hdFront; }
-      if(lo<=hi) zExtent[iy]=[lo,hi];
-    });
-    return {ny:ny2, xExtent:xExtent, zExtent:zExtent};
-  }
-
-  var bridgeRows = null, rowExtentsByOwner = null;
-  var voxForEps = regions.length ? (regions[0].opts.vox||0.003) : 0.003;
-  if(boneBridgeCandidates && boneBridgeCandidates.size){
-    var neededOwners = new Set();
-    boneBridgeCandidates.forEach(function(key){
-      var parts = key.split(",");
-      neededOwners.add(parseInt(parts[0],10)); neededOwners.add(parseInt(parts[1],10));
-    });
-    rowExtentsByOwner = new Map();
-    regions.forEach(function(r){
-      if(!neededOwners.has(r.ownerId)) return;
-      rowExtentsByOwner.set(r.ownerId, extentsFromPrecomputed(precomputedRowsByOwner.get(r.ownerId)));
-    });
-    bridgeRows = computeBoneBridgeRows(boneBridgeCandidates, rowExtentsByOwner, ny, voxForEps);
-  }
   var voxForGapClose = regions.length ? (regions[0].opts.vox||0.003) : 0.003;
 
   // ウィンドウの行数をメモリ予算から決める。既定の粗い設定ではグリッド
@@ -1650,25 +1262,10 @@ function carveUnifiedRegions(regions, sharedGrid, minFragFrac, boneBridgeCandida
         grid: sharedGrid,
         rowRange: [winStart, winEnd],
         precomputedRows: precomputedRowsByOwner.get(r.ownerId),
-        accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId,
-          bridgeRows:bridgeRows, bridgeK:BONE_BRIDGE_K},
+        accumulate: {field:field, ownerField:ownerField, ownerId:r.ownerId},
       });
       carveRegion(opts);
     });
-
-    // ★2026-07-13追加(bone_bridge機能、実機検証で判明): 確定橋渡し行でも、
-    // 2パーツが実際に同じボクセルを取り合う(競合する)ケースはごく僅かで
-    // (実測: 163,982頂点サンプルで後ろ髪⇔ツインテール間はわずか5〜69ボクセル)、
-    // 可視化される隙間の大部分は「どちらのパーツも一度も書き込んでいない、
-    // 本当に何もない空隙(field=-1のまま)」だった。carveSdfField内の
-    // smooth-maxブレンドは既存の2値を橋渡しするだけなので、データそのものが
-    // 無い空隙には無力(実機の45度視点スクリーンショットで隙間が埋まって
-    // いないことを確認して発覚)。確定橋渡し行では、2パーツの外縁が作る
-    // 外接範囲のうち、まだ何も書き込まれていないボクセルへ直接「橋渡し用の
-    // 実体」を書き込む。
-    if(bridgeRows && bridgeRows.size){
-      applyBoneBridgeFill(field, ownerField, bridgeRows, rowExtentsByOwner, sharedGrid, voxForEps, [winStart, winEnd]);
-    }
 
     // ★2026-07-14追加(part_gap_close機能): ボーン共有や行単位の近似を介さず、
     // 純粋なボクセルグリッド上の3次元距離だけで異なるパーツ間の隙間を塞ぐ

@@ -35,13 +35,6 @@ function buildDerivedLandmarks(points, analysis, derivedBase){
     var el=points['elbow_'+s];
     if(el) d['elbow_'+s+'_mx']=MX(el[0]);
   });
-  // ★2026-07-11追加(顔の立体感対応): eye_L/eye_Rランドマーク(px)をmodel座標
-  // へ変換し、js/carving.jsのapplyEyeSocketRecessが目窩の凹みを彫る中心点
-  // として使う。
-  ['L','R'].forEach(function(s){
-    var ep=points['eye_'+s];
-    if(ep) d['face_eye_'+s]=[MX(ep[0]), MY(ep[1]), 0.0];
-  });
   function meanV(keys){
     var vals = keys.map(function(k){return points[k];}).filter(Boolean).map(function(p){return V(p[1]);});
     return vals.length ? vals.reduce(function(a,b){return a+b;},0)/vals.length : undefined;
@@ -327,7 +320,7 @@ async function runCarvingStages(state, report){
     faW:sizes.front.w, faH:sizes.front.h, saW:sizes.side.w, saH:sizes.side.h,
     frontCont:contFull.front||null, backCont:contFull.back||null, sideCont:contFull.side||null,
     SCALE:SCALE, CX:prof.CX, YBOT:prof.YBOT, SYTOP:prof.SYTOP, SYBOT:prof.SYBOT, SIDE_REF:core.SIDE_REF,
-    pivots:pivots, gp:gp, faceEyeL:LM.face_eye_L, faceEyeR:LM.face_eye_R,
+    pivots:pivots, gp:gp,
   });
 
   var accBuilt = [];
@@ -442,35 +435,16 @@ async function runCarvingStages(state, report){
   }
   var regions = [{ownerId:0, opts:bodyBuilt.carveOpts}].concat(
     accBuilt.map(function(a,i){ return {ownerId:i+1, opts:a.carveOpts}; }));
-  // ★2026-07-13追加(bone_bridge機能、ユーザー指摘「ツインテールの付け根の
-  // 隙間」対応): 遮蔽によってシルエットが分断されたパーツ同士(例: 後ろ髪の
-  // 一部を覆うツインテール)を橋渡しする。誤結合を避けるため、ボーン(bones)
-  // を共有するパーツ同士だけを候補にする(体はbonesを持たず常に候補、
-  // js/carving.jsのcarveUnifiedRegions/carveSdfField参照)。
-  // ★2026-07-14(ユーザー指摘「効果がなさすぎる」対応): 同様の目的だった
-  // owner_blend機能(パーツ境界で競合するボクセルのみsmooth-maxで橋渡し)は、
-  // 実測(163,982頂点のサンプル)で該当ボクセルがわずか34頂点分しかなく
-  // 体感できる効果がほぼ無いことが分かったため機能ごと削除した。
-  var boneBridgeCandidates = new Set();
-  if(gp.bone_bridge){
-    var ownerBones = [null].concat(accBuilt.map(function(a){ return a.bones||null; }));
-    for(var oa=0; oa<ownerBones.length; oa++){
-      for(var ob=oa+1; ob<ownerBones.length; ob++){
-        var isCandidate = (oa===0 || ob===0); // 体は常に候補
-        if(!isCandidate){
-          var ba=ownerBones[oa], bb=ownerBones[ob];
-          if(ba && bb) isCandidate = ba.some(function(b){ return bb.indexOf(b)>=0; });
-        }
-        if(isCandidate) boneBridgeCandidates.add(oa+","+ob);
-      }
-    }
-  }
   // ★2026-07-14追加(part_gap_close機能、ユーザー要望「モデル生成時に、設定
-  // した距離でパーツ間の隙間を塞ぐ機能」): bone_bridgeのボーン共有+行単位の
-  // 粗い近似とは独立に、ボクセルグリッド上の本物の3次元距離だけで異なる
-  // パーツ間の隙間を塞ぐ(js/carving.jsのcloseInterPartGaps参照)。
+  // した距離でパーツ間の隙間を塞ぐ機能」): ボクセルグリッド上の本物の
+  // 3次元距離だけで異なるパーツ間の隙間を塞ぐ(js/carving.jsの
+  // closeInterPartGaps参照)。
+  // ★2026-07-17(設定タブ整理): 同様の目的だったbone_bridge機能(ボーン共有+
+  // 行単位の粗い外縁近似による橋渡し)は、実サンプルで実際に検証したところ
+  // 前面∪背面の合成で既に解決しており効果を確認できなかったため削除した
+  // (ユーザー指摘)。
   var partGapCloseDist = gp.part_gap_close ? (gp.part_gap_close_dist||0) : 0;
-  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, boneBridgeCandidates, partGapCloseDist);
+  var unified = P3D.carveUnifiedRegions(regions, sharedGrid, 0.001, partGapCloseDist);
   if(!unified) throw new Error("visual_hull+accessories: carving produced an empty mesh");
   console.log("  carveUnifiedRegions: total verts", unified.V.length/3, "faces", unified.F.length/3);
 

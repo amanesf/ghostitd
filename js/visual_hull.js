@@ -97,9 +97,9 @@ function buildBodyCarveOpts(opts){
     faW: opts.faW, faH: opts.faH, saW: opts.saW, saH: opts.saH,
     // ★2026-07-11: gp.subpixel_edges有効時、js/pipeline.jsが最近傍色分類の
     // ボロノイ境界に対応するサブピクセル指標(P3D.boundaryContForCandidate)を
-    // frontCont/backCont/sideContとして渡す(無効時・face_sculpt等の後方互換
-    // 呼び出しではnull、carveRegion側は従来通りCommon.findRunsで整数px境界を
-    // 使う)。旧・白背景しきい値ベースのサブピクセル補正(輝度専用)とは別の
+    // frontCont/backCont/sideContとして渡す(無効時・後方互換呼び出しでは
+    // null、carveRegion側は従来通りCommon.findRunsで整数px境界を使う)。
+    // 旧・白背景しきい値ベースのサブピクセル補正(輝度専用)とは別の
     // 仕組みのため、whiteThrは0(cont=0がちょうど分類境界)を明示する。
     faCont: opts.frontCont, baCont: opts.backCont, saCont: opts.sideCont,
     whiteThr: 0,
@@ -115,9 +115,6 @@ function buildBodyCarveOpts(opts){
     psqArms: gp.psq_arms, psqHands: gp.psq_hands,
     neckY: opts.pivots.neck ? opts.pivots.neck[1] : null,
     hipsY: opts.pivots.hips ? opts.pivots.hips[1] : null,
-    trackWin: gp.track_win,
-    trackGapClosePx: gp.track_gap_close_px,
-    depthGapClosePx: gp.depth_gap_close_px,
     smoothIters: 0,
     armLines: armLines, armMaxHw: gp.arm_max_hw,
     handLines: handLines.length ? handLines : null,
@@ -130,21 +127,6 @@ function buildBodyCarveOpts(opts){
     // 値まで下げる。
     minFragFrac: 0.001,
   };
-  // ★2026-07-11追加(顔の立体感対応): eye_L/eye_Rランドマークがあり、
-  // face_sculptが無効化されていなければ、彫刻済みの頭部表面へ局所的な目窩の
-  // 凹みを彫る(js/carving.jsのapplyEyeSocketRecess参照)。目窩はfront/back/
-  // sideどのシルエット輪郭にも現れない内部形状のため、凹ませても輪郭(=元
-  // イラストの実測データ)とは矛盾しない。landmarkが無い旧プロジェクトは
-  // 何も変わらない(faceSculpt:nullでapplyEyeSocketRecess自体がスキップ
-  // される)。
-  if(gp.face_sculpt!==false && (opts.faceEyeL || opts.faceEyeR)){
-    carveOpts.faceSculpt = {
-      eyeL: opts.faceEyeL, eyeR: opts.faceEyeR,
-      eyeSocketDepth: gp.eye_socket_depth,
-      eyeSocketRadiusX: gp.eye_socket_radius_x,
-      eyeSocketRadiusY: gp.eye_socket_radius_y,
-    };
-  }
   return {mxBounds:mxBounds, myBounds:myBounds, mzBounds:mzBounds, carveOpts:carveOpts};
 }
 P3D.buildBodyCarveOpts = buildBodyCarveOpts;

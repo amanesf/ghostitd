@@ -161,9 +161,14 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 近接した(位置差1e-5オーダー)頂点がどちらか一方だけ選ばれる箇所が
 // ごく少数(実測23,713頂点中7〜8点、0.03%)生じるため、ハッシュを更新した
 // (見た目上の劣化は無いことを確認済み)。
+// ★2026-07-17(設定タブ整理): 目窩(face_sculpt/eye_socket_*)機能とdepth_gap_
+// close_px(側面のrun統合)を機能ごと削除した。前者は輪郭に現れない架空の
+// 凹みだったため、後者は実サンプルで検証したところ効果を確認できなかった
+// ため(ユーザー指摘)。body-only/with-accessoryとも彫刻結果が変わるため
+// ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 698860,
-  sha256: "6e31a01dfa8896696bee70eaa7a42eb324f71775de623aefa002491e46157c46",
+  byteLength: 690804,
+  sha256: "8438cbd02c2cff75664ad2694dae4d57852b97fe15e08fd2dbea460edabae651",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -276,9 +281,14 @@ const EXPECTED_BODY_ONLY = {
 // ★2026-07-17: 上のEXPECTED_BODY_ONLYコメント(SimplifyModifierのswap-and-pop化)
 // と同じ変更により、with-accessory側も間引き終盤の僅差タイブレークが変わり
 // ハッシュを更新した。
+// ★2026-07-17(設定タブ整理): 上のEXPECTED_BODY_ONLYコメント(目窩/
+// depth_gap_close_px削除)に加え、track_gap_close_px(房の分断を埋める)も
+// 機能ごと削除した。with-accessory側はこれらの影響を全て受けるため
+// ハッシュを更新した(バイト数が増えているのは、房の分断や側面の分断が
+// 埋められなくなり、以前より分割された形状になったため)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1223284,
-  sha256: "7d76fbd885c6de5a498bd5a8977fb3febd4c6f41bca03a48c9fc8f2e143db07d",
+  byteLength: 1239204,
+  sha256: "d306e5ba8ff0920a526a77454e904298b3bf2c66a503294f76acdea14f9627ac",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
