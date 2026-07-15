@@ -786,26 +786,30 @@ function carveRegion(opts){
     var saPx = saCont ? Common.findRunsSubpixel(saRow, rowOf1d(saCont,saW,rowPx2), whiteThr) : Common.findRuns(saRow);
     if(!saPx.length) continue;
     saPx = saPx.slice().sort(function(p,q){return p[0]-q[0];});
-    var pxGroups = saPx.map(function(p){ return [p]; });
+    // 各runをモデル単位に変換し、mzLimで切り詰める。
+    var runsMz=[];
+    for(var ri=0;ri<saPx.length;ri++){
+      var conv=intersectIntervals([[(saPx[ri][0]-SIDE_REF-sideOffsetX)/SCALE, (saPx[ri][1]-SIDE_REF-sideOffsetX)/SCALE]], mzLim);
+      if(conv.length) runsMz.push(conv[0]);
+    }
+    if(!runsMz.length) continue;
+    // ★2026-07-18バグ修正: 以前は近接するrunを1グループにまとめてから
+    // グループ内でノイズ幅(vox未満)のrunを無視していたが、2026-07-17の
+    // depth_gap_close_px削除時にグループを「run 1本=1グループ」へ簡略化した
+    // ため、この「ノイズ幅runを無視する」判定(zrunsMz.length>1が常に偽になる)
+    // が意図せず死んでいた。アンチエイリアス由来の1px程度の孤立誤分類run
+    // (色分けマップ上で複数パーツの境界が近接する箇所で発生する)が、
+    // そのまま独立した奥行き帯として彫刻に使われ、3D形状にスパイクとして
+    // 現れる不具合があった。同じ行に実体のあるrun(vox以上の幅)が他にあれば
+    // ノイズ幅のrunは無視する(全runがノイズ幅の場合は、顎先等の実在の小さい
+    // 凹凸を消さないよう何も無視しない)。★2026-07-17の変更(隙間サイズに
+    // 依存しないよう、各runを別々の奥行き帯として扱う。エンベロープはしない)
+    // はそのまま維持する。
+    var significantRuns=runsMz.filter(function(r){ return (r[1]-r[0])>=vox; });
+    var useRuns = significantRuns.length ? significantRuns : runsMz;
     var bands=[];
-    for(var g=0; g<pxGroups.length; g++){
-      var zrunsMz = pxGroups[g].map(function(pq){ return [(pq[0]-SIDE_REF-sideOffsetX)/SCALE, (pq[1]-SIDE_REF-sideOffsetX)/SCALE]; });
-      zrunsMz = intersectIntervals(zrunsMz, mzLim);
-      if(!zrunsMz.length) continue;
-      // ★2026-07-04(改): 以前は「最大幅のrunを採用」(+vox*3以内の隙間の橋渡し)
-      // だったが、顎先と首の間のような実在の凹みで顎側runが分離すると、隙間が
-      // 橋渡し閾値を超えた時点で幅の広い首側runに負けて顎の突出が消えていた
-      // (閾値依存で直らない)。隙間サイズに依存しないよう、ノイズ幅(vox未満)の
-      // runを除いた全runを「前端の最小〜後端の最大」で包む1本の区間として
-      // 採用する(エンベロープ、ただし同じ帯グループ内のrunに限る)。
-      zrunsMz.sort(function(p,q){return p[0]-q[0];});
-      var mz0=Infinity, mz1=-Infinity;
-      for(var k=0;k<zrunsMz.length;k++){
-        if(zrunsMz.length>1 && zrunsMz[k][1]-zrunsMz[k][0]<vox) continue; // ゴミ描線幅は無視
-        if(zrunsMz[k][0]<mz0) mz0=zrunsMz[k][0];
-        if(zrunsMz[k][1]>mz1) mz1=zrunsMz[k][1];
-      }
-      if(mz0>mz1){ mz0=zrunsMz[0][0]; mz1=zrunsMz[zrunsMz.length-1][1]; } // 全部ノイズ幅なら全体を包む
+    for(var g=0; g<useRuns.length; g++){
+      var mz0=useRuns[g][0], mz1=useRuns[g][1];
       if(mz0<0.0 && 0.0<mz1){
         bands.push([Math.max(mz1,EPS), Math.max(-mz0,EPS), 0.0]);
       }else{

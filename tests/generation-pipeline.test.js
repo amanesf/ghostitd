@@ -166,9 +166,14 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 凹みだったため、後者は実サンプルで検証したところ効果を確認できなかった
 // ため(ユーザー指摘)。body-only/with-accessoryとも彫刻結果が変わるため
 // ハッシュを更新した。
+// ★2026-07-18(スカート裾スパイク調査): (1)js/carving.jsのbuildDepthByRowで、
+// depth_gap_close_px削除時にグループ構造が変わったことで死んでいた「ノイズ幅
+// runを無視する」フィルタを復元、(2)js/common.jsにdespeckleLabels(アンチ
+// エイリアス境界画素が無関係な色に誤分類される問題の修復)を追加。どちらも
+// 体・アクセサリーの彫刻結果に影響するためハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 690804,
-  sha256: "8438cbd02c2cff75664ad2694dae4d57852b97fe15e08fd2dbea460edabae651",
+  byteLength: 688780,
+  sha256: "731ef8e0ab8cb5f95283e9fc256a21265159c90dcccc58063a04569f607a10cd",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -286,9 +291,11 @@ const EXPECTED_BODY_ONLY = {
 // 機能ごと削除した。with-accessory側はこれらの影響を全て受けるため
 // ハッシュを更新した(バイト数が増えているのは、房の分断や側面の分断が
 // 埋められなくなり、以前より分割された形状になったため)。
+// ★2026-07-18(スカート裾スパイク調査): 上のEXPECTED_BODY_ONLYコメント参照
+// (buildDepthByRowのノイズフィルタ復元+despeckleLabels追加)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1239204,
-  sha256: "d306e5ba8ff0920a526a77454e904298b3bf2c66a503294f76acdea14f9627ac",
+  byteLength: 1206412,
+  sha256: "fbbe762489d68bcde3ee3730f903b73b91dc289e430a4fd7a856f021b9359e51",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
