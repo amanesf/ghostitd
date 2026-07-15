@@ -166,11 +166,14 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 凹みだったため、後者は実サンプルで検証したところ効果を確認できなかった
 // ため(ユーザー指摘)。body-only/with-accessoryとも彫刻結果が変わるため
 // ハッシュを更新した。
-// ★2026-07-18(スカート裾スパイク調査): (1)js/carving.jsのbuildDepthByRowで、
+// ★2026-07-18(スカート裾スパイク調査): js/carving.jsのbuildDepthByRowで、
 // depth_gap_close_px削除時にグループ構造が変わったことで死んでいた「ノイズ幅
-// runを無視する」フィルタを復元、(2)js/common.jsにdespeckleLabels(アンチ
-// エイリアス境界画素が無関係な色に誤分類される問題の修復)を追加。どちらも
-// 体・アクセサリーの彫刻結果に影響するためハッシュを更新した。
+// runを無視する」フィルタを復元した。1ボクセル未満の幅は解像度的に表現不可能な
+// ゴミとして無視するだけで、色分けマップの分類結果自体は一切書き換えない
+// (「画像を信じる」方針に沿った修正、ユーザー合意済み)。
+// ★同日: js/common.jsに追加していたdespeckleLabels(色分類結果を周囲の
+// 多数派で書き換える処理)は、画像の分類結果を推測で上書きするものだった
+// ため、ユーザー判断により撤回した(this file's history参照)。
 const EXPECTED_BODY_ONLY = {
   byteLength: 688780,
   sha256: "731ef8e0ab8cb5f95283e9fc256a21265159c90dcccc58063a04569f607a10cd",
@@ -292,10 +295,11 @@ const EXPECTED_BODY_ONLY = {
 // ハッシュを更新した(バイト数が増えているのは、房の分断や側面の分断が
 // 埋められなくなり、以前より分割された形状になったため)。
 // ★2026-07-18(スカート裾スパイク調査): 上のEXPECTED_BODY_ONLYコメント参照
-// (buildDepthByRowのノイズフィルタ復元+despeckleLabels追加)。
+// (buildDepthByRowのノイズフィルタ復元。despeckleLabelsは撤回済みのため
+// with-accessory側のみ影響を受ける、body-onlyは不変)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1206412,
-  sha256: "fbbe762489d68bcde3ee3730f903b73b91dc289e430a4fd7a856f021b9359e51",
+  byteLength: 1199956,
+  sha256: "d55954d2bc89e1ac6aa11a140090ba85eb70a883d56aa8c32dbb773865cc7080",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

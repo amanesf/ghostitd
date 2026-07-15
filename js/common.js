@@ -431,73 +431,6 @@ function classifyColorsNearest(ctx, w, h, candidates){
 }
 P3D.classifyColorsNearest = classifyColorsNearest;
 
-// ★2026-07-18追加(スカート裾スパイク調査で判明): アンチエイリアス境界の
-// ブレンド画素は、見た目は2色の中間色でも、RGB距離的には全く無関係な
-// 第3の候補色の方が近くなることがある(例: 緑と黒の中間色が、たまたま
-// 候補にある別パーツのティール系の色に最も近くなる)。これにより、本来
-// 連続しているはずの1パーツの輪郭に無関係な別パーツ色の小さな孤立領域が
-// 食い込み、輪郭が数px単位で分裂する(側面画像で顕著。奥行き抽出には
-// 行方向の平滑化が無い(js/carving.jsのbuildDepthByRow参照)ため、
-// そのまま3D形状のスパイクとして現れていた)。
-// classifyColorsNearestの勝者ラベルに対し、minAreaPx未満の孤立した連結成分を
-// 「その成分に隣接する画素で最も優勢なラベル」へ塗り直すことで、この手の
-// ブレンド画素の誤分類を修復する。significantComponentsMaskは1つの候補の
-// マスクから小さい塊を単純に除外するだけで、除外した画素をどこにも
-// 割り当てないため、本来の持ち主(隣接パーツ)へ画素を返せなかった。
-function despeckleLabels(labels, w, h, minAreaPx){
-  minAreaPx = (minAreaPx===undefined || minAreaPx===null) ? 16 : minAreaPx;
-  var n=w*h;
-  var compId=new Int32Array(n).fill(-1);
-  var compLabel=[], compSize=[];
-  var stack=[];
-  for(var start=0; start<n; start++){
-    if(compId[start]!==-1) continue;
-    var lab=labels[start], cid=compLabel.length, size=0;
-    stack.length=0; stack.push(start); compId[start]=cid;
-    while(stack.length){
-      var idx=stack.pop(); size++;
-      var x=idx%w, y=(idx/w)|0;
-      var ni;
-      if(x>0){ ni=idx-1; if(compId[ni]===-1 && labels[ni]===lab){ compId[ni]=cid; stack.push(ni); } }
-      if(x<w-1){ ni=idx+1; if(compId[ni]===-1 && labels[ni]===lab){ compId[ni]=cid; stack.push(ni); } }
-      if(y>0){ ni=idx-w; if(compId[ni]===-1 && labels[ni]===lab){ compId[ni]=cid; stack.push(ni); } }
-      if(y<h-1){ ni=idx+w; if(compId[ni]===-1 && labels[ni]===lab){ compId[ni]=cid; stack.push(ni); } }
-    }
-    compLabel.push(lab); compSize.push(size);
-  }
-  var smallSet={};
-  for(var c=0;c<compSize.length;c++){ if(compSize[c]<minAreaPx) smallSet[c]=true; }
-  var voteMaps={};
-  for(var i=0;i<n;i++){
-    var cid2=compId[i];
-    if(!(cid2 in smallSet)) continue;
-    var vm=voteMaps[cid2]||(voteMaps[cid2]={});
-    var x2=i%w, y2=(i/w)|0, nj, vl;
-    if(x2>0){ nj=i-1; if(compId[nj]!==cid2){ vl=labels[nj]; vm[vl]=(vm[vl]||0)+1; } }
-    if(x2<w-1){ nj=i+1; if(compId[nj]!==cid2){ vl=labels[nj]; vm[vl]=(vm[vl]||0)+1; } }
-    if(y2>0){ nj=i-w; if(compId[nj]!==cid2){ vl=labels[nj]; vm[vl]=(vm[vl]||0)+1; } }
-    if(y2<h-1){ nj=i+w; if(compId[nj]!==cid2){ vl=labels[nj]; vm[vl]=(vm[vl]||0)+1; } }
-  }
-  var reassign={};
-  Object.keys(smallSet).forEach(function(cidStr){
-    var cid3=+cidStr;
-    var vm2=voteMaps[cid3]||{};
-    var bestLabel=compLabel[cid3], bestVote=-1;
-    Object.keys(vm2).forEach(function(k){
-      var vl2=+k, v=vm2[k];
-      if(v>bestVote || (v===bestVote && vl2<bestLabel)){ bestVote=v; bestLabel=vl2; }
-    });
-    if(bestVote>=0) reassign[cid3]=bestLabel;
-  });
-  var out=labels.slice();
-  for(var i2=0;i2<n;i2++){
-    var cid4=compId[i2];
-    if(cid4 in reassign) out[i2]=reassign[cid4];
-  }
-  return out;
-}
-P3D.despeckleLabels = despeckleLabels;
-
 // classifyColorsNearestの戻り値からidx番の候補のみを1とする2値マスクを作る。
 function maskFromLabels(labels, idx){
   var n=labels.length, out=new Uint8Array(n);
@@ -520,7 +453,6 @@ function classifySilhouetteRaw(ctx, w, h, bodyColorHex, accessoryColorHexes){
   var candidates = [hexToRgb("#ffffff"), hexToRgb(bodyColorHex)].concat(
     accessoryColorHexes.map(hexToRgb));
   var labels = classifyColorsNearest(ctx, w, h, candidates);
-  labels = despeckleLabels(labels, w, h);
   var bodyRaw = maskFromLabels(labels, 1);
   var accRaw = accessoryColorHexes.map(function(_, i){ return maskFromLabels(labels, i+2); });
   return {bodyRaw:bodyRaw, accRaw:accRaw};
