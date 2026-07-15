@@ -152,12 +152,6 @@ var DEFAULT_GEN_PARAMS = {
   // 繰り返し見つかった「実際には近くないのに隣接と誤判定する」不具合が
   // 原理的に起きにくい。
   part_gap_close: false, part_gap_close_dist: 0.01,
-  // ★2026-07-18追加(ユーザー要望「急激な飛び出しだけ削りたい、前髪は残したい」):
-  // js/carving.jsのspikeSmoothSelective参照。近傍平均からの実際のズレ量が
-  // spike_smooth_threshold(model単位)を超えた頂点だけを、超えた分だけ引っ込め、
-  // 対象パーツはbody_spike_smooth(体、全身一律)とアクセサリー個別のspikeSmooth
-  // (既定0=対象外)で選ぶ。既定は全パーツ0(無効)で、必要なパーツだけ手動でONにする。
-  body_spike_smooth: 0, spike_smooth_threshold: 0.008, spike_smooth_iters: 3,
 };
 P3D.DEFAULT_GEN_PARAMS = DEFAULT_GEN_PARAMS;
 

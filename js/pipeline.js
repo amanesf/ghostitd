@@ -469,8 +469,8 @@ async function runCarvingStages(state, report){
   // 両側で別々に動いて隙間・段差になっていた。統合されたままの1枚のメッシュ
   // (owner付き)を返し、分割は間引き・平滑化が全て終わった後(pipeline.jsの
   // decimateStage/meshFinishStage参照)にだけ行う。
-  var partsMeta = [{ownerId:0, name:"body", mode:null, bones:null, spikeSmooth:(gp.body_spike_smooth||0)}].concat(
-    accBuilt.map(function(a,i){ return {ownerId:i+1, name:a.name, mode:a.mode, bones:a.bones, spikeSmooth:(a.spikeSmooth||0)}; }));
+  var partsMeta = [{ownerId:0, name:"body", mode:null, bones:null}].concat(
+    accBuilt.map(function(a,i){ return {ownerId:i+1, name:a.name, mode:a.mode, bones:a.bones}; }));
   await tick();
 
   return {sizes:sizes, prof:prof, core:core, SCALE:SCALE, pivots:pivots, bledCanvas:bledCanvas,
@@ -561,14 +561,6 @@ function decimateStage(inter, gp){
 function meshFinishStage(decimated, gp, pivots, partsMeta){
   var V=decimated.V, F=decimated.F, owner=decimated.owner;
   if(gp.smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.smooth_iters);
-  // ★2026-07-18追加(尖り除去、js/carving.jsのspikeSmoothSelective参照):
-  // 通常の平滑化(上記)の後に、パーツごとに個別設定した強さ(既定0=対象外)
-  // だけを対象に、近傍平均から大きくズレた頂点(飛び出し)だけを引っ込める。
-  var spikeStrengthByOwner=new Map();
-  partsMeta.forEach(function(p){ if(p.spikeSmooth>0) spikeStrengthByOwner.set(p.ownerId, p.spikeSmooth); });
-  if(spikeStrengthByOwner.size && gp.spike_smooth_iters>0){
-    V=P3D.spikeSmoothSelective(V,F,owner,spikeStrengthByOwner,gp.spike_smooth_threshold,gp.spike_smooth_iters);
-  }
   var fw=P3D.computeNormalsFixWinding(V,F);
   F=fw.F;
 
@@ -632,9 +624,7 @@ async function finishFromIntermediate(inter, opts, onProgress){
   }
   await tick();
 
-  var meshSig = decSig+"|"+sig({si:gp.smooth_iters, rsw:gp.rigid_soft_width,
-    sst:gp.spike_smooth_threshold, ssi:gp.spike_smooth_iters,
-    ssOwner:inter.parts_meta.map(function(p){ return p.spikeSmooth||0; })});
+  var meshSig = decSig+"|"+sig({si:gp.smooth_iters, rsw:gp.rigid_soft_width});
   var meshFinished;
   if(cache.meshSig===meshSig && cache.meshFinished){
     meshFinished = cache.meshFinished;
