@@ -731,22 +731,6 @@ function carveRegion(opts){
         var r0=runsVal[i][0], r1=runsVal[i][1];
         if(r1-r0>=vox) segs.push([(r0+r1)/2.0, Math.max((r1-r0)/2.0, EPS)]);
       }
-      // ★2026-07-18バグ修正(スカート裾スパイク): 奥行き(hdByRow)はこの行に
-      // つき1つの値しか持てないのに対し、幅(segs)は同じ行の中に複数の塊を
-      // 持てる。体の脚が分かれ始める境目のような、本物の細い切れ込みが
-      // ちょうどこの行にあると、本体から数px離れた極小の断片が独立した
-      // セグメントとして拾われ、carveSdfField側では全セグメントに同じ行の
-      // 奥行き(本体の値)がそのまま適用されてしまう。断片は横幅数pxしかないのに
-      // 本体並みの奥行きを継承し、そこだけ飛び出たコブになっていた
-      // (実測で確認済み)。同じ行に主要なセグメント(この行の最大幅)がある
-      // 場合、それよりずっと小さい(15%未満)セグメントは、本体とは別の奥行きを
-      // 持つはずの孤立断片とみなして無視する(全セグメントが同程度の大きさの
-      // 場合は従来通り全て使う。房が複数ある等の正当なケースを壊さないため)。
-      if(segs.length>1){
-        var maxSegHw=0;
-        for(var msi=0; msi<segs.length; msi++){ if(segs[msi][1]>maxSegHw) maxSegHw=segs[msi][1]; }
-        segs=segs.filter(function(sg){ return sg[1]>=maxSegHw*0.15; });
-      }
       var rowPx = fy[iy], rowOff=rowPx*faW;
       for(var s=0;s<segs.length;s++){
         var cx=segs[s][0], hw=segs[s][1];
