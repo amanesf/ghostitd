@@ -174,9 +174,19 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // ★同日: js/common.jsに追加していたdespeckleLabels(色分類結果を周囲の
 // 多数派で書き換える処理)は、画像の分類結果を推測で上書きするものだった
 // ため、ユーザー判断により撤回した(this file's history参照)。
+// ★2026-07-18(続き): buildWidthTracksに、行内の主要セグメントより極端に
+// 小さい(15%未満)セグメントを無視するフィルタを追加。奥行き(hdByRow)は
+// 1行につき1値しか持てないのに幅(segs)は複数の塊を持てるという非対称性が
+// あり、体の脚が分かれ始める境目のような本物の細い切れ込みがある行では、
+// 本体から数px離れた極小の断片が独立したセグメントとして拾われ、
+// carveSdfField側で全セグメントに同じ行の奥行き(本体の値)がそのまま
+// 適用されてしまっていた(実測・45度レンダリングで確認したスカート裾の
+// 浮いた断片の直接の原因)。修正後、実際にレンダリングして浮いた断片が
+// 消えたことを確認済み。体・アクセサリーとも彫刻結果が変わるためハッシュを
+// 更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 688780,
-  sha256: "731ef8e0ab8cb5f95283e9fc256a21265159c90dcccc58063a04569f607a10cd",
+  byteLength: 680668,
+  sha256: "ff70324571507b9d1ac68edce7dbf57821ad5349497c6d8a463e8e979ea61ae0",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -295,11 +305,11 @@ const EXPECTED_BODY_ONLY = {
 // ハッシュを更新した(バイト数が増えているのは、房の分断や側面の分断が
 // 埋められなくなり、以前より分割された形状になったため)。
 // ★2026-07-18(スカート裾スパイク調査): 上のEXPECTED_BODY_ONLYコメント参照
-// (buildDepthByRowのノイズフィルタ復元。despeckleLabelsは撤回済みのため
-// with-accessory側のみ影響を受ける、body-onlyは不変)。
+// (buildDepthByRowのノイズフィルタ復元+buildWidthTracksの極小セグメント
+// フィルタ追加。どちらも体・アクセサリー双方の彫刻結果に影響する)。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1199956,
-  sha256: "d55954d2bc89e1ac6aa11a140090ba85eb70a883d56aa8c32dbb773865cc7080",
+  byteLength: 1195692,
+  sha256: "8b1b618fb8a306ed524402c7a5f9968965a74bef0779cd842ca202fbdd6de0aa",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
