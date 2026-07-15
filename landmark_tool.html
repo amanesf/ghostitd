@@ -6,17 +6,21 @@
 <script src="js/vendor/three.min.js"></script>
 <script src="js/vendor/BufferGeometryUtils.js"></script>
 <script src="js/vendor/SimplifyModifier.js"></script>
-<script src="js/marching_cubes.js"></script>
-<script src="js/common.js"></script>
-<script src="js/carving.js"></script>
-<script src="js/skeleton.js"></script>
-<script src="js/profile.js"></script>
-<script src="js/atlas.js"></script>
-<script src="js/model_export.js"></script>
-<script src="js/visual_hull.js"></script>
-<script src="js/accessories.js"></script>
-<script src="js/pipeline.js"></script>
-<script src="js/idb.js"></script>
+<!-- ★2026-07-15(ユーザー報告「修正をデプロイしたのにサイトで直っていない」対応):
+     GitHub PagesはCDN配信のため、script srcのURLが変わらないとブラウザ/CDNに
+     古いJSがキャッシュされたまま残り得る。js/配下の自作ファイルにはバージョン
+     クエリを付け、コード変更時にここを更新することで確実に最新版を読み込ませる。 -->
+<script src="js/marching_cubes.js?v=20260715"></script>
+<script src="js/common.js?v=20260715"></script>
+<script src="js/carving.js?v=20260715"></script>
+<script src="js/skeleton.js?v=20260715"></script>
+<script src="js/profile.js?v=20260715"></script>
+<script src="js/atlas.js?v=20260715"></script>
+<script src="js/model_export.js?v=20260715"></script>
+<script src="js/visual_hull.js?v=20260715"></script>
+<script src="js/accessories.js?v=20260715"></script>
+<script src="js/pipeline.js?v=20260715"></script>
+<script src="js/idb.js?v=20260715"></script>
 <style>
   :root{--bg:#07080a;--mut:#9aa3ad;--mint:#ff2fb0;--green:#39ff9e;--txt:#e8edf2;--line:rgba(255,255,255,.12);
     --mono:"SFMono-Regular",Consolas,Menlo,monospace}
