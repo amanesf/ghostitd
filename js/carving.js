@@ -408,6 +408,81 @@ function laplacianSmooth(V, F, iters, alpha, beta){
 }
 P3D.laplacianSmooth = laplacianSmooth;
 
+// ★2026-07-18追加(ユーザー要望「急激な飛び出しだけ削りたい、前髪は残したい」):
+// 通常のlaplacianSmoothは全頂点を一律に近傍平均へ寄せるため、細かい房のような
+// 意図した凹凸までなだらかにしてしまう。この関数は「近傍平均からの実際のズレ量
+// (model単位の絶対値)がthresholdを超えた頂点だけ」を、超えた分だけ引っ込める
+// (通常のプリーツの折り目程度の小さいズレは対象外のまま残る)。動かす頂点は
+// ownerPerVertex(頂点ごとのパーツID)とstrengthByOwner(パーツID→強さ0〜1、
+// Mapに無い/0のパーツは常に対象外)で絞り込むため、パーツごとに「このパーツ
+// だけ削る」設定ができる(前髪はstrength未設定のまま=完全に無傷)。
+// 「近傍平均」は1-ring(直接繋がる頂点)ではなく、1-ring隣接をK回(既定3回)
+// 辿った範囲(自分を除く全頂点)の平均を使う。実際の飛び出し(ジャケットに
+// 隠れて奥行きが誤って迫り出したスカート裾等)は「1点だけ尖っている」のでは
+// なく「隣接する複数の頂点がまとまって同じように迫り出している面」であり、
+// 1-ringだけの平均では塊の内部同士を比べることになり差が出ず検出できない
+// (実測)。塊の外側(迫り出していない本来の面)まで届く広さの平均を基準に
+// することで、塊全体が本来の位置よりズレていること自体を検出できる。
+var SPIKE_SMOOTH_RING = 3;
+function spikeSmoothSelective(V, F, ownerPerVertex, strengthByOwner, threshold, iters){
+  var n=V.length/3, nf=F.length/3;
+  var adjIdx=[]; for(var i=0;i<n;i++) adjIdx.push([]);
+  for(var f=0;f<nf;f++){
+    var a=F[f*3],b=F[f*3+1],c=F[f*3+2];
+    adjIdx[a].push(b); adjIdx[b].push(c); adjIdx[c].push(a);
+    adjIdx[b].push(a); adjIdx[c].push(b); adjIdx[a].push(c);
+  }
+  // 対象になり得る頂点(strength>0のownerを持つ)だけ事前に絞る(無関係な
+  // パーツの頂点は近傍計算自体スキップして高速化)。
+  var targetVerts=[];
+  for(var v0=0; v0<n; v0++){
+    var st0=strengthByOwner.get(ownerPerVertex[v0]);
+    if(st0 && st0>0 && adjIdx[v0].length) targetVerts.push(v0);
+  }
+  // 対象頂点ごとに、Kホップ以内(自分を除く)の頂点集合を事前計算(BFS)。
+  // メッシュのトポロジー(繋がり方)自体は反復中も変わらないため1回だけでよい。
+  var ringSets=new Array(targetVerts.length);
+  for(var ti0=0; ti0<targetVerts.length; ti0++){
+    var start=targetVerts[ti0];
+    var visited=new Set([start]);
+    var frontier=[start];
+    for(var hop=0; hop<SPIKE_SMOOTH_RING; hop++){
+      var next=[];
+      for(var fi=0; fi<frontier.length; fi++){
+        var nb2=adjIdx[frontier[fi]];
+        for(var k2=0;k2<nb2.length;k2++){
+          if(!visited.has(nb2[k2])){ visited.add(nb2[k2]); next.push(nb2[k2]); }
+        }
+      }
+      frontier=next;
+    }
+    visited.delete(start);
+    ringSets[ti0]=Array.from(visited);
+  }
+  var Vc=Float32Array.from(V);
+  for(var it=0; it<iters; it++){
+    var Vn=Float32Array.from(Vc);
+    for(var ti=0; ti<targetVerts.length; ti++){
+      var v=targetVerts[ti];
+      var st=strengthByOwner.get(ownerPerVertex[v]);
+      var ring=ringSets[ti];
+      if(!ring.length) continue;
+      var sx=0,sy=0,sz=0;
+      for(var k=0;k<ring.length;k++){ var j=ring[k]*3; sx+=Vc[j];sy+=Vc[j+1];sz+=Vc[j+2]; }
+      var d=ring.length;
+      var ax=sx/d, ay=sy/d, az=sz/d;
+      var dx=ax-Vc[v*3], dy=ay-Vc[v*3+1], dz=az-Vc[v*3+2];
+      var mag=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if(mag<=threshold) continue; // 通常の凹凸(プリーツ等)は対象外のまま
+      var pull=Math.min(1,st)*(mag-threshold)/mag; // しきい値を超えた分だけ、方向を保って引っ込める
+      Vn[v*3]=Vc[v*3]+dx*pull; Vn[v*3+1]=Vc[v*3+1]+dy*pull; Vn[v*3+2]=Vc[v*3+2]+dz*pull;
+    }
+    Vc=Vn;
+  }
+  return Vc;
+}
+P3D.spikeSmoothSelective = spikeSmoothSelective;
+
 // ★2026-07-10(ユーザー指摘「体に隙間が空く」対応): HC-Laplacianは通常の
 // Laplacian平滑化より縮小を抑える設計だが、完全にはゼロにならない(反復回数
 // が多いほど輪郭が内側に丸まって縮む)。体本体とアクセサリーは別々の
