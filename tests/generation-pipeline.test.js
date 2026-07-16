@@ -189,25 +189,9 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 実在するシルエット情報(脚の分かれ目等)を丸ごと消す"補正"であり、この
 // プロジェクトの「画像を信じる」方針に反すると判断し撤回した。1行につき奥行きを
 // 1つしか測れないという彫刻方式そのものの限界であって、バグではない。
-// ★2026-07-19(スパイクの根本原因特定+対策): 実データ検証により、太もも/
-// スカート裾/肩/頭頂のスパイクの直接原因は彫刻(輪郭抽出)側ではなく、
-// decimateMesh(SimplifyModifierによる間引き)にあると特定した。彫刻直後の
-// 生メッシュでは該当箇所は「近傍重心からの突出量/近傍辺長」比が0.25〜0.55
-// (なだらか)だったが、間引き後は同じ座標のまま0.85〜0.92(鋭い突起)まで
-// 悪化することを確認した(頂点座標自体は間引き前後で1ビットも変わらない=
-// 座標比較で同一頂点であることを確認済み)。原因はjs/vendor/SimplifyModifier.js
-// のcomputeEdgeCollapseCostが曲率の高い頂点(段差の角)を優先的に保護する
-// ため、周囲の緩衝頂点だけが間引かれてその1頂点への吸収が集中すること。
-// 1頂点が吸収できる間引き回数に上限を設け、超過分のコストを2乗で急増させて
-// 分散させる対策(absorbCount/_spikeGuardCap、js/carving.jsのdecimateMesh
-// 第5引数)を追加し、gen_paramsのdecimate_spike_guard/decimate_spike_guard_max
-// (既定ON・上限8)として設定タブからON/OFF・調整できるようにした。彫刻結果
-// (輪郭)自体は変更していないが、間引き後の頂点数がやや増える(=既定の
-// 軽量化がわずかに弱まる)ため、body-only/with-accessoryともハッシュを
-// 更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 731900,
-  sha256: "164770cde6c29c91726b9626b7ba777ed6fafc19c4a638152d46e5a0ed7036b7",
+  byteLength: 688780,
+  sha256: "731ef8e0ab8cb5f95283e9fc256a21265159c90dcccc58063a04569f607a10cd",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -326,12 +310,9 @@ const EXPECTED_BODY_ONLY = {
 // ハッシュを更新した(バイト数が増えているのは、房の分断や側面の分断が
 // 埋められなくなり、以前より分割された形状になったため)。
 // ★2026-07-18(スカート裾スパイク修正の撤回): 上のEXPECTED_BODY_ONLYコメント参照。
-// ★2026-07-19(スパイクの根本原因特定+対策): 上のEXPECTED_BODY_ONLYコメント
-// (decimate_spike_guard追加)参照。with-accessory側も間引きの挙動が変わる
-// ためハッシュを更新した。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1255404,
-  sha256: "9fb7e81a01bc50be7ebbfb4349b7f6a3a84c4ad938b1706f6fd2c4cd808c848b",
+  byteLength: 1199956,
+  sha256: "d55954d2bc89e1ac6aa11a140090ba85eb70a883d56aa8c32dbb773865cc7080",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

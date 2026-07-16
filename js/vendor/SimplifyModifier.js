@@ -11,13 +11,6 @@
 	const _cb = new THREE.Vector3(),
 		_ab = new THREE.Vector3();
 
-	// ★2026-07-19追加(3DtoolJS、スパイク対策): modify()実行中だけ有効な、
-	// 「1頂点が周囲の間引きをどれだけ吸収してよいか」の上限。computeEdgeCollapseCost
-	// はこの関数の外(モジュールスコープ)からも参照するため、modify()の引数として
-	// 素直に渡せずここに置く(このファイルは単一スレッド・非再入前提で元々
-	// 書かれているため、他のモジュールスコープ変数(_cb/_ab)と同じ扱いで問題ない)。
-	let _spikeGuardCap = 0;
-
 	class SimplifyModifier {
 
 		constructor() {
@@ -46,11 +39,7 @@
 		// 時点でcountに達していなくても間引きを打ち切る(呼び出し側decimateMesh
 		// が「目標頂点数」ではなく「間引きの強さ(誤差閾値)」でUIを持てるように
 		// するため)。
-		// ★2026-07-19追加(3DtoolJS、スパイク対策): 第5引数spikeGuardCap(省略可、
-		// 0/undefinedで無効)を追加した。computeEdgeCollapseCost参照。
-		modify( geometry, count, weights, maxCost, spikeGuardCap ) {
-
-			_spikeGuardCap = spikeGuardCap > 0 ? spikeGuardCap : 0;
+		modify( geometry, count, weights, maxCost ) {
 
 			if ( geometry.isGeometry === true ) {
 
@@ -307,26 +296,7 @@
 		// ★2026-07-12改変(3DtoolJS): u/vのweight(既定1)を掛けて、絶対的な辺長
 		// だけでなく呼び出し側が指定したパーツ相対スケールも考慮する。
 		// 境界(u/vで別パーツ)の辺は、より保護したい側(大きいweight)を優先する。
-		let amt = edgelength * curvature * Math.max( u.weight, v.weight ) + borders;
-
-		// ★2026-07-19追加(3DtoolJS、スパイク対策): 曲率が高い(=上のcurvature項で
-		// 保護される)頂点は、その頂点自身が間引かれることはほぼ無い代わりに、
-		// 周囲の頂点が次々とその頂点へ吸収されていく「間引きの集中先」になり
-		// やすい。彫刻直後は複数頂点にまたがるなだらかな段差だった箇所が、
-		// 緩衝頂点だけ間引かれて1頂点に吸収が集中すると、頂点の座標自体は
-		// 動かないまま近傍を失い、結果として鋭い突起(スパイク)に見えるように
-		// なる(実データで検証: 太もも/スカート裾/肩/頭頂で「近傍重心からの
-		// 突出量」が間引き前後で10〜20倍化することを確認済み)。生存側頂点v
-		// (このedgeが採用されればuを吸収する側)が既にabsorbCap(_spikeGuardCap)
-		// を超えて吸収済みなら、超過分の2乗でコストを急増させ、間引きが1点に
-		// 偏らず周辺の頂点へ分散するよう仕向ける。0(既定)は従来通り無効。
-		if ( _spikeGuardCap > 0 ) {
-
-			const over = ( v.absorbCount || 0 ) - _spikeGuardCap;
-			if ( over > 0 ) amt *= 1 + over * over;
-
-		}
-
+		const amt = edgelength * curvature * Math.max( u.weight, v.weight ) + borders;
 		return amt;
 
 	}
@@ -456,11 +426,6 @@
 			u.faces[ i ].replaceVertex( u, v );
 
 		}
-
-		// ★2026-07-19追加(3DtoolJS、スパイク対策): vがuを吸収した回数を積算する
-		// (uが既に他の頂点を吸収済みなら、その分もvへ引き継ぐ)。
-		// computeEdgeCollapseCostの_spikeGuardCap判定で参照する。
-		v.absorbCount = ( v.absorbCount || 0 ) + 1 + ( u.absorbCount || 0 );
 
 		removeVertex( u, vertices ); // recompute the edge collapse costs in neighborhood
 
@@ -622,7 +587,6 @@
 			this.position = v;
 			this.id = id; // old index id
 			this.weight = 1; // ★2026-07-12改変(3DtoolJS): computeEdgeCollapseCost参照
-			this.absorbCount = 0; // ★2026-07-19追加(3DtoolJS): computeEdgeCollapseCost/collapse参照
 
 			this.faces = []; // faces vertex is connected
 

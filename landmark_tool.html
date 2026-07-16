@@ -602,15 +602,6 @@ const PARAM_META=[
  {group:"モデルの細かさ", key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
  {group:"モデルの細かさ", key:"decimate_strength", label:"間引きの強さ(体+アクセサリー共通)", type:"number", min:0, max:1, step:0.01, unit:"",
   desc:"目標頂点数ではなく、間引きで許容する形状のズレの上限(誤差ベース、js/carving.jsのstrengthToMaxCost参照)。内部では「辺の長さ×その辺を挟む面同士の法線がなす角度」をコストとし、コストが低い(=目立たない)辺から間引く。大きいほど許容誤差が指数的に増え強く間引かれる。decimateがONの時のみ有効。"},
- // ★2026-07-19追加(スパイク調査、ユーザー承認): 間引きは曲率が高い頂点
- // (段差の角)を保護する代わりに周囲から優先的に間引くため、彫刻直後は
- // なだらかだった段差(肩・太もも・スカート裾・頭頂等)の緩衝頂点が失われ、
- // 1頂点への吸収が集中して鋭い突起に見えることがある(実データで検証、
- // js/vendor/SimplifyModifier.jsのabsorbCount/_spikeGuardCap参照)。
- {group:"モデルの細かさ", key:"decimate_spike_guard", label:"間引きの吸収集中を防ぐ(スパイク対策)", type:"checkbox",
-  desc:"ONだと、1頂点に周囲の間引きが集中しすぎないよう分散させる(彫刻結果=輪郭自体は変更しない、間引きの配分だけを均す)。OFFにすると従来通りの間引き挙動に戻る。"},
- {group:"モデルの細かさ", key:"decimate_spike_guard_max", label:"吸収集中の許容回数", type:"number", min:2, max:40, step:1, unit:"回",
-  desc:"1頂点がこの回数を超えて周囲の頂点を吸収しようとすると、それ以上の吸収コストを急激に上げて他の頂点へ分散させる。小さいほどスパイク抑制が強く効くが、間引き後の頂点数がやや増える(=軽量化が弱まる)。decimate_spike_guardがONの時のみ有効。"},
 
  // ---- 4. モデルの形 ----
  {group:"モデルの形", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",

@@ -552,8 +552,7 @@ P3D.runToIntermediate = runToIntermediate;
 function decimateStage(inter, gp){
   var V=inter.raw_unified.V, F=inter.raw_unified.F, owner=inter.raw_unified.owner;
   if(gp.decimate){
-    var spikeGuardMax = gp.decimate_spike_guard ? gp.decimate_spike_guard_max : 0;
-    var d=P3D.decimateMesh(V,F,gp.decimate_strength,owner,spikeGuardMax);
+    var d=P3D.decimateMesh(V,F,gp.decimate_strength,owner);
     V=d.V; F=d.F; owner=d.owner;
   }
   return {V:V, F:F, owner:owner};
@@ -613,7 +612,7 @@ async function finishFromIntermediate(inter, opts, onProgress){
   var cache = inter._stageCache || (inter._stageCache = {});
   function sig(o){ return JSON.stringify(o); }
 
-  var decSig = sig({d:gp.decimate, ds:gp.decimate_strength, sg:gp.decimate_spike_guard, sgm:gp.decimate_spike_guard_max});
+  var decSig = sig({d:gp.decimate, ds:gp.decimate_strength});
   var decimated;
   if(cache.decSig===decSig && cache.decimated){
     decimated = cache.decimated;

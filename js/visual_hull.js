@@ -181,8 +181,7 @@ function finishBodyMesh(rawV, rawF, gp){
   var V=rawV, F=rawF;
   if(gp.smooth_iters>0) V=P3D.laplacianSmoothPreserveExtent(V,F,gp.smooth_iters);
   if(gp.decimate){
-    var spikeGuardMax = gp.decimate_spike_guard ? gp.decimate_spike_guard_max : 0;
-    var dec=P3D.decimateMesh(V,F,gp.decimate_strength,undefined,spikeGuardMax);
+    var dec=P3D.decimateMesh(V,F,gp.decimate_strength);
     V=dec.V; F=dec.F;
   }
   return {V:V, F:F};
