@@ -239,7 +239,10 @@ function computeOwnerScaleWeights(V, F, owner){
 // 受け取るように変更した(SIMPLIFY_DECIMATE_PLAN.md「4. UIの再設計」)。
 // countは間引きが際限なく続かないための安全上限であって目標ではない
 // (実際にどこで止まるかはmaxCostが決める)。
-function simplifyModifierDecimate(V, F, maxCost, owner){
+// ★2026-07-19追加(スパイク対策、SPIKE_INVESTIGATION参照): spikeGuardMax
+// (省略可、0/未指定で無効)は1頂点が吸収してよい間引き回数の上限
+// (js/vendor/SimplifyModifier.jsのabsorbCount/_spikeGuardCap参照)。
+function simplifyModifierDecimate(V, F, maxCost, owner, spikeGuardMax){
   if(!(maxCost>0)) return owner ? {V:V,F:F,owner:owner} : {V:V,F:F};
   var geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(V), 3));
@@ -248,7 +251,7 @@ function simplifyModifierDecimate(V, F, maxCost, owner){
   var safeCount = Math.max(0, curVerts-4); // 安全上限。実際の停止点はmaxCostが決める
   var modifier = new THREE.SimplifyModifier();
   var ownerWeights = computeOwnerScaleWeights(V, F, owner);
-  var simplified = modifier.modify(geo, safeCount, ownerWeights, maxCost);
+  var simplified = modifier.modify(geo, safeCount, ownerWeights, maxCost, spikeGuardMax);
   var pos = simplified.attributes.position.array;
   var idxAttr = simplified.index;
   var nTri, rawF;
@@ -356,13 +359,16 @@ function strengthToFallbackTargetVerts(strength, curVerts){
 // ★2026-07-11追加: ownerを通すことで、体+全アクセサリーを1つの連続した
 // メッシュのまま間引ける(パーツ分割はこの後の平滑化まで終えてから行う。
 // js/pipeline.jsのdecimateStage/meshFinishStage参照)。
-function decimateMesh(V, F, strength, owner){
+// ★2026-07-19追加: spikeGuardMax(省略可、0/未指定で無効)はsimplifyModifierDecimate
+// にそのまま渡す(gridClusterDecimateフォールバックには効かない。あちらは
+// セルクラスタリング方式でそもそも1頂点吸収集中が起きないため対象外)。
+function decimateMesh(V, F, strength, owner, spikeGuardMax){
   if(!(strength>0)) return owner ? {V:V, F:F, owner:owner} : {V:V, F:F};
   var curVerts = V.length/3;
   if(typeof THREE !== "undefined" && THREE.SimplifyModifier){
     try{
       var maxCost = strengthToMaxCost(strength, V);
-      return simplifyModifierDecimate(V, F, maxCost, owner);
+      return simplifyModifierDecimate(V, F, maxCost, owner, spikeGuardMax);
     }catch(e){
       console.warn("  decimateMesh: SimplifyModifierに失敗、頂点クラスタリングにフォールバックします:", e);
     }
