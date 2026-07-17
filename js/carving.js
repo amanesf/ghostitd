@@ -614,6 +614,65 @@ function buildGrid(mxBounds, myBounds, mzBounds, voxXZ, voxY){
 }
 P3D.buildGrid = buildGrid;
 
+// ★2026-07-19(ユーザー指摘「腕の上面がノコギリ状になる」原因調査・対応):
+// carveSdfField()はX/Z方向(横・奥行き)では実測シルエットの外側までboundFactor
+// 倍の余白を持って値がなだらかに減衰するよう書く(exVal/ezが2を超えたら自然に
+// 書き込みを止めるだけで、余白そのものは常に書く)のに対し、Y方向(行)は
+// 「実測データ(front/back/side画像の該当行)が存在する行」にしか一切値を
+// 書き込まない。そのため、腕の上面や頭頂のように形状がY方向で終わる箇所では、
+// 表面の直前の行(値がまだプラス=形状の内側)のすぐ次の行がいきなり初期値
+// -1.0(未書き込みの番兵)へ崖落ちする。marching cubesのエッジ線形補間は
+// この崖を「行の位置」にほぼそのまま量子化してしまい(2点の値の差が
+// 極端に大きいため補間係数tがほぼ0になり、頂点が実測行の位置に張り付く)、
+// ほぼ水平な面(=腕の上面・頭頂等)でだけ視覚的に目立つノコギリ状の階段に
+// なる(X/Z方向の崖は面がほぼ垂直になるため同じ量子化が目立たない)。
+// 実測データが尽きた直後の行に、直前2行の実測値から求めた傾き(実際の
+// シルエットが示す減衰の実測値そのもの、部位ごとの数式やpsq値を一切
+// 仮定しない)で外挿した値を書き込むことで、X/Zと同じ「なだらかに0を
+// 跨ぐ」書き込みをY方向にも実現する。傾きが得られない(直前行が無い/
+// 傾きが0以上=減衰していない)場合や、外挿値が-1.0を下回った場合はそこで
+// 打ち切る(無駄な書き込み・誤った長い突出を避ける安全弁)。
+var EXTRAP_FIELD_EDGES_MAX_STEPS = 40;
+function extrapolateFieldEdges(field, ownerField, rowCount, nx, nz){
+  if(rowCount<3) return;
+  var strideY=nx*nz, strideX=nz;
+  function idxOf(iy,ix,iz){ return iy*strideY+ix*strideX+iz; }
+  function extrapolateDir(ix, iz, edgeIy, stepIy){
+    // edgeIy: 実測データが確認できた最後の行(その次(edgeIy+stepIy)が未書き込み
+    // であること前提)。stepIy: +1(上端、iyを増やしながら外挿)か-1(下端)。
+    var idxEdge=idxOf(edgeIy,ix,iz), v=field[idxEdge];
+    if(v<=0) return; // まだ形状の内側にすら達していない(=このすぐ外が崖ではない)行は対象外
+    var prevIy=edgeIy-stepIy;
+    if(prevIy<0 || prevIy>=rowCount) return;
+    var idxPrev=idxOf(prevIy,ix,iz), vPrev=field[idxPrev];
+    if(vPrev<=-1.0) return; // 傾きの根拠となる実測点が無い
+    var slope=v-vPrev; // 実測2点から求めた「境界に向かうにつれての実際の減衰率」
+    if(slope>=-1e-7) return; // 減衰していない(ノイズ等)場合は外挿しない
+    var srcOwner = ownerField ? ownerField[idxEdge] : -1;
+    var cur=v;
+    for(var k=1;k<=EXTRAP_FIELD_EDGES_MAX_STEPS;k++){
+      var iy2=edgeIy+stepIy*k;
+      if(iy2<0||iy2>=rowCount) break;
+      cur+=slope;
+      if(cur<=-1.0) break; // これ以降は元々の番兵と同じなので書く意味が無い
+      var idx2=idxOf(iy2,ix,iz);
+      if(cur>field[idx2]){ field[idx2]=cur; if(ownerField) ownerField[idx2]=srcOwner; }
+    }
+  }
+  for(var ix=0; ix<nx; ix++){
+    for(var iz=0; iz<nz; iz++){
+      var topIy=-1, bottomIy=-1;
+      for(var iy=0; iy<rowCount; iy++){
+        if(field[idxOf(iy,ix,iz)]>-1.0){ if(bottomIy<0) bottomIy=iy; topIy=iy; }
+      }
+      if(topIy<0) continue; // この列は完全に未書き込み(形状の外)
+      if(topIy<rowCount-1 && field[idxOf(topIy+1,ix,iz)]<=-1.0) extrapolateDir(ix, iz, topIy, +1);
+      if(bottomIy>0 && field[idxOf(bottomIy-1,ix,iz)]<=-1.0) extrapolateDir(ix, iz, bottomIy, -1);
+    }
+  }
+}
+P3D.extrapolateFieldEdges = extrapolateFieldEdges;
+
 /**
  * carve_region()のJS移植。
  * opts: {
@@ -1108,8 +1167,14 @@ function carveRegion(opts){
 
   // ★2026-07-10: 共有fieldへ蓄積するだけの呼び出し(体+アクセサリー統合彫刻の
   // 1パーツ分)は、marching cubes/断片除去/平滑化を行わずここで終える
-  // (呼び出し元が全パーツ蓄積後に1回だけ行う)。
+  // (呼び出し元が全パーツ蓄積後に1回だけ行う。Y方向の崖の外挿はcarveUnifiedRegions
+  // 側が全パーツ蓄積後にまとめて1回だけ行う。extrapolateFieldEdges参照)。
   if(accumulate) return {accumulated:true};
+
+  // ★2026-07-19: Y方向のシルエット崖(腕の上面・頭頂等でノコギリの原因になる、
+  // extrapolateFieldEdgesのコメント参照)をここで解消する(単体呼び出し=
+  // アクセサリー等の経路。体の統合彫刻はcarveUnifiedRegions側で行う)。
+  extrapolateFieldEdges(field, null, rowRangeEnd-rowRangeStart+1, nx, nz);
 
   var anyPositive=false, cntPos=0;
   for(var i5=0;i5<field.length;i5++){ if(field[i5]>0){ cntPos++; if(cntPos>=8){anyPositive=true;break;} } }
@@ -1316,6 +1381,13 @@ function carveUnifiedRegions(regions, sharedGrid, minFragFrac, partGapCloseDist)
       });
       carveRegion(opts);
     });
+
+    // ★2026-07-19: 全パーツをこのウィンドウのfieldへ蓄積し終えた直後、
+    // marching cubesの前にY方向のシルエット崖を外挿で均す(腕の上面・頭頂等
+    // のノコギリの原因、extrapolateFieldEdges参照)。パーツごとに個別実行
+    // すると他パーツの後書きで実測データが上書きされる前提が崩れるため、
+    // 必ず全パーツ蓄積後にこのウィンドウ単位で1回だけ行う。
+    extrapolateFieldEdges(field, ownerField, winRows, nx, nz);
 
     // ★2026-07-14追加(part_gap_close機能): ボーン共有や行単位の近似を介さず、
     // 純粋なボクセルグリッド上の3次元距離だけで異なるパーツ間の隙間を塞ぐ

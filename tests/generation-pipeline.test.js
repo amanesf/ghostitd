@@ -189,9 +189,19 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 実在するシルエット情報(脚の分かれ目等)を丸ごと消す"補正"であり、この
 // プロジェクトの「画像を信じる」方針に反すると判断し撤回した。1行につき奥行きを
 // 1つしか測れないという彫刻方式そのものの限界であって、バグではない。
+// ★2026-07-19(ユーザー指摘「腕の上面がノコギリ状になる」原因調査・対応):
+// carveSdfFieldはX/Z方向(横・奥行き)では実測シルエットの外側までboundFactor倍の
+// 余白を持って値がなだらかに減衰するよう書くのに対し、Y方向(行)は実測データが
+// 存在する行にしか値を書かず、直後の行がいきなり初期値-1.0へ崖落ちしていた。
+// marching cubesのエッジ線形補間がこの崖を行位置に量子化し、腕の上面や頭頂の
+// ようなほぼ水平な面でノコギリ状の階段として現れていた。実測データが尽きた
+// 直後の行に、直前2行の実測値から求めた傾きで外挿した値を書き込む
+// extrapolateFieldEdges(js/carving.js)を追加し、Y方向にもX/Zと同じなだらかな
+// 減衰を持たせた。体・アクセサリーとも彫刻結果(頂点分布)が変わるため、
+// body-only/with-accessoryともハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 688780,
-  sha256: "731ef8e0ab8cb5f95283e9fc256a21265159c90dcccc58063a04569f607a10cd",
+  byteLength: 800384,
+  sha256: "bc2199401037da6481ed845bd233274d952d8d892bcece4beab8c6c6a661bc31",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -316,9 +326,12 @@ const EXPECTED_BODY_ONLY = {
 // (正面寄りの帯だけを使う)を設定した。実測でスカート腰周りの裂けの指標
 // (向き合う近接三角形ペアの出現率)が0.58→0.45相当に改善したための変更。
 // body-onlyはアクセサリーを持たないため影響を受けない。
+// ★2026-07-19: 上のEXPECTED_BODY_ONLYコメント(Y方向のシルエット崖の外挿修正、
+// extrapolateFieldEdges)と同じ変更により、with-accessory側も彫刻結果が変わり
+// ハッシュを更新した。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1196316,
-  sha256: "ae332758e5e805f0fe47a581779f0a6c095408bbe6606d1bf4efdc60635f97d3",
+  byteLength: 1319436,
+  sha256: "6a7b736b2dffb81a6991c8f6f31e5b551d3b97f15b53ada2133398a3610f2f9e",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
