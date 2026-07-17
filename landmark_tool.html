@@ -759,6 +759,29 @@ function renderPsqAccessoryOverridesHtml(){
     '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の断面の丸み</div>'+
     rows+'</div>';
 }
+// ★2026-07-19(ユーザー指摘「和集合が悪さしている」対応): 1行に複数の奥行き帯
+// (front/side画像のside側スキャンで、パーツの端で輪郭が中心をまたがなくなり
+// 分裂した帯)がある場合の扱いをアクセサリー単位で選べるチェックボックス。
+// 既定は正面/背面とも使う(union、従来通り)。どちらかを外すと、その側の帯を
+// 除外する(実測でスカート腰周りの裂けに効果を確認済み、js/carving.jsの
+// depth_band_front/depth_band_back参照)。
+function renderDepthBandAccessoryOverridesHtml(){
+  if(!accessories.length) return "";
+  const rows=accessories.map((a,idx)=>{
+    const useFront=a.depthBandFront!==false, useBack=a.depthBandBack!==false;
+    return '<div class="acform" style="margin-bottom:6px">'+
+      '<div style="color:var(--txt);font-size:12px;margin-bottom:4px">'+(a.name||"(無名)")+'</div>'+
+      '<label style="font-size:11px;color:var(--mut);margin-right:10px">'+
+      '<input type="checkbox" class="depthBandFrontChk" data-i="'+idx+'" '+(useFront?"checked":"")+' style="vertical-align:middle"> 正面寄りの帯を使う</label>'+
+      '<label style="font-size:11px;color:var(--mut)">'+
+      '<input type="checkbox" class="depthBandBackChk" data-i="'+idx+'" '+(useBack?"checked":"")+' style="vertical-align:middle"> 背面寄りの帯を使う</label>'+
+      '</div>';
+  }).join("");
+  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の奥行き帯(1行に複数帯がある場合、両方offにはできません)</div>'+
+    '<div style="font-size:10.5px;color:var(--mut);margin-bottom:6px">パーツの端で輪郭が中心をまたがなくなり、奥行き方向に複数の帯へ分裂することがあります。両方使う(既定)と裂けが出る場合、片方だけに絞ると直ることがあります。</div>'+
+    rows+'</div>';
+}
 // ★2026-07-14追加(ユーザー指摘「ボクセルとピクセルを一致させたら無駄がない」):
 // body_vox(model単位)を、元画像のpx解像度にちょうど1px=1voxelで合わせられる
 // ヘルパーを表示する。SCALE(px/model単位、js/pipeline.jsのrunCarvingStagesが
@@ -922,7 +945,7 @@ function buildParamsPanelHtml(){
       '<span class="accCount">'+itemList.length+'項目</span>'+
       '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
       '</summary><div class="accbody">'+items+
-      (g==="モデルの形"?renderPsqAccessoryOverridesHtml():"")+
+      (g==="モデルの形"?(renderPsqAccessoryOverridesHtml()+renderDepthBandAccessoryOverridesHtml()):"")+
       (g==="モデルの細かさ"?(renderVoxPxHelperHtml()+renderVertEstimateHtml()):"")+
       (g==="モデルへの画像貼り付け"?renderSeamPanelHtml():"")+
       '</div></details>';
@@ -1012,6 +1035,26 @@ function wireParamsPanelEvents(el){
   [].forEach.call(el.querySelectorAll(".psqAccNum"),num=>{
     num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||2); };
   });
+  // アクセサリー個別の奥行き帯選択(depth_band_front/back、
+  // renderDepthBandAccessoryOverridesHtml参照)。両方offは意味を持たない
+  // (js/carving.js側はfallbackするが、UI上は「最低どちらか1つ」を維持する)。
+  function setAccessoryDepthBand(i,side,checked){
+    const a=accessories[i]; if(!a)return;
+    const key = side==="front" ? "depthBandFront" : "depthBandBack";
+    const otherKey = side==="front" ? "depthBandBack" : "depthBandFront";
+    a[key]=checked;
+    if(!checked && a[otherKey]===false){
+      a[otherKey]=true;
+      const otherChk=el.querySelector('.depthBand'+(side==="front"?"Back":"Front")+'Chk[data-i="'+i+'"]');
+      if(otherChk)otherChk.checked=true;
+    }
+  }
+  [].forEach.call(el.querySelectorAll(".depthBandFrontChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthBand(+chk.dataset.i,"front",chk.checked); };
+  });
+  [].forEach.call(el.querySelectorAll(".depthBandBackChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthBand(+chk.dataset.i,"back",chk.checked); };
+  });
   // 推定頂点数・メモリ(renderVertEstimateHtml)の配線。
   const estimateBtn=el.querySelector("#estimateVertBtn");
   if(estimateBtn){
@@ -1024,7 +1067,8 @@ function wireParamsPanelEvents(el){
           imgs, points, analysis, deriveFromPoints,
           accessories: accessories.map(a=>{
             const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-              psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
+              psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+              depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
             out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
             return out;
           }),
@@ -1655,7 +1699,8 @@ function buildJson(){
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
+        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+        depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
@@ -1713,7 +1758,8 @@ function applyLoadedJson(d){
   accessories=(d.accessories||[]).map(a=>{
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
       color:a.color||null,
-      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
+      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+      depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -2696,7 +2742,8 @@ $("generateBtn").onclick=async()=>{
         // (P3D.fillColorGaps)が「このアクセサリーの登録色」を必要とするため
         // ここでも渡すようにした(無いとギャップ埋めが常にスキップされ無効化する)。
         const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
+          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+          depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
         // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
         // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
         // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による

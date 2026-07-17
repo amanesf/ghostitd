@@ -112,6 +112,9 @@ function buildAccessoryCarveOptsList(opts){
     // (各アクセサリーは必ず個別のpsq値を持つ)。ここでの2は、それでも欠けて
     // いた場合(壊れた/旧形式JSON等)に備えた安全側フォールバックに過ぎない。
     var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : 2;
+    // ★2026-07-19(和集合の選択制対応): 既定はboth trueで従来通りのunion。
+    var accDepthBandFront = acc.depthBandFront!==false;
+    var accDepthBandBack = acc.depthBandBack!==false;
     var mask = acc.mask || {};
     var mxMin,mxMax,myMin,myMax,mzMin,mzMax;
     var usedBackOnly=false;
@@ -174,6 +177,7 @@ function buildAccessoryCarveOptsList(opts){
       vox: gp.body_vox_xz,
       psqHead: accPsq, psqTorso: accPsq, psqLegs: accPsq,
       psqArms: accPsq, psqHands: accPsq,
+      depth_band_front: accDepthBandFront, depth_band_back: accDepthBandBack,
       smoothIters: 0,
     };
     out.push({name:name, mode:mode, bones:bones.slice(), usedBackOnly:usedBackOnly,

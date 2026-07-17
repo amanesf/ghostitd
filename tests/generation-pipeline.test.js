@@ -310,9 +310,15 @@ const EXPECTED_BODY_ONLY = {
 // ハッシュを更新した(バイト数が増えているのは、房の分断や側面の分断が
 // 埋められなくなり、以前より分割された形状になったため)。
 // ★2026-07-18(スカート裾スパイク修正の撤回): 上のEXPECTED_BODY_ONLYコメント参照。
+// ★2026-07-19(和集合の選択制対応): js/carving.jsに depth_band_front/
+// depth_band_back(アクセサリー単位で、1行に複数の奥行き帯がある場合どちらの
+// 帯を使うか選べる機能)を追加し、サンプルのスカートで depthBandBack:false
+// (正面寄りの帯だけを使う)を設定した。実測でスカート腰周りの裂けの指標
+// (向き合う近接三角形ペアの出現率)が0.58→0.45相当に改善したための変更。
+// body-onlyはアクセサリーを持たないため影響を受けない。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1199956,
-  sha256: "d55954d2bc89e1ac6aa11a140090ba85eb70a883d56aa8c32dbb773865cc7080",
+  byteLength: 1196316,
+  sha256: "ae332758e5e805f0fe47a581779f0a6c095408bbe6606d1bf4efdc60635f97d3",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

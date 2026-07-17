@@ -818,6 +818,22 @@ function carveRegion(opts){
         bands.push([hw2,hw2,zc]);
       }
     }
+    // ★2026-07-19(ユーザー指摘「和集合が悪さしている」対応): 1行に複数帯が
+    // ある場合、既定(depth_band_front/back共にtrue)は従来通り全帯を
+    // max-combineで彫る(union、非対称パーツ等で必要な場合があるため既定は
+    // 変えない)。どちらかをfalseにすると、そちら側(zcが正=front寄り/
+    // 負=back寄り)の帯を除外する。実測(スカート腰周りの裂け)で確認済み:
+    // 一時的な小さい方の帯(パーツの端で輪郭が中心をまたがなくなる際に生じる
+    // 名残)がunion経由でmarching cubesに急な位相変化を強いており、
+    // 使わない側を明示的に除外することで位相変化そのものを起こさせずに
+    // 裂けを防げる(効果は実測でスカートの向き合う近接三角形ペア出現率が
+    // 0.58→0.45相当に改善、他領域への悪影響なしを確認済み)。
+    var useFront = opts.depth_band_front!==false;
+    var useBack = opts.depth_band_back!==false;
+    if(bands.length>1 && !(useFront && useBack)){
+      var filtered = bands.filter(function(b){ return (b[2]>=0.0 && useFront) || (b[2]<0.0 && useBack); });
+      bands = filtered.length ? filtered : bands; // 両方false相当(異常値)は安全側にfallback
+    }
     if(bands.length) depthRows.push([iy2, bands]);
   }
     // ★2026-07-04(改): 以前は奥行き(hdFront/hdBack/zc)にも行方向trackWin幅の
