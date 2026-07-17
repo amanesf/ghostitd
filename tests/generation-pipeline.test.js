@@ -199,9 +199,22 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // extrapolateFieldEdges(js/carving.js)を追加し、Y方向にもX/Zと同じなだらかな
 // 減衰を持たせた。体・アクセサリーとも彫刻結果(頂点分布)が変わるため、
 // body-only/with-accessoryともハッシュを更新した。
+// ★2026-07-17(ユーザー報告「裾に垂直スパイクが乱立する」原因調査・修正、
+// extrapolateFieldEdges自身のレビュー): 2026-07-19に追加したextrapolateFieldEdges
+// (直後のEXPECTED_BODY_ONLYコメント参照)は、傾きの符号だけをガードに境界から
+// 最大40行分も減衰を延長していたため、「スカートの裾のように形状が急に終わる
+// (最後の行でもfield値がまだ大きい)」箇所で、行ごとの実測揺らぎだけで傾きが
+// たまたま僅かな負になると、ほぼフルパワーの正値(=形状の内側)を最大40行分
+// 発明してしまう欠陥があった(裾の下に柱状の垂直スパイクが乱立する原因、
+// body-onlyが800384→800384のまま気づかれず混入していた)。外挿は境界の等値面
+// 交差位置をサブ行精度にできれば十分で、それには境界の次の1行に必ず負となる
+// 値を1つ書けば足りる(js/carving.js参照)。線形外挿した値が次の1行以内で0を
+// 跨がない場合は崖であって減衰ではないため外挿しない。body-only/with-accessory
+// とも彫刻結果が変わる(body-onlyはファイルサイズが縮小=発明されていたスパイク
+// ジオメトリの分、2026-07-18時点の値に近い水準へ戻った)ため、ハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 800384,
-  sha256: "bc2199401037da6481ed845bd233274d952d8d892bcece4beab8c6c6a661bc31",
+  byteLength: 691476,
+  sha256: "bfe566d80509d4328cd5d3627ffd9c6809d9171607bf797025b92e2a6a7e9917",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -329,9 +342,12 @@ const EXPECTED_BODY_ONLY = {
 // ★2026-07-19: 上のEXPECTED_BODY_ONLYコメント(Y方向のシルエット崖の外挿修正、
 // extrapolateFieldEdges)と同じ変更により、with-accessory側も彫刻結果が変わり
 // ハッシュを更新した。
+// ★2026-07-17(extrapolateFieldEdges自身のバグ修正): 上のEXPECTED_BODY_ONLY
+// コメント(裾の垂直スパイク)参照。with-accessory側もスカートの裾等で同じ欠陥の
+// 影響を受けていたため、ハッシュを更新した。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1319436,
-  sha256: "6a7b736b2dffb81a6991c8f6f31e5b551d3b97f15b53ada2133398a3610f2f9e",
+  byteLength: 1198820,
+  sha256: "721c8b4056afff64cde8f7fe21eaddabd432bc7dc83977992bf18cc9e9ac8ff3",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {

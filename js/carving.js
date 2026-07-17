@@ -630,9 +630,23 @@ P3D.buildGrid = buildGrid;
 // シルエットが示す減衰の実測値そのもの、部位ごとの数式やpsq値を一切
 // 仮定しない)で外挿した値を書き込むことで、X/Zと同じ「なだらかに0を
 // 跨ぐ」書き込みをY方向にも実現する。傾きが得られない(直前行が無い/
-// 傾きが0以上=減衰していない)場合や、外挿値が-1.0を下回った場合はそこで
-// 打ち切る(無駄な書き込み・誤った長い突出を避ける安全弁)。
-var EXTRAP_FIELD_EDGES_MAX_STEPS = 40;
+// 傾きが0以上=減衰していない)場合や、外挿によるゼロ交差が1行を超えて
+// 先になる場合はそこで打ち切る(無駄な書き込み・誤った長い突出を避ける
+// 安全弁)。
+//
+// ★2026-07-17(ユーザー報告「裾に垂直スパイクが乱立する」原因調査・修正):
+// 当初は傾きの符号だけをガードに、境界から最大40行先まで減衰を延長
+// していた。しかし「スカートの裾のように形状が急に終わる(最後の行でも
+// field値がまだ大きい)」箇所では、findRunsの行ごとの実測揺らぎだけで
+// 傾きがたまたま僅かな負(例: -0.005)になることがあり、そのまま40行分
+// 「ほぼフルパワーの正値(=形状の内側)」を書き込んでしまっていた。
+// 正値は等値面0の内側なのでmarching cubesが実体そのものとして彫ってしまい、
+// 裾の下に高さ数十行分の柱状スパイクが発明される欠陥があった。
+// 外挿の目的は「境界の等値面交差位置をサブ行精度にする」ことだけであり、
+// それには境界の次の1行に負値を1つ書けば必要十分(それ以降の行は
+// marching cubesの交差計算に一切寄与しない)。かつ、線形外挿した値が
+// 次の1行以内で0を跨がない(=実測が「ここでスパッと終わる」と言っている)
+// 場合は崖であって減衰ではないので、外挿してはいけない。
 function extrapolateFieldEdges(field, ownerField, rowCount, nx, nz){
   if(rowCount<3) return;
   var strideY=nx*nz, strideX=nz;
@@ -648,16 +662,13 @@ function extrapolateFieldEdges(field, ownerField, rowCount, nx, nz){
     if(vPrev<=-1.0) return; // 傾きの根拠となる実測点が無い
     var slope=v-vPrev; // 実測2点から求めた「境界に向かうにつれての実際の減衰率」
     if(slope>=-1e-7) return; // 減衰していない(ノイズ等)場合は外挿しない
-    var srcOwner = ownerField ? ownerField[idxEdge] : -1;
-    var cur=v;
-    for(var k=1;k<=EXTRAP_FIELD_EDGES_MAX_STEPS;k++){
-      var iy2=edgeIy+stepIy*k;
-      if(iy2<0||iy2>=rowCount) break;
-      cur+=slope;
-      if(cur<=-1.0) break; // これ以降は元々の番兵と同じなので書く意味が無い
-      var idx2=idxOf(iy2,ix,iz);
-      if(cur>field[idx2]){ field[idx2]=cur; if(ownerField) ownerField[idx2]=srcOwner; }
-    }
+    var iy2=edgeIy+stepIy;
+    if(iy2<0||iy2>=rowCount) return;
+    var cur=v+slope;
+    if(cur>0) return; // 1行以内でゼロを跨がない=実測上の崖(裾)。外挿しない
+    cur=Math.min(cur,-1e-4); // 誤差で0以上に丸まらないよう必ず負にする
+    var idx2=idxOf(iy2,ix,iz);
+    if(cur>field[idx2]){ field[idx2]=cur; if(ownerField) ownerField[idx2]=ownerField[idxEdge]; }
   }
   for(var ix=0; ix<nx; ix++){
     for(var iz=0; iz<nz; iz++){
