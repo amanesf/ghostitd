@@ -1,4 +1,4 @@
-# bk/ (バックアップ)
+# BK_手動パーツ分け版_2026-07-07/ (バックアップ)
 
 このフォルダには、`carveRegion()`/`nearestBoneSegmentSkin()`の内部分割、
 `runPipeline`/`runToIntermediate`の重複統合、3ファイル(controller.html/
