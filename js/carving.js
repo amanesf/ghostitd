@@ -1122,6 +1122,21 @@ function carveRegion(opts){
         if(exVal<0 && armProf && !isNaN(armProf.cy[ix])){
           var ua=Math.abs(myv-armProf.cy[ix]);
           var armRy=armProf.ry[ix];
+          // ★2026-07-20(ユーザー報告「腕の上面がz軸方向にギザギザ」原因調査・
+          // 対応): armRy(buildBoneProfiles、列単位でgap許容走査して1回だけ測る)
+          // とfrontHasPixel(行単位、生の前面画素を直接判定)は互いに独立した
+          // 別々の量子化のため、実際にはまだ腕のシルエット内(frontHasPixel=
+          // true)なのにua(行の腕中心からの距離)がarmRyを僅かに(グリッド1〜2行
+          // 分程度)超えてしまう行がまれに生じる。このズレで下のelse節(胴体側
+          // psq・side実測奥行きへ補間するブレンド)へ落ちると、隣接列の滑らかな
+          // 円形断面から浮いた平らな段差になり、それが積み重なって腕上面のz軸
+          // 方向のギザギザとして見えていた(実測で確認済み)。実測したズレ幅は
+          // 高々グリッド行間隔の1〜2行分なので、その範囲内はブレンドへ回さず
+          // 腕自身の円形断面(ua=armRyでクランプ)のまま連続させる。ズレがそれ
+          // より大きい(=本当の肩/手首の付け根で胴体へ移行している)場合は
+          // 従来通りブレンドする。
+          var voxYlocal = my.length>1 ? Math.abs(my[1]-my[0]) : 0.003;
+          if(frontHasPixel && ua>=armRy && ua<armRy+voxYlocal*2) ua=armRy*0.999;
           if(ua<armRy){
             if(!frontHasPixel) continue;
             zr=armProf.rz[ix];

@@ -212,9 +212,19 @@ const { startServer, openPage, REPO_ROOT } = require("./lib/testkit");
 // 跨がない場合は崖であって減衰ではないため外挿しない。body-only/with-accessory
 // とも彫刻結果が変わる(body-onlyはファイルサイズが縮小=発明されていたスパイク
 // ジオメトリの分、2026-07-18時点の値に近い水準へ戻った)ため、ハッシュを更新した。
+// ★2026-07-20(ユーザー報告「腕の上面がz軸方向にギザギザ」原因調査・対応):
+// carveRegion内でarmProf(buildBoneProfiles、列単位でgap許容走査して1回だけ
+// 測るarmRy)とfrontHasPixel(行単位、生の前面画素を直接判定)という互いに
+// 独立な2つの量子化が、実際にはまだ腕のシルエット内なのにua(行の腕中心から
+// の距離)がarmRyを僅かに(グリッド1〜2行分)超える行をまれに生む欠陥があった。
+// このズレで腕の円形断面(psqArms)から胴体側の補間ブレンド(psqHead/side実測
+// 奥行き)へ切り替わり、隣接列の滑らかな円形断面から浮いた平らな段差ができて
+// いたのが原因(js/carving.js参照)。ズレがグリッド1〜2行分以内の場合は
+// ブレンドへ回さず腕自身の円形断面のまま連続させるよう修正し、腕彫刻結果が
+// 変わるため、body-only/with-accessoryともハッシュを更新した。
 const EXPECTED_BODY_ONLY = {
-  byteLength: 691476,
-  sha256: "bfe566d80509d4328cd5d3627ffd9c6809d9171607bf797025b92e2a6a7e9917",
+  byteLength: 682284,
+  sha256: "559f6fda769740a63bc082f4dd981dc0bf7effcab37607f02aa226852274fb81",
 };
 // ★2026-07-10バグ修正: bleedEdges(縁の色にじみ)が体(alphaFull)だけを前景と
 // みなし、スカート/マフラー/髪等のアクセサリー領域(体とは別の色分けマップ色)
@@ -345,9 +355,11 @@ const EXPECTED_BODY_ONLY = {
 // ★2026-07-17(extrapolateFieldEdges自身のバグ修正): 上のEXPECTED_BODY_ONLY
 // コメント(裾の垂直スパイク)参照。with-accessory側もスカートの裾等で同じ欠陥の
 // 影響を受けていたため、ハッシュを更新した。
+// ★2026-07-20: 上のEXPECTED_BODY_ONLYコメント(腕上面のz軸ギザギザ修正)と
+// 同じ変更により、with-accessory側も彫刻結果が変わりハッシュを更新した。
 const EXPECTED_WITH_ACCESSORY = {
-  byteLength: 1198820,
-  sha256: "721c8b4056afff64cde8f7fe21eaddabd432bc7dc83977992bf18cc9e9ac8ff3",
+  byteLength: 1192436,
+  sha256: "eddfb780cf7691d77940339f99e417b7b205cc09035d3ba26e52084d47d424c5",
 };
 
 async function generateAndExportGlb(server, browser, bodyOnly) {
