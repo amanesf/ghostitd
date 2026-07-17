@@ -693,6 +693,23 @@ function carveRegion(opts){
     var v_=1.0-my[iy0];
     spy[iy0]=Math.min(Math.max(Math.round(SYTOP+v_*(SYBOT-SYTOP)+sideOffsetY),0),saH-1);
   }
+  // ★2026-07-19(右/左の選択制対応): 奥行きの第2ソース(sa2、通常はside/
+  // leftSideのもう一方)が渡された場合の行→pxマッピング。sa2は解像度・
+  // キャリブレーション(SYTOP2/SYBOT2/SIDE_REF2/saW2/saH2/sideOffsetX2/
+  // sideOffsetY2)がsaと別物なので、spyとは別に自前で計算する
+  // (SCALE/myはfront画像基準で共通のためそのまま使える)。
+  var sa2=opts.sa2, saCont2=opts.saCont2||null;
+  var spy2=null;
+  if(sa2){
+    var SYTOP2=opts.SYTOP2, SYBOT2=opts.SYBOT2, saH2=opts.saH2, saW2=opts.saW2;
+    var sideOffsetY2=opts.sideOffsetY2||0, sideOffsetX2=opts.sideOffsetX2||0;
+    var SIDE_REF2=opts.SIDE_REF2;
+    spy2=new Int32Array(ny);
+    for(var iy0b=0;iy0b<ny;iy0b++){
+      var v2_=1.0-my[iy0b];
+      spy2[iy0b]=Math.min(Math.max(Math.round(SYTOP2+v2_*(SYBOT2-SYTOP2)+sideOffsetY2),0),saH2-1);
+    }
+  }
   // ★2026-07-10: mxLim/mzLimは「このパーツ自身の範囲」でなければならない
   // (共有グリッド使用時はmx[0]/mx[nx-1]がグリッド全体の外接範囲になってしまい、
   // このパーツの範囲より広くなる)。常にこの呼び出しのmxBounds/mzBoundsを使う。
@@ -784,13 +801,26 @@ function carveRegion(opts){
     var rowPx2 = spy[iy2];
     var saRow=rowOf1d(sa, saW, rowPx2);
     var saPx = saCont ? Common.findRunsSubpixel(saRow, rowOf1d(saCont,saW,rowPx2), whiteThr) : Common.findRuns(saRow);
-    if(!saPx.length) continue;
-    saPx = saPx.slice().sort(function(p,q){return p[0]-q[0];});
     // 各runをモデル単位に変換し、mzLimで切り詰める。
     var runsMz=[];
     for(var ri=0;ri<saPx.length;ri++){
       var conv=intersectIntervals([[(saPx[ri][0]-SIDE_REF-sideOffsetX)/SCALE, (saPx[ri][1]-SIDE_REF-sideOffsetX)/SCALE]], mzLim);
       if(conv.length) runsMz.push(conv[0]);
+    }
+    // ★2026-07-19(右/左の選択制対応): 第2ソース(sa2)が渡されていれば、
+    // 独自のキャリブレーション(spy2/SIDE_REF2/sideOffsetX2)でモデル単位に
+    // 変換した上で和集合する(front/back幅のunionIntervalsと同じ考え方。
+    // side/leftSideは解像度が別物なのでモデル座標系に変換してから合成する)。
+    if(sa2){
+      var rowPx2b = spy2[iy2];
+      var saRow2=rowOf1d(sa2, opts.saW2, rowPx2b);
+      var saPx2 = saCont2 ? Common.findRunsSubpixel(saRow2, rowOf1d(saCont2,opts.saW2,rowPx2b), whiteThr) : Common.findRuns(saRow2);
+      var runsMz2=[];
+      for(var ri2=0;ri2<saPx2.length;ri2++){
+        var conv2=intersectIntervals([[(saPx2[ri2][0]-opts.SIDE_REF2-(opts.sideOffsetX2||0))/SCALE, (saPx2[ri2][1]-opts.SIDE_REF2-(opts.sideOffsetX2||0))/SCALE]], mzLim);
+        if(conv2.length) runsMz2.push(conv2[0]);
+      }
+      runsMz = unionIntervals(runsMz, runsMz2);
     }
     if(!runsMz.length) continue;
     // ★2026-07-18バグ修正: 以前は近接するrunを1グループにまとめてから

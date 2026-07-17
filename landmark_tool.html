@@ -782,6 +782,31 @@ function renderDepthBandAccessoryOverridesHtml(){
     '<div style="font-size:10.5px;color:var(--mut);margin-bottom:6px">パーツの端で輪郭が中心をまたがなくなり、奥行き方向に複数の帯へ分裂することがあります。両方使う(既定)と裂けが出る場合、片方だけに絞ると直ることがあります。</div>'+
     rows+'</div>';
 }
+// ★2026-07-19(右/左の選択制対応): 奥行きにside(右)/leftSide(左)のどちらの
+// 側面画像を使うかをアクセサリー単位で選べるチェックボックス。既定(両方とも
+// 未設定=auto)は従来通りleftSideがあればleftSideのみを使う(js/accessories.js
+// のbuildAccessoryCarveOptsList参照)。チェック状態のプレビューはこの既定の
+// 目安であり、実際の解決(データの有無によるフォールバック等)は生成時に
+// js/accessories.js側で行う。
+function renderDepthSideAccessoryOverridesHtml(){
+  if(!accessories.length) return "";
+  const rows=accessories.map((a,idx)=>{
+    const hasLeftMask = !!(a.mask && a.mask.leftSide);
+    const useRight = a.depthSideRight!==undefined ? a.depthSideRight : !hasLeftMask;
+    const useLeft = a.depthSideLeft!==undefined ? a.depthSideLeft : hasLeftMask;
+    return '<div class="acform" style="margin-bottom:6px">'+
+      '<div style="color:var(--txt);font-size:12px;margin-bottom:4px">'+(a.name||"(無名)")+'</div>'+
+      '<label style="font-size:11px;color:var(--mut);margin-right:10px">'+
+      '<input type="checkbox" class="depthSideRightChk" data-i="'+idx+'" '+(useRight?"checked":"")+' style="vertical-align:middle"> 右側面(side)を使う</label>'+
+      '<label style="font-size:11px;color:var(--mut)">'+
+      '<input type="checkbox" class="depthSideLeftChk" data-i="'+idx+'" '+(useLeft?"checked":"")+' style="vertical-align:middle"> 左側面(leftSide)を使う</label>'+
+      '</div>';
+  }).join("");
+  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の奥行き画像(左右非対称な素材向け、両方offにはできません)</div>'+
+    '<div style="font-size:10.5px;color:var(--mut);margin-bottom:6px">既定はleftSide画像があればそちらのみ使用(自動)。両方チェックすると和集合(両方の輪郭を合成)、片方だけなら単独使用になります。</div>'+
+    rows+'</div>';
+}
 // ★2026-07-14追加(ユーザー指摘「ボクセルとピクセルを一致させたら無駄がない」):
 // body_vox(model単位)を、元画像のpx解像度にちょうど1px=1voxelで合わせられる
 // ヘルパーを表示する。SCALE(px/model単位、js/pipeline.jsのrunCarvingStagesが
@@ -945,7 +970,7 @@ function buildParamsPanelHtml(){
       '<span class="accCount">'+itemList.length+'項目</span>'+
       '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
       '</summary><div class="accbody">'+items+
-      (g==="モデルの形"?(renderPsqAccessoryOverridesHtml()+renderDepthBandAccessoryOverridesHtml()):"")+
+      (g==="モデルの形"?(renderPsqAccessoryOverridesHtml()+renderDepthBandAccessoryOverridesHtml()+renderDepthSideAccessoryOverridesHtml()):"")+
       (g==="モデルの細かさ"?(renderVoxPxHelperHtml()+renderVertEstimateHtml()):"")+
       (g==="モデルへの画像貼り付け"?renderSeamPanelHtml():"")+
       '</div></details>';
@@ -1055,6 +1080,39 @@ function wireParamsPanelEvents(el){
   [].forEach.call(el.querySelectorAll(".depthBandBackChk"),chk=>{
     chk.onchange=()=>{ setAccessoryDepthBand(+chk.dataset.i,"back",chk.checked); };
   });
+  // アクセサリー個別の奥行き画像選択(depthSideRight/depthSideLeft、
+  // renderDepthSideAccessoryOverridesHtml参照)。既定(未設定=auto)は
+  // js/accessories.js側でleftSideの有無から解決されるため、片方だけを
+  // 明示値にすると、もう片方が「未設定=auto」のまま実質false扱いに
+  // なってしまう(autoは「両方未設定」の時だけ働く仕様のため)。これを防ぐため、
+  // 変更していない側が未設定なら、現在の表示状態(auto解決込み)をそのまま
+  // 明示値として書き込んでおく。両方offは意味を持たない。
+  function setAccessoryDepthSide(i,side,checked){
+    const a=accessories[i]; if(!a)return;
+    const rightChk=el.querySelector('.depthSideRightChk[data-i="'+i+'"]');
+    const leftChk=el.querySelector('.depthSideLeftChk[data-i="'+i+'"]');
+    if(side==="right"){
+      a.depthSideRight=checked;
+      if(a.depthSideLeft===undefined && leftChk) a.depthSideLeft=leftChk.checked;
+    }else{
+      a.depthSideLeft=checked;
+      if(a.depthSideRight===undefined && rightChk) a.depthSideRight=rightChk.checked;
+    }
+    if(!checked){
+      const otherKey = side==="right" ? "depthSideLeft" : "depthSideRight";
+      if(a[otherKey]===false){
+        a[otherKey]=true;
+        const otherChk = side==="right" ? leftChk : rightChk;
+        if(otherChk)otherChk.checked=true;
+      }
+    }
+  }
+  [].forEach.call(el.querySelectorAll(".depthSideRightChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthSide(+chk.dataset.i,"right",chk.checked); };
+  });
+  [].forEach.call(el.querySelectorAll(".depthSideLeftChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthSide(+chk.dataset.i,"left",chk.checked); };
+  });
   // 推定頂点数・メモリ(renderVertEstimateHtml)の配線。
   const estimateBtn=el.querySelector("#estimateVertBtn");
   if(estimateBtn){
@@ -1068,7 +1126,8 @@ function wireParamsPanelEvents(el){
           accessories: accessories.map(a=>{
             const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
               psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
-              depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
+              depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+              depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
             out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
             return out;
           }),
@@ -1700,7 +1759,8 @@ function buildJson(){
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
         psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
-        depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
+        depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+        depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
@@ -1759,7 +1819,8 @@ function applyLoadedJson(d){
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
       color:a.color||null,
       psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
-      depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
+      depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+      depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -2743,7 +2804,8 @@ $("generateBtn").onclick=async()=>{
         // ここでも渡すようにした(無いとギャップ埋めが常にスキップされ無効化する)。
         const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
           psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
-          depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false};
+          depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+          depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
         // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
         // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
         // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による

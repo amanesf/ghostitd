@@ -129,20 +129,46 @@ function buildAccessoryCarveOptsList(opts){
       console.log("  accessories: skip", name, "(front/back範囲なし)");
       return;
     }
-    var useLeftSide = !!(laW && mask.leftSide && mask.leftSide.bbox);
-    var sideMask = useLeftSide ? mask.leftSide : mask.side;
-    var curSAW = useLeftSide ? laW : saW;
-    var curSAH = useLeftSide ? laH : saH;
-    var curSYTOP = useLeftSide ? LEFT_SYTOP : SYTOP;
-    var curSYBOT = useLeftSide ? LEFT_SYBOT : SYBOT;
-    var curSIDE_REF = useLeftSide ? LEFT_SIDE_REF : SIDE_REF;
-    var curSideOffsetX = useLeftSide ? leftSideOffsetX : sideOffsetX;
-    var curSideOffsetY = useLeftSide ? leftSideOffsetY : sideOffsetY;
+    // ★2026-07-19(右/左の選択制対応): depthSideRight/depthSideLeft(共に
+    // undefined=auto)でside(右)/leftSide(左)のどちらを使うか選べるように
+    // した。前後(depth_band_front/back)と同じ思想: 両方trueなら和集合、
+    // 片方だけなら単独使用。未指定(auto)時は従来通りleftSideがあれば
+    // leftSideのみを優先する(既定挙動は変えない)。
+    var rightAvail = !!(mask.side && mask.side.bbox);
+    var leftAvail = !!(laW && mask.leftSide && mask.leftSide.bbox);
+    var wantRight = acc.depthSideRight, wantLeft = acc.depthSideLeft;
+    if(wantRight===undefined && wantLeft===undefined){
+      wantLeft = leftAvail; wantRight = !leftAvail;
+    }else{
+      wantRight = wantRight===true; wantLeft = wantLeft===true;
+    }
+    wantRight = wantRight && rightAvail;
+    wantLeft = wantLeft && leftAvail;
+    if(!wantRight && !wantLeft){ wantLeft = leftAvail; wantRight = !leftAvail && rightAvail; }
+    function sideParams(isLeft){
+      return { mask: isLeft?mask.leftSide:mask.side,
+        SAW: isLeft?laW:saW, SAH: isLeft?laH:saH,
+        SYTOP: isLeft?LEFT_SYTOP:SYTOP, SYBOT: isLeft?LEFT_SYBOT:SYBOT,
+        SIDE_REF: isLeft?LEFT_SIDE_REF:SIDE_REF,
+        offX: isLeft?leftSideOffsetX:sideOffsetX, offY: isLeft?leftSideOffsetY:sideOffsetY };
+    }
+    // 片方だけなら従来通りleft優先、両方ならleftを主・sideを副にする
+    // (どちらを主にしても和集合の結果は同じだが、mzBoundsの基準を一貫させる)。
+    var primaryIsLeft = wantLeft;
+    var primary = sideParams(primaryIsLeft);
+    var secondary = (wantRight && wantLeft) ? sideParams(!primaryIsLeft) : null;
+    var curSAW=primary.SAW, curSAH=primary.SAH, curSYTOP=primary.SYTOP, curSYBOT=primary.SYBOT;
+    var curSIDE_REF=primary.SIDE_REF, curSideOffsetX=primary.offX, curSideOffsetY=primary.offY;
+    var sideMask = primary.mask;
     if(sideMask && sideMask.bbox){
       var bbm3=P3D.pixelBboxToModelBbox(sideMask.bbox, function(pts){ return sidePointsToModel(pts, curSIDE_REF, SCALE, curSYTOP, curSYBOT); });
       mzMin=bbm3[0];mzMax=bbm3[1];
     }else{
       var hw=(mxMax-mxMin)/2; mzMin=-hw*0.6; mzMax=hw*0.6;
+    }
+    if(secondary && secondary.mask && secondary.mask.bbox){
+      var bbm3b=P3D.pixelBboxToModelBbox(secondary.mask.bbox, function(pts){ return sidePointsToModel(pts, secondary.SIDE_REF, SCALE, secondary.SYTOP, secondary.SYBOT); });
+      mzMin=Math.min(mzMin,bbm3b[0]); mzMax=Math.max(mzMax,bbm3b[1]);
     }
 
     var faAcc = (mask.front && mask.front.alpha) ? mask.front.alpha : new Uint8Array(faW*faH);
@@ -161,6 +187,11 @@ function buildAccessoryCarveOptsList(opts){
       var sy0=curSYTOP+(1.0-myMax)*(curSYBOT-curSYTOP)+curSideOffsetY, sy1=curSYTOP+(1.0-myMin)*(curSYBOT-curSYTOP)+curSideOffsetY;
       saAcc = rectAlpha(curSAW, curSAH, sx0, sy0, sx1, sy1);
     }
+    var saAcc2=null, saContAcc2=null;
+    if(secondary && secondary.mask && secondary.mask.alpha){
+      saAcc2 = secondary.mask.alpha;
+      saContAcc2 = secondary.mask.cont || null;
+    }
 
     var carveOpts = {
       fa:faAcc, ba:baAcc, sa:saAcc, faW:faW, faH:faH, saW:curSAW, saH:curSAH,
@@ -169,6 +200,13 @@ function buildAccessoryCarveOptsList(opts){
       SCALE:SCALE, CX:CX, YBOT:YBOT, SYTOP:curSYTOP, SYBOT:curSYBOT, SIDE_REF:curSIDE_REF,
       backOffsetX:backOffsetX, backOffsetY:backOffsetY, sideOffsetX:curSideOffsetX, sideOffsetY:curSideOffsetY,
       mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax],
+      // ★2026-07-19(右/左の選択制対応): secondaryがあれば第2ソース(sa2等)を
+      // carveOptsに渡す(js/carving.jsのbuildDepthByRowが和集合する)。
+      sa2: saAcc2, saCont2: saContAcc2,
+      saW2: secondary?secondary.SAW:undefined, saH2: secondary?secondary.SAH:undefined,
+      SYTOP2: secondary?secondary.SYTOP:undefined, SYBOT2: secondary?secondary.SYBOT:undefined,
+      SIDE_REF2: secondary?secondary.SIDE_REF:undefined,
+      sideOffsetX2: secondary?secondary.offX:undefined, sideOffsetY2: secondary?secondary.offY:undefined,
       // ★2026-07-10(体+アクセサリー統合彫刻対応): 共有グリッド(body_vox_xz/
       // body_voxで作る)へ統合するため、voxもグリッドのX/Z軸解像度(body_vox_xz)
       // に揃える(閾値判定(最小セグメント幅等)はX/Z方向の量のため。
