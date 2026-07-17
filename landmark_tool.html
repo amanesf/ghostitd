@@ -636,16 +636,6 @@ const PARAM_META=[
   desc:"この距離以内で2パーツ以上に挟まれている隙間を塞ぐ。大きいほど広い隙間まで塞げるが、離れた無関係なパーツ同士まで誤って繋がるリスクが増える。part_gap_closeがONの時のみ有効。"},
  {group:"モデル補正", key:"smooth_iters", label:"表面平滑化回数(体+アクセサリー共通)", type:"number", min:0, max:60, step:1, unit:"回",
   desc:"ボクセル化(marching cubes)特有の階段状のガタつきを均す回数。増やすほど滑らかになるが、細かい造形も鈍る。"},
- // ★2026-07-19追加(スパイク根本原因調査、ユーザー承認): パーツの輪郭が
- // 途切れる/先細りする末端(裾・頭頂・腕/脚の先等)では、行ごと独立の奥行き
- // 測定の都合上、本物の細部がごく少ない行数に圧縮され彫刻結果が荒れることが
- // ある(js/carving.jsのspikeSmoothSelective参照)。間引きより前に適用する。
- {group:"モデル補正", key:"body_spike_smooth", label:"体の尖り除去の強さ", type:"number", min:0, max:1, step:0.05, unit:"",
-  desc:"体(頭/胴体/脚/腕/手、全身一律)のうち、近傍からの飛び出しが「尖り除去のしきい値」を超えた頂点だけ、超えた分をこの強さ(0=無効〜1=全部)で引っ込める。通常の凹凸(筋肉の丸み等)はしきい値以下なので対象外。アクセサリーは下の個別スライダーで別途設定する。間引きより前(彫刻直後の生メッシュ)に適用する。"},
- {group:"モデル補正", key:"spike_smooth_threshold", label:"尖り除去のしきい値", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
-  desc:"近傍平均からのズレがこの値を超えた頂点だけを「尖り」とみなす。小さくしすぎると通常の凹凸まで削れてしまう。"},
- {group:"モデル補正", key:"spike_smooth_iters", label:"尖り除去の反復回数", type:"number", min:1, max:20, step:1, unit:"回",
-  desc:"尖り除去を何回繰り返すか。多いほどしっかり削れるが処理が重くなる。"},
 
  // ---- 6. 動き方(スキニング) ----
  {group:"動き方(スキニング)", key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", type:"number", min:0, max:0.8, step:0.05, unit:"",
@@ -767,24 +757,6 @@ function renderPsqAccessoryOverridesHtml(){
   }).join("");
   return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
     '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の断面の丸み</div>'+
-    rows+'</div>';
-}
-// ★2026-07-19追加(スパイク根本原因調査): renderPsqAccessoryOverridesHtmlと
-// 同じ構成で、アクセサリーごとの尖り除去の強さ(0=対象外〜1)を設定する。
-// 既定は全アクセサリー0(無効)。
-function renderSpikeSmoothAccessoryOverridesHtml(){
-  if(!accessories.length) return "";
-  const rows=accessories.map((a,idx)=>{
-    const val=(a.spikeSmooth!==undefined && a.spikeSmooth!==null)?a.spikeSmooth:0;
-    return '<div class="acform" style="margin-bottom:6px">'+
-      '<div style="color:var(--txt);font-size:12px;margin-bottom:4px">'+(a.name||"(無名)")+'</div>'+
-      '<div style="display:flex;align-items:center;gap:6px">'+
-      '<input type="range" class="spikeSmoothAccSlider" data-i="'+idx+'" min="0" max="1" step="0.05" value="'+val+'" style="flex:1">'+
-      '<input type="number" class="spikeSmoothAccNum" data-i="'+idx+'" min="0" max="1" step="0.05" value="'+val+'" style="width:70px">'+
-      '</div></div>';
-  }).join("");
-  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
-    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">アクセサリー個別の尖り除去の強さ(既定0=無効)</div>'+
     rows+'</div>';
 }
 // ★2026-07-14追加(ユーザー指摘「ボクセルとピクセルを一致させたら無駄がない」):
@@ -951,7 +923,6 @@ function buildParamsPanelHtml(){
       '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
       '</summary><div class="accbody">'+items+
       (g==="モデルの形"?renderPsqAccessoryOverridesHtml():"")+
-      (g==="モデル補正"?renderSpikeSmoothAccessoryOverridesHtml():"")+
       (g==="モデルの細かさ"?(renderVoxPxHelperHtml()+renderVertEstimateHtml()):"")+
       (g==="モデルへの画像貼り付け"?renderSeamPanelHtml():"")+
       '</div></details>';
@@ -1040,21 +1011,6 @@ function wireParamsPanelEvents(el){
   }
   [].forEach.call(el.querySelectorAll(".psqAccNum"),num=>{
     num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||2); };
-  });
-  // アクセサリー個別の尖り除去の強さ(spikeSmooth、renderSpikeSmoothAccessoryOverridesHtml参照)。
-  function setAccessorySpikeSmooth(i,n){
-    n=Math.max(0,Math.min(1,n));
-    accessories[i].spikeSmooth=n;
-    const sl=el.querySelector('.spikeSmoothAccSlider[data-i="'+i+'"]');
-    const num=el.querySelector('.spikeSmoothAccNum[data-i="'+i+'"]');
-    if(sl)sl.value=n;
-    if(num)num.value=n;
-  }
-  [].forEach.call(el.querySelectorAll(".spikeSmoothAccSlider"),sl=>{
-    sl.oninput=()=>{ setAccessorySpikeSmooth(+sl.dataset.i, parseFloat(sl.value)); };
-  });
-  [].forEach.call(el.querySelectorAll(".spikeSmoothAccNum"),num=>{
-    num.onchange=()=>{ setAccessorySpikeSmooth(+num.dataset.i, parseFloat(num.value)||0); };
   });
   // 推定頂点数・メモリ(renderVertEstimateHtml)の配線。
   const estimateBtn=el.querySelector("#estimateVertBtn");
@@ -1699,8 +1655,7 @@ function buildJson(){
     points_px,derived:deriveFromPoints(points,analysis),
     accessories:accessories.map(a=>{
       const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
-        spikeSmooth:(a.spikeSmooth!==undefined&&a.spikeSmooth!==null)?a.spikeSmooth:0};
+        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
       out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
       return out;
     }),
@@ -1758,8 +1713,7 @@ function applyLoadedJson(d){
   accessories=(d.accessories||[]).map(a=>{
     const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
       color:a.color||null,
-      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
-      spikeSmooth:(a.spikeSmooth!==undefined&&a.spikeSmooth!==null)?a.spikeSmooth:0};
+      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
     out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
       const m=a.mask[v];
       if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
@@ -2742,8 +2696,7 @@ $("generateBtn").onclick=async()=>{
         // (P3D.fillColorGaps)が「このアクセサリーの登録色」を必要とするため
         // ここでも渡すようにした(無いとギャップ埋めが常にスキップされ無効化する)。
         const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
-          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
-          spikeSmooth:(a.spikeSmooth!==undefined&&a.spikeSmooth!==null)?a.spikeSmooth:0};
+          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2};
         // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
         // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
         // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による

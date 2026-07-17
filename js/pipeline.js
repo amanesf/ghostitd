@@ -469,8 +469,8 @@ async function runCarvingStages(state, report){
   // 両側で別々に動いて隙間・段差になっていた。統合されたままの1枚のメッシュ
   // (owner付き)を返し、分割は間引き・平滑化が全て終わった後(pipeline.jsの
   // decimateStage/meshFinishStage参照)にだけ行う。
-  var partsMeta = [{ownerId:0, name:"body", mode:null, bones:null, spikeSmooth:(gp.body_spike_smooth||0)}].concat(
-    accBuilt.map(function(a,i){ return {ownerId:i+1, name:a.name, mode:a.mode, bones:a.bones, spikeSmooth:(a.spikeSmooth||0)}; }));
+  var partsMeta = [{ownerId:0, name:"body", mode:null, bones:null}].concat(
+    accBuilt.map(function(a,i){ return {ownerId:i+1, name:a.name, mode:a.mode, bones:a.bones}; }));
   await tick();
 
   return {sizes:sizes, prof:prof, core:core, SCALE:SCALE, pivots:pivots, bledCanvas:bledCanvas,
@@ -549,16 +549,8 @@ P3D.runToIntermediate = runToIntermediate;
  * すればその段はスキップして前回の結果を再利用する。あるTierが変わって
  * 上流の段が再計算されれば、その下流の段も強制的に再計算する。
  */
-// ★2026-07-19追加: partsMetaを追加引数に取る。spikeSmoothSelectiveは
-// 間引きより前(彫刻直後の生メッシュ)に適用する必要があるため、ここで行う
-// (js/carving.jsのspikeSmoothSelectiveコメント参照)。
-function decimateStage(inter, gp, partsMeta){
+function decimateStage(inter, gp){
   var V=inter.raw_unified.V, F=inter.raw_unified.F, owner=inter.raw_unified.owner;
-  var spikeStrengthByOwner=new Map();
-  (partsMeta||[]).forEach(function(p){ if(p.spikeSmooth>0) spikeStrengthByOwner.set(p.ownerId, p.spikeSmooth); });
-  if(spikeStrengthByOwner.size && gp.spike_smooth_iters>0){
-    V=P3D.spikeSmoothSelective(V,F,owner,spikeStrengthByOwner,gp.spike_smooth_threshold,gp.spike_smooth_iters);
-  }
   if(gp.decimate){
     var d=P3D.decimateMesh(V,F,gp.decimate_strength,owner);
     V=d.V; F=d.F; owner=d.owner;
@@ -620,15 +612,13 @@ async function finishFromIntermediate(inter, opts, onProgress){
   var cache = inter._stageCache || (inter._stageCache = {});
   function sig(o){ return JSON.stringify(o); }
 
-  var decSig = sig({d:gp.decimate, ds:gp.decimate_strength,
-    sst:gp.spike_smooth_threshold, ssi:gp.spike_smooth_iters,
-    ssOwner:inter.parts_meta.map(function(p){ return p.spikeSmooth||0; })});
+  var decSig = sig({d:gp.decimate, ds:gp.decimate_strength});
   var decimated;
   if(cache.decSig===decSig && cache.decimated){
     decimated = cache.decimated;
   }else{
     report("decimate(間引き)");
-    decimated = decimateStage(inter, gp, inter.parts_meta);
+    decimated = decimateStage(inter, gp);
     cache.decSig = decSig; cache.decimated = decimated;
     cache.meshSig = null; cache.bakeSig = null; // 下流を強制再計算
   }

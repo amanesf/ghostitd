@@ -112,9 +112,6 @@ function buildAccessoryCarveOptsList(opts){
     // (各アクセサリーは必ず個別のpsq値を持つ)。ここでの2は、それでも欠けて
     // いた場合(壊れた/旧形式JSON等)に備えた安全側フォールバックに過ぎない。
     var accPsq = (acc.psq!==undefined && acc.psq!==null) ? acc.psq : 2;
-    // ★2026-07-19追加: 尖り除去(js/carving.jsのspikeSmoothSelective)の
-    // アクセサリー個別の強さ(0=対象外〜1)。既定0(無効)。
-    var accSpikeSmooth = (acc.spikeSmooth!==undefined && acc.spikeSmooth!==null) ? acc.spikeSmooth : 0;
     var mask = acc.mask || {};
     var mxMin,mxMax,myMin,myMax,mzMin,mzMax;
     var usedBackOnly=false;
@@ -180,8 +177,7 @@ function buildAccessoryCarveOptsList(opts){
       smoothIters: 0,
     };
     out.push({name:name, mode:mode, bones:bones.slice(), usedBackOnly:usedBackOnly,
-      mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax], carveOpts:carveOpts,
-      spikeSmooth:accSpikeSmooth});
+      mxBounds:[mxMin,mxMax], myBounds:[myMin,myMax], mzBounds:[mzMin,mzMax], carveOpts:carveOpts});
   });
   return out;
 }
