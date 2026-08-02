@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴーストスキャナー</title>
+<script src="js/common.js"></script>
+<script src="js/idb.js"></script>
+<script src="js/scanner_api.js"></script>
+<script src="js/scanner_render.js"></script>
+<style>
+  :root{--bg:#07080a;--mut:#9aa3ad;--mint:#ff2fb0;--green:#39ff9e;--cyan:#5be6ff;--txt:#e8edf2;--line:rgba(255,255,255,.12);
+    --mono:"SFMono-Regular",Consolas,Menlo,monospace}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .page{max-width:460px;margin:0 auto;padding:14px 12px 64px}
+  h1{font-size:16px;font-weight:700;margin:0 0 2px;letter-spacing:.01em}
+  h1 .eng{display:block;font-family:var(--mono);font-size:9.5px;color:var(--green);
+    letter-spacing:.22em;margin:5px 0 0;opacity:.85;font-weight:400}
+  .sub{font-size:11.5px;color:var(--mut);margin:6px 0 14px}
+  a.back{color:var(--mut);font-size:11.5px;text-decoration:none}
+  .headRow{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .apiKeyBtn{flex:0 0 auto;font-size:11px;padding:6px 10px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--mut);white-space:nowrap}
+  .apiKeyBtn.on{border-color:var(--cyan);color:var(--cyan)}
+  #apiKeyPanel[hidden]{display:none}
+
+  /* タブ */
+  .tabs{display:flex;gap:4px;margin:14px 0 12px;overflow-x:auto;padding-bottom:2px}
+  .tabbtn{flex:0 0 auto;font-size:11px;padding:7px 10px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut);white-space:nowrap}
+  .tabbtn.on{border-color:var(--mint);background:rgba(255,47,176,.12);color:var(--mint)}
+  .tabbtn.done{color:var(--green)}
+  .tabbtn[disabled]{opacity:.4;pointer-events:none}
+  .tabpanel{display:none}
+  .tabpanel.on{display:block}
+
+  .card{border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.03);padding:12px;margin-bottom:12px}
+  .card h2{font-size:13px;margin:0 0 8px;color:var(--cyan)}
+  .btn{width:100%;height:42px;border-radius:11px;font-size:13px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--txt);
+    display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px}
+  .btn:active{transform:scale(.98)}
+  .btn.mint{background:rgba(255,47,176,.14);color:var(--mint);border-color:rgba(255,47,176,.4)}
+  .btn.green{background:rgba(57,255,158,.12);color:var(--green);border-color:rgba(57,255,158,.4)}
+  .btn[disabled]{opacity:.45;pointer-events:none}
+  .btn.sm{height:34px;font-size:12px}
+  input[type=file]{display:none}
+  /* APIログ/エラーはどのタブ・どこまでスクロールしていても押した直後のボタンの
+     近くに見えるよう、画面下部に常時追従させる(以前は文書末尾に固定配置されて
+     おり、ページが長いタブでは押したボタンから遠く見落とされやすかった)。 */
+  #msg{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;
+    max-width:460px;margin-left:auto;margin-right:auto;
+    font-size:11.5px;color:var(--mut);min-height:16px;line-height:1.5;
+    padding:8px 12px;background:rgba(7,8,10,.92);border-top:1px solid var(--line);
+    backdrop-filter:blur(4px)}
+  #msg:empty{display:none}
+  #msg.err{color:#ff6a6a}
+
+  /* プロンプト表示パネル(GHOST_SCANNER_PLAN.md: 送信するプロンプト全文を隠さず表示) */
+  details.promptPanel{border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.02);
+    margin-bottom:10px}
+  details.promptPanel summary{padding:8px 10px;font-size:11.5px;color:var(--mut);cursor:pointer}
+  details.promptPanel pre{margin:0;padding:0 10px 10px;font-size:10.5px;line-height:1.6;color:#c7ccd3;
+    white-space:pre-wrap;word-break:break-word;font-family:var(--mono);max-height:280px;overflow-y:auto}
+
+  .imgPreview{width:100%;border-radius:10px;border:1px solid var(--line);background:#000;display:block;margin-bottom:8px}
+  canvas.imgPreview{width:100%;height:auto}
+  .modelRow{display:flex;gap:6px;margin-bottom:8px;align-items:center}
+  .modelRow label{flex:0 0 auto;font-size:12px;color:var(--mut);white-space:nowrap}
+  .modelRow select{flex:1;min-width:0;height:34px;border-radius:9px;border:1px solid var(--line);
+    background:#0d0f13;color:var(--txt);font-size:13px;padding:0 8px}
+  .apiKeyRow{display:flex;gap:6px;margin-bottom:10px}
+  .apiKeyRow input{flex:1;min-width:0;height:36px;border-radius:9px;border:1px solid var(--line);
+    background:rgba(255,255,255,.04);color:var(--txt);padding:0 10px;font-size:12px}
+  .apiKeyRow .btn{width:auto;flex:0 0 auto;padding:0 12px;margin-bottom:0}
+
+  /* チャットUI(ランドマーク/アクセサリータブ) */
+  .chatLog{max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;
+    background:rgba(0,0,0,.25);padding:8px;margin-bottom:8px;font-size:12px}
+  .chatMsg{margin-bottom:8px;line-height:1.6}
+  .chatMsg b{display:block;font-size:10.5px;color:var(--mut);margin-bottom:2px}
+  .chatMsg.user{color:var(--txt)}
+  .chatMsg.model{color:#c7ccd3}
+  .chatRow{display:flex;gap:6px}
+  .chatRow input{flex:1;min-width:0;height:38px;border-radius:9px;border:1px solid var(--line);
+    background:rgba(255,255,255,.04);color:var(--txt);padding:0 10px;font-size:12px}
+  .chatRow .btn{width:auto;flex:0 0 auto;padding:0 14px;margin-bottom:0}
+
+  .rowGap{display:flex;gap:8px}
+  .rowGap .btn{flex:1}
+  .hint{color:var(--mut);font-size:11px;line-height:1.6}
+  .accItem{border:1px solid var(--line);border-radius:9px;padding:8px;margin-bottom:6px;font-size:11.5px}
+  .accItem b{display:block;margin-bottom:2px}
+  #maskPreviewList{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  #maskPreviewList .maskPreviewItem{flex:0 0 auto;max-width:140px}
+  #maskPreviewList canvas{max-width:140px;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block}
+  #maskPreviewList .maskPreviewLabel{font-size:10.5px;color:var(--mut);margin-bottom:2px}
+  .spin{display:inline-block;width:11px;height:11px;border-radius:50%;border:2px solid rgba(255,255,255,.25);
+    border-top-color:var(--mint);animation:spin .8s linear infinite;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style></head>
+<body>
+<div class="page">
+  <a class="back" href="index.html">← ゴースト イン ザ デバイス</a>
+  <div class="headRow">
+    <h1>ゴーストスキャナー<span class="eng">GHOST SCANNER</span></h1>
+    <button class="apiKeyBtn" id="apiKeyToggleBtn" type="button">⚙ APIキー</button>
+  </div>
+  <p class="sub">1枚のイラストから front/side/back の3面図と骨格情報をAIで推定し、ジェネレータへ引き継ぐ前処理ツール。</p>
+
+  <div class="card" id="resumeCard" hidden>
+    <h2>前回の続き</h2>
+    <p class="hint">保存済みの作業内容(画像・ランドマーク等)が見つかりました。続きから復元しますか?(いずれかを選ぶと以後は自動保存されます)</p>
+    <div class="rowGap">
+      <button class="btn sm" id="resumeDiscardBtn">破棄して新規作成</button>
+      <button class="btn sm mint" id="resumeBtn">続きから復元</button>
+    </div>
+  </div>
+
+  <div class="card" id="apiKeyPanel" hidden>
+    <h2>Gemini APIキー</h2>
+    <div class="apiKeyRow">
+      <input id="apiKeyInput" type="password" placeholder="APIキーを入力してlocalStorageに保存"/>
+      <button class="btn sm mint" id="apiKeySave" style="margin:0">保存</button>
+      <button class="btn sm" id="apiKeyClear" style="margin:0">削除</button>
+    </div>
+    <p class="hint" id="apiKeyStatus"></p>
+    <div class="modelRow">
+      <label for="imageModelSelect">画像生成モデル</label>
+      <select id="imageModelSelect"></select>
+    </div>
+    <div class="modelRow">
+      <label for="textModelSelect">テキスト/JSON推定モデル</label>
+      <select id="textModelSelect"></select>
+    </div>
+    <button class="btn sm" id="modelListFetchBtn" style="margin:0 0 6px">APIキーからモデル一覧を取得</button>
+    <p class="hint" id="modelListStatus"></p>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <!-- 1. 画像投入 -->
+  <div class="tabpanel" data-tabpanel="upload">
+    <div class="card">
+      <h2>1. 画像投入</h2>
+      <p class="hint">キャラクターの原画(ポーズ・アングル不問)を1枚選んでください。1024×1024に自動リサイズしてからAPIに渡します(Gemini側のリサイズは使いません)。</p>
+      <button class="btn mint" id="uploadBtn">画像を選ぶ</button>
+      <input type="file" id="uploadFile" accept="image/*"/>
+      <canvas class="imgPreview" id="uploadPreview" width="512" height="512"></canvas>
+      <button class="btn sm" id="uploadDownloadBtn" disabled>リサイズ画像をダウンロード</button>
+      <button class="btn green" id="uploadNextBtn" disabled>次へ(正面生成)</button>
+    </div>
+  </div>
+
+  <!-- 2. 正面生成 -->
+  <div class="tabpanel" data-tabpanel="front">
+    <div class="card">
+      <h2>2. 正面(front)生成</h2>
+      <p class="hint">元イラストを参照に、輪郭線なしのTポーズ正面図を生成します(ここから新しいセッションを開始し、続くside/leftSide/backはこのセッションの続きとして生成します)。</p>
+      <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="frontPromptText"></pre></details>
+      <button class="btn mint" id="frontGenBtn">正面を生成</button>
+      <canvas class="imgPreview" id="frontPreview" width="512" height="512"></canvas>
+      <div class="rowGap">
+        <button class="btn sm" id="frontRetryBtn" disabled>リトライ</button>
+        <button class="btn sm green" id="frontConfirmBtn" disabled>この画像で確定</button>
+      </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="frontUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="frontUploadFile" accept="image/*"/>
+      <button class="btn sm" id="frontDownloadBtn" disabled>この画像をダウンロード</button>
+      <button class="btn green" id="frontNextBtn" disabled>次へ(側面生成)</button>
+    </div>
+  </div>
+
+  <!-- 3. 側面(右)生成 -->
+  <div class="tabpanel" data-tabpanel="side">
+    <div class="card">
+      <h2>3. 側面・右(side)生成</h2>
+      <p class="hint">確定したfrontを参照に、真横(右向き)からの側面図を生成します。front生成から続く同一セッションで生成するため、左右非対称な特徴(ツインテールの左右など)の割り当てがブレにくくなります。</p>
+      <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="sidePromptText"></pre></details>
+      <button class="btn mint" id="sideGenBtn">側面(右)を生成</button>
+      <canvas class="imgPreview" id="sidePreview" width="512" height="512"></canvas>
+      <div class="rowGap">
+        <button class="btn sm" id="sideRetryBtn" disabled>リトライ</button>
+        <button class="btn sm green" id="sideConfirmBtn" disabled>この画像で確定</button>
+      </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="sideUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="sideUploadFile" accept="image/*"/>
+      <button class="btn sm" id="sideDownloadBtn" disabled>この画像をダウンロード</button>
+      <button class="btn green" id="sideNextBtn" disabled>次へ(側面・左生成)</button>
+    </div>
+  </div>
+
+  <!-- 3b. 側面(左)生成 -->
+  <!-- ★2026-07-09: 左右非対称キャラ(左右で違う房のツインテール等)に対応する
+       ため新設。キャラクター自体は正面から見て左右非対称でも、この側面(左)
+       画像は「左向きに撮った1枚」であり体型自体は側面(右)と同じはずなので、
+       side生成から続く同一セッションで「今度は左向きで」と依頼する形にして
+       いる(新規セッションでは体型比率が side と微妙にズレる恐れがあるため)。 -->
+  <div class="tabpanel" data-tabpanel="leftSide">
+    <div class="card">
+      <h2>3b. 側面・左(leftSide)生成</h2>
+      <p class="hint">確定したfront/sideに続く同一セッションで、真横(左向き)からの側面図を生成します。左右非対称なアクセサリー(片方だけのツインテール等)がある場合、この画像がその左側の彫刻に使われます(無い場合はこのタブをスキップしても構いません)。</p>
+      <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="leftSidePromptText"></pre></details>
+      <button class="btn mint" id="leftSideGenBtn">側面(左)を生成</button>
+      <canvas class="imgPreview" id="leftSidePreview" width="512" height="512"></canvas>
+      <div class="rowGap">
+        <button class="btn sm" id="leftSideRetryBtn" disabled>リトライ</button>
+        <button class="btn sm green" id="leftSideConfirmBtn" disabled>この画像で確定</button>
+      </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="leftSideUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="leftSideUploadFile" accept="image/*"/>
+      <button class="btn sm" id="leftSideDownloadBtn" disabled>この画像をダウンロード</button>
+      <button class="btn sm" id="leftSideSkipBtn">この面は無し(スキップ)</button>
+      <button class="btn green" id="leftSideNextBtn" disabled>次へ(背面生成)</button>
+    </div>
+  </div>
+
+  <!-- 4. 背面生成 -->
+  <div class="tabpanel" data-tabpanel="back">
+    <div class="card">
+      <h2>4. 背面(back)生成</h2>
+      <p class="hint">front生成から続く同一セッションで、完全に背後(180度)からの背面図を生成します。</p>
+      <details class="promptPanel"><summary>送信プロンプト全文を表示</summary><pre id="backPromptText"></pre></details>
+      <button class="btn mint" id="backGenBtn">背面を生成</button>
+      <canvas class="imgPreview" id="backPreview" width="512" height="512"></canvas>
+      <div class="rowGap">
+        <button class="btn sm" id="backRetryBtn" disabled>リトライ</button>
+        <button class="btn sm green" id="backConfirmBtn" disabled>この画像で確定</button>
+      </div>
+      <p class="hint">APIでの生成に失敗する場合は、上のプロンプトをコピーして外部(AI Studio等)で生成した画像を代わりにアップロードできます。</p>
+      <button class="btn sm" id="backUploadBtn">手動で画像をアップロード</button>
+      <input type="file" id="backUploadFile" accept="image/*"/>
+      <button class="btn sm" id="backDownloadBtn" disabled>この画像をダウンロード</button>
+      <button class="btn green" id="backNextBtn" disabled>次へ(ランドマーク)</button>
+    </div>
+  </div>
+
+  <!-- 5. ランドマーク -->
+  <div class="tabpanel" data-tabpanel="lm">
+    <div class="card">
+      <h2>5. ランドマーク推定</h2>
+      <p class="hint">確定したfront画像から22点(骨格関節点18+目/口角4)の目印を推定します。誤りがあれば下のチャットで修正を指示できます(このタブ内でのみ会話を継続)。</p>
+      <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="lmPromptText"></pre></details>
+      <button class="btn mint" id="lmRunBtn">ランドマークを推定</button>
+      <!-- ★2026-07-10: Gemini(APIキー)が無くても手動でスキャナーを完結できる
+           ようにするための代替経路。一般的な体型比率から22点を機械的に仮配置
+           するだけで、実際の絵柄(手足の角度・髪型等)には一切合わせていない
+           「叩き台」に過ぎない。ジェネレータ(landmark_tool.html)側のドラッグ
+           編集で実際の見た目に合わせて位置を追い込む前提。 -->
+      <button class="btn sm" id="lmManualBtn">標準位置で仮配置(AI不使用・後でジェネレータ側で調整)</button>
+      <canvas class="imgPreview" id="lmPreview" width="512" height="512" style="touch-action:none;cursor:grab"></canvas>
+      <p class="hint">プレビュー上をドラッグすると全点が平行移動、ホイール/トラックパッドのピンチ・2本指ピンチで拡大縮小します(画像中心基準)。下の数値でも微調整できます。「反映」を押すまではプレビューだけの仮表示です。</p>
+      <div class="modelRow">
+        <label for="lmOffsetX">オフセットX(px)</label>
+        <input id="lmOffsetX" type="number" value="0" step="1" style="width:70px"/>
+        <label for="lmOffsetY">Y(px)</label>
+        <input id="lmOffsetY" type="number" value="0" step="1" style="width:70px"/>
+        <label for="lmOffsetScale">倍率</label>
+        <input id="lmOffsetScale" type="number" value="1" step="0.01" style="width:70px"/>
+      </div>
+      <button class="btn sm" id="lmOffsetReset">リセット</button>
+      <button class="btn sm mint" id="lmOffsetApply">この位置で反映</button>
+      <p class="hint">この補正(位置+倍率)は、ランドマークだけでなくアクセサリー領域指定(タブ6)にも同じ値を自動適用します(Geminiの座標のズレは面ごとに共通の傾向であることが多いため)。</p>
+      <div class="chatLog" id="lmChatLog"></div>
+      <div class="chatRow">
+        <input id="lmChatInput" placeholder="例: 右肘をもう少し下に" disabled/>
+        <button class="btn sm mint" id="lmChatSend" disabled>送信</button>
+      </div>
+      <button class="btn green" id="lmNextBtn" disabled style="margin-top:8px">この内容で確定 → 次へ(アクセサリー)</button>
+    </div>
+  </div>
+
+  <!-- 6. アクセサリー(任意) -->
+  <div class="tabpanel" data-tabpanel="params">
+    <div class="card">
+      <h2>6-1. アクセサリー検出(名称のみ、任意)</h2>
+      <p class="hint">まず「何を抽出するか」の一覧だけを決める(精度を上げるため、範囲指定は次のステップで1件ずつ個別に行う)。front/side/back 3枚同時入力でbody/accessoryを二分類します(スキップ可)。</p>
+      <p class="hint">アクセサリーは「体の輪郭からはみ出るかどうか」で決まる3Dパーツの分割単位です(スカート・髪の房・尻尾など、体に密着していない全て)。体に密着してその輪郭に沿う服(通常のシャツ・ズボン・靴等)はbody(黒塗り)として扱われます。</p>
+      <details class="promptPanel"><summary>送信プロンプト全文(初回)を表示</summary><pre id="accPromptText"></pre></details>
+      <button class="btn mint" id="accRunBtn">アクセサリー一覧を検出</button>
+      <div id="accList"></div>
+      <div class="chatLog" id="accChatLog"></div>
+      <div class="chatRow">
+        <input id="accChatInput" placeholder="例: 尻尾も検出して" disabled/>
+        <button class="btn sm mint" id="accChatSend" disabled>送信</button>
+      </div>
+      <button class="btn green" id="accConfirmListBtn" disabled style="margin-top:8px">この一覧で確定 → 領域指定へ</button>
+      <button class="btn sm" id="accUnconfirmBtn" style="display:none;margin-top:8px">確定を解除してやり直す</button>
+      <p class="hint" id="accConfirmedNote" style="display:none">一覧を確定済みです。名前・色・ボーン等を修正したい場合は「確定を解除してやり直す」を押してください(下の色分けマップ・抽出済みのマスクはリセットされます)。</p>
+    </div>
+    <div class="card">
+      <h2>6-2. 色分けマップ生成</h2>
+      <!-- ★2026-07-09: マスク抽出(色分けマップ→パーツごとのラスタマスク)は
+           ここでは行わず、ジェネレータ(landmark_tool.html)の「自動マスク」タブへ
+           移した。抽出パラメータ(色許容誤差)をパーツごとに試行錯誤するには
+           このツール内で完結させるより、色分けマップとアクセサリー一覧を渡した
+           先で調整→即プレビューできる方が扱いやすいため(ユーザー指摘)。ここでは
+           front/side/leftSide/backの色分けマップ画像を生成/アップロードして
+           渡すところまでを担当する。 -->
+      <p class="hint">front/side/leftSide/backそれぞれ1枚ずつ、「体=黒・背景=白・各accessory=パレット色でベタ塗り」した色分けマップ画像を生成(または手動アップロード)します(6-1の確定後に押せます)。マスクの抽出(色ごとの切り出し・許容誤差の調整)はジェネレータの「自動マスク」タブで行います。leftSideは左右非対称なアクセサリーが無ければ省略できます。</p>
+      <!-- ★2026-07-09: 以前はfront/side/back共通の1つのプロンプトを使い回して
+           いたが、面ごとに個別確認・個別コピーしたいとの要望を受け、面ごとに
+           別々のプロンプトパネル(=個別コピーボタン付き)に分割した。 -->
+      <details class="promptPanel"><summary>送信プロンプト全文(front)を表示</summary><pre id="colormapPromptTextFront"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(side・右)を表示</summary><pre id="colormapPromptTextSide"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(leftSide・左)を表示</summary><pre id="colormapPromptTextLeftSide"></pre></details>
+      <details class="promptPanel"><summary>送信プロンプト全文(back)を表示</summary><pre id="colormapPromptTextBack"></pre></details>
+      <button class="btn mint" id="colormapGenBtn" disabled>色分けマップを生成(front/side/leftSide/back)</button>
+      <p class="hint" id="colormapProgress"></p>
+      <div class="rowGap">
+        <button class="btn sm" id="colormapUploadFrontBtn" disabled>front手動アップロード</button>
+        <button class="btn sm" id="colormapUploadSideBtn" disabled>side手動アップロード</button>
+        <button class="btn sm" id="colormapUploadLeftSideBtn" disabled>leftSide手動アップロード</button>
+        <button class="btn sm" id="colormapUploadBackBtn" disabled>back手動アップロード</button>
+      </div>
+      <input type="file" id="colormapUploadFrontFile" accept="image/*"/>
+      <input type="file" id="colormapUploadSideFile" accept="image/*"/>
+      <input type="file" id="colormapUploadLeftSideFile" accept="image/*"/>
+      <input type="file" id="colormapUploadBackFile" accept="image/*"/>
+      <canvas class="imgPreview" id="colormapFrontPreview" width="512" height="512"></canvas>
+      <canvas class="imgPreview" id="colormapSidePreview" width="512" height="512"></canvas>
+      <canvas class="imgPreview" id="colormapLeftSidePreview" width="512" height="512"></canvas>
+      <canvas class="imgPreview" id="colormapBackPreview" width="512" height="512"></canvas>
+    </div>
+    <button class="btn green" id="paramsNextBtn">次へ(出力)</button>
+  </div>
+
+  <!-- 7. 出力 -->
+  <div class="tabpanel" data-tabpanel="out">
+    <div class="card">
+      <h2>7. 出力/ジェネレータへ</h2>
+      <p class="hint">front/side/back画像とランドマーク(+任意でアクセサリー)を、ゴーストジェネレータ(landmark_tool.html)へIndexedDB経由で引き継ぎます。</p>
+      <button class="btn mint" id="outSendBtn">ジェネレータへ引き継ぐ</button>
+    </div>
+  </div>
+
+  <p id="msg"></p>
+</div>
+<script>
+(function(){
+"use strict";
+
+/* ==================== 状態管理(1箇所にまとめる、GHOST_SCANNER_PLAN.md方針) ==================== */
+// ★2026-07-09(左右非対称キャラ対応): 「左側面(leftSide)」を新設し、
+// side(右側面)の直後・backの前に挿入する。front→side→leftSide→backを
+// 同一Geminiセッション(genHistory)で繋げて生成することで、左右の資産
+// (ツインテール等)の割り当てが生成ごとにブレるのを防ぐ(下記genHistory参照)。
+var TAB_ORDER=["upload","front","side","leftSide","back","lm","params","out"];
+var TAB_LABEL={upload:"1.画像投入",front:"2.正面",side:"3.側面(右)",leftSide:"3b.側面(左)",back:"4.背面",lm:"5.ランドマーク",params:"6.アクセサリー",out:"7.出力"};
+var state={
+  curTab:"upload",
+  unlockedUpTo:0, // TAB_ORDERのindex。ここまでは行き来自由
+  sourceImg:null, sourceDataUrl:null, // リサイズ済み1024x1024
+  front:{dataUrl:null, confirmed:false},
+  side:{dataUrl:null, confirmed:false},
+  leftSide:{dataUrl:null, confirmed:false},
+  back:{dataUrl:null, confirmed:false},
+  // front/side/leftSide/back生成を通して同一Geminiセッションを維持する会話履歴
+  // (GHOST_SCANNER_PLAN.md「左右非対称キャラ対応」節)。新規セッションを
+  // 都度張り直すと、キャラクターの左右非対称な特徴(例: 左右で違う房のツインテール)
+  // の割り当てがビューごとにブレる(左右反転して生成される等)ことが実地で
+  // 確認されたため、front生成から続く1つの会話としてside/leftSide/backを生成する。
+  genHistory:[],
+  landmarks:{pointsPx:null, imageWH:null, history:[], confirmed:false},
+  accessories:{list:null, history:[], confirmed:false},
+  // タブ5で「反映」した位置ズレ補正(平行移動+倍率)の累積値。ランドマーク
+  // だけでなく、タブ6-2で取得するアクセサリー領域(regions)にも同じ値を
+  // 自動適用する(Geminiの座標系のズレは面ごとに共通の傾向であることが
+  // 多いため、一度計測した補正を使い回す)。
+  calibration:{dx:0, dy:0, scale:1},
+};
+
+function $(id){ return document.getElementById(id); }
+function setMsg(t,isErr){ var el=$("msg"); el.textContent=t||""; el.className=isErr?"err":""; }
+
+/* ==================== タブUI(単一責務: 切り替えのみ) ==================== */
+function renderTabs(){
+  var wrap=$("tabs"); wrap.innerHTML="";
+  TAB_ORDER.forEach(function(t,i){
+    var b=document.createElement("button");
+    b.className="tabbtn"+(t===state.curTab?" on":"")+(i<state.unlockedUpTo?" done":"");
+    b.textContent=TAB_LABEL[t];
+    b.disabled = i>state.unlockedUpTo;
+    b.onclick=function(){ switchTab(t); };
+    wrap.appendChild(b);
+  });
+}
+function switchTab(t){
+  state.curTab=t;
+  [].forEach.call(document.querySelectorAll(".tabpanel"),function(p){ p.classList.toggle("on",p.dataset.tabpanel===t); });
+  renderTabs();
+}
+function unlockNext(tabName){
+  var idx=TAB_ORDER.indexOf(tabName);
+  if(idx+1>state.unlockedUpTo) state.unlockedUpTo=idx+1;
+}
+
+/* ==================== APIキーUI ==================== */
+// 常時表示だとタブを切り替えるたびに場所を取るため、右上のボタンで
+// 開閉するパネルにしてある(中身のHTML/ロジックは元のまま移設しただけ)。
+$("apiKeyToggleBtn").onclick=function(){
+  var panel=$("apiKeyPanel");
+  var opening = panel.hidden;
+  panel.hidden = !opening;
+  $("apiKeyToggleBtn").classList.toggle("on", opening);
+};
+function refreshApiKeyStatus(){
+  var k=P3D.getGeminiApiKey();
+  $("apiKeyStatus").textContent = k ? "APIキーを保存済み(localStorage)です。" : "APIキー未設定です。生成/推定を行うには入力・保存してください。";
+}
+$("apiKeySave").onclick=function(){
+  var v=$("apiKeyInput").value.trim();
+  if(!v){ setMsg("APIキーを入力してください。",true); return; }
+  P3D.setGeminiApiKey(v);
+  $("apiKeyInput").value="";
+  refreshApiKeyStatus();
+  setMsg("APIキーを保存しました。");
+};
+$("apiKeyClear").onclick=function(){
+  P3D.clearGeminiApiKey();
+  refreshApiKeyStatus();
+  setMsg("APIキーを削除しました。");
+};
+
+/* ==================== モデル選択UI ==================== */
+// 既定値(コード埋め込みのDEFAULT_*)を、取得済みモデル一覧が無くても
+// 選べるようフォールバックの選択肢として常に用意しておく。
+function fillModelSelect(selectEl, options, current){
+  selectEl.innerHTML="";
+  options.forEach(function(name){
+    var opt=document.createElement("option");
+    opt.value=name; opt.textContent=name;
+    if(name===current) opt.selected=true;
+    selectEl.appendChild(opt);
+  });
+  // 現在値が選択肢に無ければ先頭に追加して選択(保存済みだが一覧未取得の場合)
+  if(current && options.indexOf(current)===-1){
+    var opt=document.createElement("option");
+    opt.value=current; opt.textContent=current+"(保存済み)";
+    opt.selected=true;
+    selectEl.insertBefore(opt, selectEl.firstChild);
+  }
+}
+function refreshModelSelects(){
+  fillModelSelect($("imageModelSelect"), [P3D.SCANNER_DEFAULT_IMAGE_MODEL], P3D.getScannerImageModel());
+  fillModelSelect($("textModelSelect"), [P3D.SCANNER_DEFAULT_TEXT_MODEL], P3D.getScannerTextModel());
+}
+refreshModelSelects();
+$("imageModelSelect").onchange=function(){ P3D.setScannerImageModel(this.value); };
+$("textModelSelect").onchange=function(){ P3D.setScannerTextModel(this.value); };
+
+$("modelListFetchBtn").onclick=function(){
+  var k=P3D.getGeminiApiKey();
+  if(!k){ setMsg("先にAPIキーを保存してください。",true); return; }
+  $("modelListStatus").textContent="モデル一覧を取得中...";
+  P3D.scannerListModels(k).then(function(models){
+    // generateContent対応モデルのみを候補にする。画像出力対応かどうかを示す
+    // 明確なフラグがレスポンスに無いため、モデル名に"image"を含むかどうかで
+    // 画像生成用/テキスト用を振り分ける(GHOST_SCANNER_PLAN.md「モデル自動取得」節参照)。
+    var names = models.filter(function(m){
+      return m.supportedGenerationMethods.indexOf("generateContent")!==-1;
+    }).map(function(m){ return m.name; });
+    var imageNames = names.filter(function(n){ return /image/i.test(n); });
+    var textNames = names.filter(function(n){ return !/image/i.test(n); });
+    if(imageNames.indexOf(P3D.SCANNER_DEFAULT_IMAGE_MODEL)===-1) imageNames.unshift(P3D.SCANNER_DEFAULT_IMAGE_MODEL);
+    if(textNames.indexOf(P3D.SCANNER_DEFAULT_TEXT_MODEL)===-1) textNames.unshift(P3D.SCANNER_DEFAULT_TEXT_MODEL);
+    fillModelSelect($("imageModelSelect"), imageNames, P3D.getScannerImageModel());
+    fillModelSelect($("textModelSelect"), textNames, P3D.getScannerTextModel());
+    $("modelListStatus").textContent="モデル一覧を取得しました("+names.length+"件、うち画像候補"+imageNames.length+"件)。";
+  }).catch(function(e){
+    $("modelListStatus").textContent="モデル一覧の取得に失敗しました: "+((e&&e.message)||e);
+  });
+};
+
+/* ==================== 汎用: プロンプトパネルにコピーボタンを付与 ==================== */
+// GHOST_SCANNER_PLAN.mdの「送信するプロンプト全文を隠さず表示」に加え、外部
+// (AI Studio等)へそのまま貼り付けて使えるようコピー機能を用意する。
+function copyTextToClipboard(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(text);
+  }
+  // クリップボードAPIが使えない環境向けのフォールバック
+  return new Promise(function(resolve,reject){
+    try{
+      var ta=document.createElement("textarea");
+      ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      var ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error("execCommand(copy)に失敗しました"));
+    }catch(e){ reject(e); }
+  });
+}
+function attachPromptCopyButtons(){
+  var panels=document.querySelectorAll("details.promptPanel");
+  panels.forEach(function(panel){
+    var summary=panel.querySelector("summary");
+    var pre=panel.querySelector("pre");
+    if(!summary || !pre || summary.querySelector(".copyBtn")) return;
+    var btn=document.createElement("button");
+    btn.type="button"; btn.className="btn sm copyBtn"; btn.textContent="コピー";
+    btn.style.cssText="margin:0 0 0 8px;padding:2px 10px;font-size:11px;vertical-align:middle";
+    btn.onclick=function(ev){
+      ev.preventDefault(); ev.stopPropagation();
+      copyTextToClipboard(pre.textContent).then(function(){
+        var orig=btn.textContent; btn.textContent="コピーしました";
+        setTimeout(function(){ btn.textContent=orig; }, 1500);
+      }).catch(function(e){ setMsg("コピーに失敗しました: "+((e&&e.message)||e),true); });
+    };
+    summary.appendChild(btn);
+  });
+}
+
+/* ==================== 汎用: canvasにdataURLを表示 ==================== */
+function showImageOnCanvas(canvasEl, dataUrl){
+  return P3D.scannerLoadImage(dataUrl).then(function(img){
+    var w=img.naturalWidth, h=img.naturalHeight;
+    canvasEl.width=w; canvasEl.height=h;
+    canvasEl.getContext("2d").drawImage(img,0,0,w,h);
+    return img;
+  });
+}
+
+/* ==================== 汎用: dataURLをファイルとしてダウンロード ==================== */
+// 手動フォールバック運用(外部のAI Studio等にプロンプト+画像を持ち込む)のため、
+// 各タブの画像をローカルに保存できるようにする。
+function downloadDataUrl(dataUrl, filename){
+  var a=document.createElement("a");
+  a.href=dataUrl; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* ==================== タブ1: 画像投入 ==================== */
+$("uploadBtn").onclick=function(){ $("uploadFile").click(); };
+$("uploadFile").onchange=function(e){
+  var f=e.target.files && e.target.files[0];
+  if(!f) return;
+  setMsg("画像を読み込み中...");
+  P3D.scannerFileToDataUrl(f).then(function(dataUrl){
+    return P3D.scannerLoadImage(dataUrl);
+  }).then(function(img){
+    var resized=P3D.scannerResizeImageToSquare(img,1024);
+    state.sourceDataUrl=resized.dataUrl;
+    var c=$("uploadPreview"); c.width=1024; c.height=1024;
+    c.getContext("2d").drawImage(resized.canvas,0,0);
+    $("uploadNextBtn").disabled=false;
+    $("uploadDownloadBtn").disabled=false;
+    setMsg("1024×1024にリサイズしました。");
+  }).catch(function(e){ setMsg("画像の読み込みに失敗しました: "+e.message,true); });
+};
+$("uploadDownloadBtn").onclick=function(){
+  if(!state.sourceDataUrl){ setMsg("先に画像を選んでください。",true); return; }
+  downloadDataUrl(state.sourceDataUrl, "ghost_scanner_source_1024.png");
+};
+$("uploadNextBtn").onclick=function(){
+  unlockNext("upload"); switchTab("front");
+};
+
+/* ==================== プロンプト文言(GHOST_SCANNER_PLAN.mdのプロンプトA〜Fを逐語使用) ==================== */
+// 指示過多(条件の数・繰り返しの強調)が等身の崩れなど無関係な劣化を招く
+// ことが実地検証で分かったため、条件を絞り簡潔にしてある。また「輪郭線を
+// 描くな」という否定形の指示は画像生成モデルに無視されやすいため、
+// 「外周の境界を背景色(白)で描け」という肯定形の指示に置き換えている
+// (結果的に見えなくなるが、モデルへの指示としては積極的な行為として
+// 伝わるため守られやすい)。
+var PROMPT_A =
+"入力画像は、ある2Dアニメ調キャラクターの原画です(ポーズ・アングルは不定)。\n"+
+"このキャラクターのデザイン(顔立ち・髪型・髪色・瞳の色・服装・配色・\n"+
+"アクセサリー)をそのまま維持して、同じキャラクターを以下の条件で撮り直した\n"+
+"1枚の画像を生成してください。\n\n"+
+"## 生成条件\n"+
+"1. **ポーズ**: 直立・Tポーズ(両腕を真横に一直線に伸ばす。手のひらは正面\n"+
+"   (カメラ側)を向ける。脚は肩幅程度に開くか揃える。膝は曲げない)\n"+
+"2. **アングル**: 完全な正面(カメラ方向を向く。体・顔とも横向き成分を含まない)\n"+
+"3. **体型比率**: 頭の大きさに対する身長の比率(頭身)を入力画像と完全に\n"+
+"   一致させること。デフォルメ・幼児化・頭身を低くする変更はしないこと\n"+
+"4. **構図**: キャラクターの人体の正中線(頭頂から股間を通る中心線)を、\n"+
+"   画像の水平方向の中心(x=画像幅の50%)に一致させる\n"+
+"5. **外周の縁取り**: キャラクター全体の一番外側の輪郭線(体・髪・服の\n"+
+"   シルエットと背景との境目)は、背景と同じ白(#FFFFFF)で描いてください\n"+
+"   (=境目に色の付いた縁取りが見えない状態)。それ以外の、パーツ同士の\n"+
+"   内部の境界線(髪の房の分かれ目、服のシワ、目や装飾のライン等)は\n"+
+"   入力画像通りの線画スタイルで描いてください\n"+
+"6. **背景**: 均一な白(#FFFFFF)の単色固定。透過・グラデーション・影は使わない\n"+
+"7. **余白**: 頭頂からつま先まで画像内に収まるよう適度な余白を残す\n\n"+
+"出力は画像のみとしてください。";
+
+// side/back共通の生成条件テンプレート。viewLabel(「側面図」/「背面図」)と
+// facingClause(向きの指定、backでは空文字列)がside/backで異なるほか、
+// 「腕を描画しない」条件はTポーズの腕がTの横棒のように突き出て見える
+// side特有の問題への対処であり、backでは腕は普通に見えるため不要
+// (armClauseがfalseなら条件自体を省き、腕には一切言及しない)。
+// 条件を配列で組み立ててから採番することで、条件の有無に応じて番号が
+// ズレないようにしている。
+// PROMPT_Aと同じ理由(指示過多を避ける・否定形より肯定形)で簡潔化してある。
+function genConditionsBody(viewLabel, angleLabel, facingClause, armClause){
+  var conditions = [
+    "**アングル**: 完全な"+angleLabel+"。"+facingClause+"体の向きが単一で\n"+
+      "   一貫していること(横向きの顔・体で、正面成分を含まない)"
+  ];
+  if(armClause){
+    // ★2026-07-09: 「腕は描かないで」だけでは、腕(肌)は消えても袖(服の生地)
+    // だけが宙に浮いた状態で残ってしまう実例が確認されたため、袖・手袋・
+    // 腕時計等「腕を覆う/腕に装着するもの全て」も明示的に対象へ含める。
+    conditions.push(
+      "**腕は描画しない**: 入力画像はTポーズで腕を真横に伸ばしていますが、\n"+
+      "   "+viewLabel+"でその腕をそのまま描くと横棒のように突き出て不自然になるため、\n"+
+      "   肩から下の腕・肘・手首・手を描かないでください(胴体の輪郭に隠れている\n"+
+      "   ものとして扱う)。**その腕を覆う袖・手袋・腕時計・リストバンド等、腕に\n"+
+      "   装着/密着しているもの一式も、腕本体と一緒に描かないでください**\n"+
+      "   (肩の付け根で切れた袖だけが宙に浮いて残る、といった状態を避けるため)。\n"+
+      "   腕関連以外(胴体・脚・頭部・髪・首回りの装飾)は通常通り描いてください"
+    );
+  }
+  conditions.push(
+    "**体型比率**: 頭身を正面図と完全に一致させること(デフォルメしない)",
+    "**構図**: キャラクターの人体の正中線を画像の水平方向の中心に一致させる",
+    "**外周の縁取り**: キャラクター全体の一番外側の輪郭線(体・髪・服の\n"+
+      "   シルエットと背景との境目)は、背景と同じ白(#FFFFFF)で描いてください。\n"+
+      "   それ以外のパーツ内部の境界線(服のシワ、髪の房の分かれ目、装飾のライン等)\n"+
+      "   は入力画像通りの線画スタイルで描いてください",
+    "**背景**: 均一な白(#FFFFFF)の単色固定。透過・グラデーション・影は使わない",
+    "**余白**: 頭頂からつま先まで画像内に収まるよう適度な余白を残す"
+  );
+  var numbered = conditions.map(function(c,i){ return (i+1)+". "+c; }).join("\n");
+  return "入力画像は、あるキャラクターの正面Tポーズの立ち絵です。このキャラクターの\n"+
+"デザイン(顔立ち・髪型・髪色・瞳の色・服装・配色・アクセサリー)をそのまま\n"+
+"維持して、同じキャラクターを"+angleLabel+"から見た"+viewLabel+"として撮り直した\n"+
+"1枚の画像を生成してください。\n\n"+
+"## 生成条件\n"+
+numbered+"\n\n"+
+"出力は画像のみとしてください。";
+}
+function promptSide(){
+  return genConditionsBody("側面図", "真横(90度)",
+    "必ず**画面に向かって右向き**(キャラクターの顔・つま先が画面の右側を向いている状態)にしてください。",
+    true);
+}
+// ★2026-07-09(左右非対称キャラ対応): side(右向き)と全く同じ生成条件で、
+// 向きだけを左向きに変えたもの。同一セッション(genHistory)で直前にside
+// (右向き)を生成済みという前提のプロンプトなので、体型比率・デザイン等の
+// 指示文はside/backと共通のgenConditionsBody任せにしつつ、会話の続きである
+// ことを明示して「同じキャラクターを反対側から見た絵」であることを強調する。
+function promptLeftSide(){
+  return genConditionsBody("側面図", "真横(90度)",
+    "必ず**画面に向かって左向き**(キャラクターの顔・つま先が画面の左側を向いている状態)にしてください。"+
+    "直前に生成した右向きの側面図と同一キャラクター・同一体型比率で、左右を反転しただけの向きです。",
+    true);
+}
+function promptBack(){
+  // 背面は左右対称に近く、向きを指定する意味が薄いためfacingClauseは空にする。
+  // 背面では腕が自然に見えるため、armClauseはfalse(腕には一切言及しない)。
+  return genConditionsBody("背面図", "背後(180度)", "", false);
+}
+
+// 添付画像は、こちら側で必ず縦横1000×1000にレターボックスリサイズ済みの
+// コピーを送る(scannerBuildDetectionCopy参照)。Geminiの自己申告サイズを
+// 信用してスケール補正する旧方式(rescalePointsToNaturalSize)はズレの原因
+// だったため廃止し、常に1000×1000固定という前提で座標を答えさせる
+// (0〜1000の値は正規化座標と数値的に一致するため、Geminiが検出タスクで
+// 学習している慣習にも合う)。返ってきた座標はP3D.scannerDetectionPointToNatural
+// で実寸へ機械的に逆変換する。
+var PROMPT_D =
+"あなたは2Dアニメ調キャラクター立ち絵の画像1枚から、3Dモデル生成用の骨格関節点+\n"+
+"顔の目印(合計22点)を推定する専門家です。添付画像は、キャラクターがTポーズ(直立・\n"+
+"両腕を真横に一直線に伸ばした姿勢)で描かれた正面(front)の、**縦横\n"+
+"1000×1000ピクセルにリサイズ済み**の画像です(キャラクターは中央に余白付きで\n"+
+"配置されています)。座標は必ずこの1000×1000のピクセル座標(0〜1000の範囲)で\n"+
+"答えてください。\n\n"+
+"## 手順0: 必ず最初に行うキャリブレーション(内部処理・出力不要)\n"+
+"点を打つ前に、必ず以下を画像から直接読み取ってください(一般的な体型比率の\n"+
+"知識だけで推測せず、この画像自身のシルエット輪郭を見て判断すること):\n"+
+"- キャラクターのシルエット(髪を含む)の最上端・最下端のy座標\n"+
+"- 胴体の左右幅が最も広い場所(肩)と最も狭い場所(ウエスト)のx座標\n"+
+"- 脚の分岐点(股)のy座標\n"+
+"このキャリブレーションを基準にして、以降の各点を「画像全体に対する一般的な\n"+
+"比率」ではなく「このキャラクター自身のシルエット輪郭のどこに実際に線・面の\n"+
+"境目があるか」で判断してください。よくある失敗は、頭身比率の思い込みで\n"+
+"下半身(膝から下)を実際より短く推定してしまうことです。膝・足首・つま先は\n"+
+"必ずシルエットの輪郭線(脚と靴の境目、靴の先端)を直接見て置いてください。\n\n"+
+"## 左右の定義(重要)\n"+
+"_L/_Rは「画面に向かって左側にあるものが_L、右側にあるものが_R」です\n"+
+"(本人から見た左右ではありません。画像上でそのまま左にある方が_L、\n"+
+"右にある方が_Rと覚えてください)。服・髪で隠れていても、実際の体の\n"+
+"構造上の位置を透視して推定してください。\n\n"+
+"## 手順1: 各点の詳細な定義\n\n"+
+"- **head_top**: 髪型を含めた輪郭全体の最上端の1点。つむじや髪飾りの先端では\n"+
+"  なく、シルエット全体で最もyが小さい点。\n"+
+"- **chin**: 顔の輪郭(髪ではなく肌の輪郭)で最もyが大きい点。前髪や後ろ髪の\n"+
+"  影に惑わされず、顔の肌色パーツの下端を見ること。\n"+
+"- **eye_L/R**: 目(黒目・瞳)の中心点。前髪で一部隠れていても、見えている\n"+
+"  瞳の輪郭から中心位置を推定すること。\n"+
+"- **mouth_L/R**: 口の左右の端(口角)。口が閉じている/開いている、笑って\n"+
+"  いる等の表情差はあるが、口の輪郭が横方向に一番広がっている左右の点を取る。\n"+
+"- **clavicle_L/R**: 首の付け根と肩関節の中間あたりの、体幹の輪郭線上の点。\n"+
+"  肩関節(shoulder)よりも中心寄り・やや上。服の首周りの縫い目があれば目安になる。\n"+
+"- **shoulder_L/R**: 腕を体幹から分離する回転軸の位置。Tポーズで腕が真横に\n"+
+"  伸びている場合、「体幹の輪郭線が終わり、腕の輪郭線が始まる境目のx座標」を\n"+
+"  軸に、その高さでの体幹側面のyと一致させる。腕の一番外側の輪郭(二の腕の\n"+
+"  盛り上がり)と混同しないこと。\n"+
+"- **elbow_L/R**: Tポーズで腕が完全に伸びている場合、肩と手首を結ぶ直線の\n"+
+"  ほぼ中間点(腕の長さの45〜55%あたり)。腕の輪郭線に実際にわずかな\n"+
+"  くびれ・曲がりが描かれていればそこを優先する。腕が真横一直線でなく\n"+
+"  少し下がって描かれている場合は、その角度に沿って肩から中間の位置を取る。\n"+
+"- **wrist_L/R**: 前腕と手のひらの境目(手首の骨のくびれ、または袖口・\n"+
+"  リストバンド等の装飾の位置)。指先まで数えないこと。\n"+
+"- **waist_L/R**: 体幹の左右輪郭のうち、胸から腰にかけて最もx方向にくびれて\n"+
+"  いる(中心線に最も近づいている)高さの左右の点。服のベルト・リボンの\n"+
+"  位置が目安になることが多い。\n"+
+"- **hip**: 両脚のシルエットが分岐を始める、股間に相当するy座標の中心\n"+
+"  (x=シルエット中心線)。スカート等で脚の分岐が見えない場合は、脚の\n"+
+"  付け根の輪郭が左右に開き始める高さを股の位置として推定する。\n"+
+"- **knee_L/R**: 脚のシルエット輪郭で、太もも(上)とすね(下)の境目に\n"+
+"  あたるくびれ・曲がりの位置。ズボン等のシワや服の切り替え線があれば\n"+
+"  目安にする。**過去の失敗傾向として、膝・足首・つま先を実際より上\n"+
+"  (体に近い側)に置きすぎることが多いため、シルエット輪郭の下端付近まで\n"+
+"  しっかり目を配ること。**\n"+
+"- **ankle_L/R**: すねと足(靴)の境目。靴を履いている場合は、靴の甲の\n"+
+"  盛り上がりが始まる位置。\n"+
+"- **toe_L/R**: 足/靴の輪郭で最もyが大きい(=シルエット全体の下端に最も\n"+
+"  近い)点のうち、つま先側の点。**この点はキャラクター全体のシルエット\n"+
+"  最下端とほぼ同じ高さになることが多い**(踵より前に出ている場合)。\n\n"+
+"## 手順2: セルフチェック\n"+
+"JSON出力前に、以下を自己確認してください:\n"+
+"1. head_topのyは、あなたが手順0で読み取ったシルエット最上端のyと一致しているか\n"+
+"2. toe_L/toe_Rのyは、シルエット最下端のyに近いか(大きく上に外れていないか)\n"+
+"3. _Lと付く点がすべて画像の左半分側、_Rと付く点がすべて画像の右半分側に\n"+
+"   あるか(中心線を挟んで正しい側にあるか)を再確認する\n"+
+"4. shoulder→elbow→wristが概ね直線(Tポーズ)上に並んでいるか\n"+
+"5. eye_L/eye_Rおよびmouth_L/mouth_Rが、head_topとchinの間(顔の範囲内)に\n"+
+"   収まっているか\n\n"+
+"## 出力形式\n"+
+"このAPIレスポンスは自動処理されるため、説明文やMarkdownのコードフェンスは\n"+
+"付けず、有効なJSONオブジェクトのみを出力してください。画像は1000×1000固定\n"+
+"なのでimageフィールドは不要です。\n\n"+
+"{\n"+
+'  "points_px": {\n'+
+'    "head_top": {"x": 0, "y": 0},\n'+
+'    "chin": {"x": 0, "y": 0},\n'+
+'    "eye_L": {"x": 0, "y": 0},\n'+
+'    "eye_R": {"x": 0, "y": 0},\n'+
+'    "mouth_L": {"x": 0, "y": 0},\n'+
+'    "mouth_R": {"x": 0, "y": 0},\n'+
+'    "clavicle_L": {"x": 0, "y": 0},\n'+
+'    "clavicle_R": {"x": 0, "y": 0},\n'+
+'    "shoulder_L": {"x": 0, "y": 0},\n'+
+'    "shoulder_R": {"x": 0, "y": 0},\n'+
+'    "elbow_L": {"x": 0, "y": 0},\n'+
+'    "elbow_R": {"x": 0, "y": 0},\n'+
+'    "wrist_L": {"x": 0, "y": 0},\n'+
+'    "wrist_R": {"x": 0, "y": 0},\n'+
+'    "waist_L": {"x": 0, "y": 0},\n'+
+'    "waist_R": {"x": 0, "y": 0},\n'+
+'    "hip": {"x": 0, "y": 0},\n'+
+'    "knee_L": {"x": 0, "y": 0},\n'+
+'    "knee_R": {"x": 0, "y": 0},\n'+
+'    "ankle_L": {"x": 0, "y": 0},\n'+
+'    "ankle_R": {"x": 0, "y": 0},\n'+
+'    "toe_L": {"x": 0, "y": 0},\n'+
+'    "toe_R": {"x": 0, "y": 0}\n'+
+"  }\n"+
+"}";
+
+var PROMPT_F =
+"添付の3枚の画像(front=正面、side=側面、back=背面)は、同一キャラクターの\n"+
+"Tポーズ立ち絵です。これらを横断的に見て、以下の2種類に分類してください。\n\n"+
+"## 分類基準\n"+
+"- **body(通常人体)**: 頭・首・胴・腕・脚そのもののシルエット、および\n"+
+"  肌や体に密着してその輪郭に沿う衣服(体のラインをそのままなぞる\n"+
+"  シャツ・タイツ・手袋・靴下など)。**このカテゴリの領域は出力不要です**\n"+
+"  (デフォルトで全てbody扱いにするため)。\n"+
+"- **accessory(通常人体の輪郭からはみ出るもの)**: 体そのものの輪郭を\n"+
+"  超えて外側に広がる・突き出るすべてのもの。判断基準は**「その部分を\n"+
+"  取り除いたときに、下の体のシルエットがそのまま単純な円柱/紡錘形に\n"+
+"  近い形で残るか」**です。例:\n"+
+"  - スカート・マント・広がった袖・大きなリボン(体の輪郭より外側に\n"+
+"    張り出す衣服)\n"+
+"  - 髪の房・ツインテール・アホ毛など、頭部の基本シルエットを超えて\n"+
+"    伸びる髪\n"+
+"  - 帽子・ヘッドホン・眼鏡・獣耳・尻尾・翼・武器・鞄などの装着物\n\n"+
+"体に密着した服(通常のTシャツ・ズボン・靴等、体のラインに沿うもの)は\n"+
+"accessoryに含めないでください。迷った場合は「取り除いても体の基本\n"+
+"シルエットが崩れないか」で判断してください。\n\n"+
+"## 髪の扱い(重要)\n"+
+"**髪は、地肌に短く密着した坊主・刈り上げのような例外を除き、基本的に\n"+
+"全体をaccessory扱いにしてください**(頭部の基本シルエットからはみ出る\n"+
+"部分だけでなく、髪全体を対象とする)。理由: 髪は体の動きと異なる揺れ方を\n"+
+"する(3Dモデルとして独立して動かしたい)ため。\n\n"+
+"さらに、**視覚的にひとまとまりに見える房(ふさ)ごとに、別々のaccessoryとして\n"+
+"分割してください**(1つの巨大な「髪」としてまとめないこと)。分割の目安:\n"+
+"- 頭皮に密着して頭部を覆う髪(前髪・後ろ髪)の境界は、芸術的な「どこまでが\n"+
+"  前髪か」という判断ではなく、**頭頂(front/side/backいずれの画像を見る場合も\n"+
+"  共通して、前から見た頭部シルエットの最も高い点)を基準に機械的に分割して\n"+
+"  ください**。頭頂を通り、そこより前方(顔側)にある髪を「前髪」、後方に\n"+
+"  ある髪を「後ろ髪」としてください(名称はこれまで通りでよい)。\n"+
+"  **頭頂そのものは必ず前髪側に含めてください**(頭頂を後ろ髪側にしてしまうと、\n"+
+"  前からは見えないはずの後ろ髪が前面に見えてしまうため)。側面図ではこの境界は\n"+
+"  だいたい耳のあたりを通ることが多いですが、これは目安に過ぎず、優先すべき\n"+
+"  基準は常に頭頂です。front/side/backのどの画像から判断する場合も、この同じ\n"+
+"  頭頂基準で一貫して分類してください。実行のたびに境界がブレないよう、\n"+
+"  芸術的な房の切れ目ではなく、この幾何的な基準を優先してください\n"+
+"- ツインテール・お団子・三つ編みなど、頭部から独立して左右や複数に分かれて\n"+
+"  垂れ下がる房は、上記の前髪/後ろ髪の分割とは別に、これまで通り房ごとに\n"+
+"  個別のaccessoryにする(例: 「左ツインテール」「右ツインテール」)。これらは\n"+
+"  頭部に密着せず自由に揺れる部分なので、上記の中心線分割の対象外です\n"+
+"- アホ毛・後れ毛など、他の髪の塊から明確に独立して飛び出している一房も\n"+
+"  個別のaccessoryにする\n"+
+"- 房の見分けが付かないほど一体化した髪型(お椀型のボブ等)の場合も、\n"+
+"  頭部を覆う部分は上記の中心線基準で前髪/後ろ髪の2つに分割してください\n\n"+
+"髪のaccessoryの取付ボーンは、頭部に根本が近いものは`head`(rigid)、\n"+
+"背中まで長く流れる後ろ髪やツインテールのように体の動きに緩やかに追従\n"+
+"させたいものは`head`+`neck`や`head`+`chest`のような複数ボーン(soft)を\n"+
+"検討してください。\n\n"+
+"## 出力手順(このステップでは領域(regions)は出力不要です。まず「何を\n"+
+"抽出するか」の一覧を確定させ、各accessoryの範囲指定は後続のステップで\n"+
+"1件ずつ個別に行います。色の割当はこちら側で機械的に行うため、colorフィールド\n"+
+"は出力不要です)\n"+
+"1. 各accessoryについて、取付ボーンを以下から1つ以上選んでください:\n"+
+"   hips, torso, chest, neck, head, clavicle_L, upperarm_L, forearm_L,\n"+
+"   wrist_L, hand_L, clavicle_R, upperarm_R, forearm_R, wrist_R, hand_R,\n"+
+"   thigh_L, shin_L, foot_L, toe_L, thigh_R, shin_R, foot_R, toe_R\n"+
+'   (1つのボーンに固定なら"rigid"、複数ボーンにまたがり体の動きに追従\n'+
+'   するなら"soft"。例: スカート→hips+thigh_L+thigh_R、soft。\n'+
+'   ヘッドホン→head、rigid。尻尾→hips、rigid)\n'+
+"2. 各accessoryについて、front/side/backのうちどの面に実際に写っているか\n"+
+"   (visible_views)を挙げてください(隠れて見えない面は含めない)\n"+
+"3. 各accessoryについて、`reason`には**なぜaccessory(体の輪郭からはみ出る\n"+
+"   もの)と判断したか**という理由だけでなく、**キャラクターの体のどの部分に、\n"+
+"   具体的にどのように付いている/生えているか**という位置の説明も必ず含めて、\n"+
+"   文章で具体的に書いてください。この`reason`は後続の別の作業(この画像を\n"+
+"   色分けして塗り分ける作業)で、今回のあなたの判断根拠をそのまま引き継ぐために\n"+
+"   使われます。今回のこの会話の記憶を持たない状態で読んでも、この文章だけを\n"+
+"   頼りに画像上で同じ部分を過不足なく特定できるくらい具体的にしてください\n"+
+"   (例: 「後頭部の生え際あたりから肩甲骨のあたりまで、背中に沿って左右2房に\n"+
+"   分かれて垂れ下がる長い髪。体幹の輪郭より外側にはみ出て背中に張り付いて\n"+
+"   いるためaccessory」)\n\n"+
+"## 出力形式(JSONのみ、説明文・コードフェンス不要。regions/colorフィールドは\n"+
+"含めないでください)\n"+
+"{\n"+
+'  "accessories": [\n'+
+"    {\n"+
+'      "name": "例: スカート",\n'+
+'      "mode": "soft",\n'+
+'      "bones": ["hips", "thigh_L", "thigh_R"],\n'+
+'      "reason": "腰の位置から円錐状に大きく広がり、太もものシルエットより外側に\\n'+
+'張り出しているプリーツ状の布。腰のベルト付近から膝上あたりまでの範囲を覆う",\n'+
+'      "visible_views": ["front", "side", "back"]\n'+
+"    }\n"+
+"  ]\n"+
+"}";
+
+// ステップ2(タブ6後半): ステップ1で確定した1件のaccessoryについて、
+// front/side/back画像から実際の領域(多角形)を精密に抽出する。1回のAPI呼び出しで
+// 全accessoryをまとめて処理していた旧版は精度が低かったため、1件ずつ個別に
+// 呼び出す(新規セッション、対象を絞ることで注意を集中させる)。
+// 頂点数を6〜12点から25点に増やし、より滑らかな輪郭を取れるようにする。
+// 添付する各面の画像は、必ずscannerBuildDetectionCopy()で1000×1000に
+// レターボックスリサイズしたコピーを使う(ランドマーク推定と同じ理由で、
+// 自己申告サイズへの依存を廃止するため)。返ってきた座標は各面ごとの
+// resize情報で実寸へ逆変換する(calibrateRegionsInPlace呼び出し元を参照)。
+$("frontPromptText").textContent=PROMPT_A;
+$("sidePromptText").textContent=promptSide();
+$("leftSidePromptText").textContent=promptLeftSide();
+$("backPromptText").textContent=promptBack();
+$("lmPromptText").textContent=PROMPT_D;
+$("accPromptText").textContent=PROMPT_F;
+attachPromptCopyButtons();
+
+/* ==================== タブ2〜4共通: front/side/back生成(常に新規セッション) ==================== */
+// GHOST_SCANNER_PLAN.md: front/side/back生成は毎回新規セッション(会話履歴を持ち越さない)。
+// 単一責務: 「生成する」「確定する」「次へ進む」をそれぞれ別関数に分ける。
+// startsSession: true(front)なら生成前にstate.genHistoryをリセットし、新しい
+// セッションを開始する。false(side/leftSide/back)ならstate.genHistoryを
+// そのまま引き継ぎ、成功したら更新する(GHOST_SCANNER_PLAN.md「左右非対称
+// キャラ対応」節: front→side→leftSide→backを同一会話にすることで、左右の
+// 資産の割り当てがビューごとにブレるのを防ぐ)。
+function makeGenTab(name, promptText, refDataUrlFn, nextTabName, startsSession){
+  var genBtn=$(name+"GenBtn"), retryBtn=$(name+"RetryBtn"), confirmBtn=$(name+"ConfirmBtn"),
+      nextBtn=$(name+"NextBtn"), preview=$(name+"Preview"),
+      uploadBtn=$(name+"UploadBtn"), uploadFile=$(name+"UploadFile"), downloadBtn=$(name+"DownloadBtn");
+  if(downloadBtn){
+    downloadBtn.onclick=function(){
+      if(!state[name].dataUrl){ setMsg("先に生成/アップロードしてください。",true); return; }
+      downloadDataUrl(state[name].dataUrl, "ghost_scanner_"+name+".png");
+    };
+  }
+  // API生成に失敗した場合の代替手段: 外部(AI Studio等)で手動生成した画像を
+  // このタブの結果として取り込む(コピーしたプロンプトをそのまま使う想定)。
+  // 取り込み後は生成成功時と同じ状態(dataUrl設定・確定待ち)にする。
+  if(uploadBtn && uploadFile){
+    uploadBtn.onclick=function(){ uploadFile.click(); };
+    uploadFile.onchange=function(e){
+      var f=e.target.files && e.target.files[0];
+      if(!f) return;
+      setMsg("画像を読み込み中...");
+      P3D.scannerFileToDataUrl(f).then(function(dataUrl){
+        state[name].dataUrl=dataUrl; state[name].confirmed=false;
+        return showImageOnCanvas(preview, dataUrl);
+      }).then(function(){
+        confirmBtn.disabled=false;
+        if(downloadBtn) downloadBtn.disabled=false;
+        setMsg((TAB_LABEL[name]||name)+"を手動でアップロードしました。問題なければ「この画像で確定」してください。");
+      }).catch(function(e){ setMsg("画像の読み込みに失敗しました: "+e.message,true); });
+      uploadFile.value="";
+    };
+  }
+  function doGenerate(){
+    var ref=refDataUrlFn();
+    if(!ref){ setMsg("参照画像がありません。前のタブを確認してください。",true); return; }
+    if(startsSession) state.genHistory=[];
+    genBtn.disabled=true; retryBtn.disabled=true;
+    setMsg((TAB_LABEL[name]||name)+"を生成中...(数十秒かかる場合があります)");
+    P3D.scannerGenerateImageInSession(promptText, ref, state.genHistory).then(function(res){
+      state[name].dataUrl=res.dataUrl; state[name].confirmed=false;
+      state.genHistory=res.history;
+      return showImageOnCanvas(preview, res.dataUrl);
+    }).then(function(){
+      genBtn.disabled=false; retryBtn.disabled=false; confirmBtn.disabled=false;
+      if(downloadBtn) downloadBtn.disabled=false;
+      setMsg("生成しました。問題なければ「この画像で確定」してください。");
+    }).catch(function(e){
+      genBtn.disabled=false;
+      setMsg("生成に失敗しました: "+e.message,true);
+    });
+  }
+  genBtn.onclick=doGenerate;
+  retryBtn.onclick=doGenerate;
+  confirmBtn.onclick=function(){
+    if(!state[name].dataUrl){ setMsg("先に生成してください。",true); return; }
+    state[name].confirmed=true;
+    nextBtn.disabled=false;
+    setMsg((TAB_LABEL[name]||name)+"を確定しました。");
+  };
+  nextBtn.onclick=function(){
+    unlockNext(name); switchTab(nextTabName);
+  };
+}
+makeGenTab("front", PROMPT_A, function(){ return state.sourceDataUrl; }, "side", true);
+makeGenTab("side", promptSide(), function(){ return state.front.dataUrl; }, "leftSide", false);
+makeGenTab("leftSide", promptLeftSide(), function(){ return state.front.dataUrl; }, "back", false);
+makeGenTab("back", promptBack(), function(){ return state.front.dataUrl; }, "lm", false);
+// leftSideは左右非対称なアクセサリーが無いキャラでは不要なため、スキップ
+// できるボタンを用意する(スキップしてもside/backのセッション継続には
+// 影響しない。単にstate.leftSide.dataUrlが空のまま次に進むだけ)。
+$("leftSideSkipBtn").onclick=function(){
+  unlockNext("leftSide"); switchTab("back");
+  setMsg("側面(左)をスキップしました。左右非対称なアクセサリーがある場合は、後からこのタブに戻って生成できます。");
+};
+
+/* ==================== タブ5: ランドマーク(会話継続、チャットで反復修正) ==================== */
+function appendChatLine(logEl, role, text){
+  var d=document.createElement("div");
+  d.className="chatMsg "+role;
+  var b=document.createElement("b"); b.textContent = role==="user" ? "あなた" : "Gemini";
+  d.appendChild(b);
+  var t=document.createElement("div"); t.textContent=text;
+  d.appendChild(t);
+  logEl.appendChild(d);
+  logEl.scrollTop=logEl.scrollHeight;
+}
+// Geminiに送る画像は必ずscannerBuildDetectionCopy()で1000×1000にレターボックス
+// リサイズしたコピーにする(自己申告サイズへの依存=旧rescalePointsToNaturalSize
+// 方式は廃止)。返ってきた1000×1000空間の座標を、そのコピー作成時のresize情報
+// (scale/ox/oy)で実寸へ機械的に逆変換する。
+function detectionPointsToNatural(pointsPx, resize){
+  var out={};
+  Object.keys(pointsPx).forEach(function(k){
+    out[k]=P3D.scannerDetectionPointToNatural(pointsPx[k], resize);
+  });
+  return out;
+}
+// 上記の決定論的な逆変換だけでは吸収しきれない残差を
+// 手動で補正できるようにする、全点一括の平行移動+倍率(画像中心基準の拡大縮小)。
+// プレビュー上のドラッグ/ホイール/ピンチでdx,dy,scaleを対話的に決め、
+// 「この位置で反映」でstate.landmarks.pointsPxに焼き込む。この確定値は
+// state.calibrationに累積し、タブ6-2のアクセサリー領域取得にも同じ値を
+// 自動適用する(除外マスク・アクセサリーもGemini由来の座標なので、同じ
+// ズレの傾向を持つことが多いため)。
+// pt: {x,y}(画像原寸ピクセル座標)、center: {cx,cy}(倍率の基準点、通常は画像中心)
+function applyCalibration(pt, calib, center){
+  return {
+    x: center.cx + (pt.x-center.cx)*calib.scale + calib.dx,
+    y: center.cy + (pt.y-center.cy)*calib.scale + calib.dy
+  };
+}
+P3D.scannerApplyCalibration = applyCalibration;
+function currentTabOffset(){
+  return {
+    dx: Number($("lmOffsetX").value)||0,
+    dy: Number($("lmOffsetY").value)||0,
+    scale: Number($("lmOffsetScale").value)||1
+  };
+}
+function setTabOffsetInputs(o){
+  $("lmOffsetX").value=Math.round(o.dx*10)/10;
+  $("lmOffsetY").value=Math.round(o.dy*10)/10;
+  $("lmOffsetScale").value=Math.round(o.scale*1000)/1000;
+}
+function refreshLmPreview(){
+  var img=state.landmarks._img;
+  if(!img || !state.landmarks.pointsPx) return;
+  var c=$("lmPreview");
+  var maxDim=900, iw=img.naturalWidth, ih=img.naturalHeight;
+  var dispScale=Math.min(1,maxDim/Math.max(iw,ih));
+  c.width=Math.round(iw*dispScale); c.height=Math.round(ih*dispScale);
+  var o=currentTabOffset();
+  var center={cx:iw/2, cy:ih/2};
+  var offsetPts=state.landmarks.pointsPx;
+  if(o.dx||o.dy||o.scale!==1){
+    offsetPts={};
+    Object.keys(state.landmarks.pointsPx).forEach(function(k){
+      offsetPts[k]=applyCalibration(state.landmarks.pointsPx[k], o, center);
+    });
+  }
+  P3D.scannerDrawLandmarkPreview(c.getContext("2d"), img, c.width, c.height, offsetPts, dispScale);
+}
+$("lmOffsetX").addEventListener("input", refreshLmPreview);
+$("lmOffsetY").addEventListener("input", refreshLmPreview);
+$("lmOffsetScale").addEventListener("input", refreshLmPreview);
+$("lmOffsetReset").onclick=function(){
+  setTabOffsetInputs({dx:0,dy:0,scale:1});
+  refreshLmPreview();
+};
+$("lmOffsetApply").onclick=function(){
+  var o=currentTabOffset();
+  if(!state.landmarks.pointsPx || (!o.dx&&!o.dy&&o.scale===1)) return;
+  var img=state.landmarks._img;
+  var center={cx:img.naturalWidth/2, cy:img.naturalHeight/2};
+  Object.keys(state.landmarks.pointsPx).forEach(function(k){
+    state.landmarks.pointsPx[k]=applyCalibration(state.landmarks.pointsPx[k], o, center);
+  });
+  // 累積: 平行移動は加算、倍率は乗算(この順で今回のoを既存の補正の後に適用)。
+  state.calibration.dx += o.dx;
+  state.calibration.dy += o.dy;
+  state.calibration.scale *= o.scale;
+  setTabOffsetInputs({dx:0,dy:0,scale:1});
+  refreshLmPreview();
+  setMsg("補正(dx="+o.dx+", dy="+o.dy+", 倍率="+o.scale+")を反映しました。以後アクセサリー領域取得にも同じ補正を自動適用します。");
+};
+// ---- プレビュー上のドラッグ(平行移動)・ホイール/ピンチ(拡大縮小) ----
+(function setupLmPreviewDragZoom(){
+  var canvas=$("lmPreview");
+  var dragging=false, dragStart=null, dragBaseOffset=null;
+  function toImageDelta(dxCss, dyCss){
+    // 表示canvasはdispScaleで縮小表示しているため、画面上のpx移動量を
+    // 画像原寸px単位に変換してから既存のdx,dyに加算する。
+    var img=state.landmarks._img;
+    if(!img) return {x:0,y:0};
+    var dispScale = canvas.width / img.naturalWidth;
+    return { x: dxCss/dispScale, y: dyCss/dispScale };
+  }
+  canvas.addEventListener("mousedown", function(e){
+    dragging=true; dragStart={x:e.clientX,y:e.clientY}; dragBaseOffset=currentTabOffset();
+    canvas.style.cursor="grabbing";
+  });
+  window.addEventListener("mousemove", function(e){
+    if(!dragging) return;
+    var d=toImageDelta(e.clientX-dragStart.x, e.clientY-dragStart.y);
+    setTabOffsetInputs({dx:dragBaseOffset.dx+d.x, dy:dragBaseOffset.dy+d.y, scale:dragBaseOffset.scale});
+    refreshLmPreview();
+  });
+  window.addEventListener("mouseup", function(){ dragging=false; canvas.style.cursor="grab"; });
+  canvas.addEventListener("wheel", function(e){
+    e.preventDefault();
+    var o=currentTabOffset();
+    var factor = Math.exp(-e.deltaY*0.001);
+    setTabOffsetInputs({dx:o.dx, dy:o.dy, scale:Math.max(0.5,Math.min(2,o.scale*factor))});
+    refreshLmPreview();
+  }, {passive:false});
+  // タッチ: 1本指ドラッグ=平行移動、2本指ピンチ=拡大縮小。
+  var touchBase=null;
+  function touchDist(t0,t1){ return Math.hypot(t0.clientX-t1.clientX, t0.clientY-t1.clientY); }
+  canvas.addEventListener("touchstart", function(e){
+    e.preventDefault();
+    if(e.touches.length===1){
+      dragging=true; dragStart={x:e.touches[0].clientX,y:e.touches[0].clientY}; dragBaseOffset=currentTabOffset();
+    }else if(e.touches.length===2){
+      dragging=false;
+      touchBase={dist:touchDist(e.touches[0],e.touches[1]), offset:currentTabOffset()};
+    }
+  }, {passive:false});
+  canvas.addEventListener("touchmove", function(e){
+    e.preventDefault();
+    if(e.touches.length===1 && dragging){
+      var d=toImageDelta(e.touches[0].clientX-dragStart.x, e.touches[0].clientY-dragStart.y);
+      setTabOffsetInputs({dx:dragBaseOffset.dx+d.x, dy:dragBaseOffset.dy+d.y, scale:dragBaseOffset.scale});
+      refreshLmPreview();
+    }else if(e.touches.length===2 && touchBase){
+      var ratio = touchDist(e.touches[0],e.touches[1]) / touchBase.dist;
+      setTabOffsetInputs({dx:touchBase.offset.dx, dy:touchBase.offset.dy, scale:Math.max(0.5,Math.min(2,touchBase.offset.scale*ratio))});
+      refreshLmPreview();
+    }
+  }, {passive:false});
+  canvas.addEventListener("touchend", function(e){
+    if(e.touches.length===0){ dragging=false; touchBase=null; }
+  });
+})();
+function runLandmarkInitial(){
+  if(!state.front.dataUrl){ setMsg("先に正面(front)を確定してください。",true); return; }
+  $("lmRunBtn").disabled=true;
+  setMsg("ランドマークを推定中...");
+  Promise.all([
+    P3D.scannerLoadImage(state.front.dataUrl),
+    P3D.scannerBuildDetectionCopy(state.front.dataUrl, 1000)
+  ]).then(function(r){
+    state.landmarks._img=r[0];
+    state.landmarks._detection=r[1];
+    return P3D.scannerCallTextTurn(PROMPT_D, [r[1].dataUrl], []);
+  }).then(function(res){
+    state.landmarks.history=res.history;
+    var d=P3D.parseJsonResponse(res.text);
+    state.landmarks.pointsPx=detectionPointsToNatural(d.points_px, state.landmarks._detection.resize);
+    appendChatLine($("lmChatLog"),"model","(初回推定)22点のランドマークを推定しました。");
+    refreshLmPreview();
+    $("lmRunBtn").disabled=false;
+    $("lmChatInput").disabled=false; $("lmChatSend").disabled=false;
+    $("lmNextBtn").disabled=false;
+    setMsg("ランドマークを推定しました。プレビューを確認し、必要ならチャットまたは下のオフセットで修正してください。");
+  }).catch(function(e){
+    $("lmRunBtn").disabled=false;
+    setMsg("ランドマーク推定に失敗しました: "+e.message,true);
+  });
+}
+$("lmRunBtn").onclick=runLandmarkInitial;
+// ★2026-07-10: AI(Gemini)を使わずランドマークを仮配置する代替経路。
+// js/common.jsのP3D.buildMask/P3D.analyzeSilhouette/P3D.placeAllLandmarks
+// (landmark_tool.htmlの初期仮配置と同じロジック)で、front画像の白背景
+// シルエットから一般的な体型比率に基づく22点を機械的に求めるだけで、
+// 実際の絵柄には合わせていない。チャットでの修正はGemini必須のため
+// 使えないままにし(有効化しない)、細かい位置合わせはジェネレータ側の
+// ドラッグ編集に委ねる想定。
+function runLandmarkManual(){
+  if(!state.front.dataUrl){ setMsg("先に正面(front)を確定してください。",true); return; }
+  $("lmManualBtn").disabled=true;
+  setMsg("標準位置で仮配置中...");
+  P3D.scannerLoadImage(state.front.dataUrl).then(function(img){
+    state.landmarks._img=img;
+    var mask=P3D.buildMask(img, img.naturalWidth, img.naturalHeight);
+    var A=P3D.analyzeSilhouette(mask, img.naturalWidth, img.naturalHeight);
+    if(!A) throw new Error("frontのシルエットを検出できません(背景が白以外?)");
+    state.landmarks.pointsPx=P3D.placeAllLandmarks(A);
+    appendChatLine($("lmChatLog"),"model","(AI不使用)一般的な体型比率から22点を仮配置しました。実際の絵柄には合わせていないため、ジェネレータ側のドラッグ編集で位置を調整してください。");
+    refreshLmPreview();
+    $("lmManualBtn").disabled=false;
+    $("lmNextBtn").disabled=false;
+    setMsg("標準位置で仮配置しました。この後ジェネレータ側で実際の絵柄に合わせて調整してください。");
+  }).catch(function(e){
+    $("lmManualBtn").disabled=false;
+    setMsg("仮配置に失敗しました: "+e.message,true);
+  });
+}
+$("lmManualBtn").onclick=runLandmarkManual;
+function sendLmChat(){
+  var text=$("lmChatInput").value.trim();
+  if(!text) return;
+  appendChatLine($("lmChatLog"),"user",text);
+  $("lmChatInput").value="";
+  $("lmChatSend").disabled=true;
+  var followup=text+"\n\n(直前のJSONを踏まえ、修正後の同じ形式のJSONのみを出力してください。座標は引き続き1000×1000空間のpoints_pxで。)";
+  // 会話履歴には初回に渡した1000×1000の検出用コピー画像が既に含まれているため、
+  // 座標系を一貫させるためフォローアップでも同じ検出用コピーを使う(front原寸を
+  // 混ぜない)。
+  P3D.scannerCallTextTurn(followup, [state.landmarks._detection.dataUrl], state.landmarks.history).then(function(res){
+    state.landmarks.history=res.history;
+    var d=P3D.parseJsonResponse(res.text);
+    state.landmarks.pointsPx=detectionPointsToNatural(d.points_px, state.landmarks._detection.resize);
+    appendChatLine($("lmChatLog"),"model","修正しました。");
+    refreshLmPreview();
+    $("lmChatSend").disabled=false;
+  }).catch(function(e){
+    appendChatLine($("lmChatLog"),"model","エラー: "+e.message);
+    $("lmChatSend").disabled=false;
+  });
+}
+$("lmChatSend").onclick=sendLmChat;
+$("lmChatInput").addEventListener("keydown",function(e){ if(e.key==="Enter") sendLmChat(); });
+$("lmNextBtn").onclick=function(){
+  state.landmarks.confirmed=true;
+  // タブ5→6は会話を持ち越さない(GHOST_SCANNER_PLAN.md方針)。
+  unlockNext("lm"); switchTab("params");
+};
+
+/* ==================== タブ6-1: アクセサリー一覧検出(会話継続、regionsなし、任意) ==================== */
+// アクセサリーの色は、検出のたびにGemini任せで決まると毎回ランダムに見えて
+// しまう(ユーザー指摘)。並び順そのものを完全に固定するのは難しいが、
+// 「一覧内の何番目か(index)」と色の対応だけは常にこちら側で決定的に固定する
+// (1件目は常にパレット先頭の色、2件目は常に次の色…という単純な規則)。
+// PROMPT_Fからも色の割当指示自体を外し(下記参照)、Geminiが返したcolorが
+// あっても常にこちらの値で上書きする。
+var ACC_COLOR_PALETTE = ["#7aa2ff","#ff6ad5","#52e0c4","#ffb454","#ff8a8a","#b48cff","#8cffb4","#5be6ff"];
+function assignAccessoryColors(list){
+  (list||[]).forEach(function(a,i){ a.color = ACC_COLOR_PALETTE[i % ACC_COLOR_PALETTE.length]; });
+}
+function renderAccList(list){
+  var el=$("accList"); el.innerHTML="";
+  (list||[]).forEach(function(a){
+    var d=document.createElement("div");
+    d.className="accItem";
+    d.style.borderColor=a.color||"var(--line)";
+    var hasRegion = a.regions && Object.keys(a.regions).length>0;
+    d.innerHTML="<b style='color:"+(a.color||"#fff")+"'>"+a.name+"</b>"+
+      "mode="+a.mode+" / bones="+(a.bones||[]).join(",")+
+      " / 写っている面="+(a.visible_views||[]).join(",")+
+      " / 領域="+(hasRegion?"取得済み":"未取得");
+    el.appendChild(d);
+  });
+}
+function runAccInitial(){
+  if(!state.front.dataUrl||!state.side.dataUrl||!state.back.dataUrl){
+    setMsg("front/side/backすべての確定が必要です。",true); return;
+  }
+  $("accRunBtn").disabled=true;
+  setMsg("アクセサリー一覧を検出中...");
+  P3D.scannerCallTextTurn(PROMPT_F, [state.front.dataUrl, state.side.dataUrl, state.back.dataUrl], []).then(function(res){
+    state.accessories.history=res.history;
+    var d=P3D.parseJsonResponse(res.text);
+    state.accessories.list=d.accessories||[];
+    assignAccessoryColors(state.accessories.list);
+    renderAccList(state.accessories.list);
+    appendChatLine($("accChatLog"),"model","(初回検出)"+state.accessories.list.length+"件のaccessory(名称のみ、範囲は未取得)。");
+    $("accRunBtn").disabled=false;
+    $("accChatInput").disabled=false; $("accChatSend").disabled=false;
+    $("accConfirmListBtn").disabled = state.accessories.list.length===0;
+    $("accUnconfirmBtn").style.display="none"; $("accConfirmedNote").style.display="none";
+    resetColormapAndMaskState(); // 再検出時は古い色分けマップ/マスクを破棄(色割当が変わるため)
+    setMsg("アクセサリー一覧を検出しました。問題なければ「この一覧で確定」してください。");
+  }).catch(function(e){
+    $("accRunBtn").disabled=false;
+    setMsg("アクセサリー検出に失敗しました: "+e.message,true);
+  });
+}
+$("accRunBtn").onclick=runAccInitial;
+function sendAccChat(){
+  var text=$("accChatInput").value.trim();
+  if(!text) return;
+  appendChatLine($("accChatLog"),"user",text);
+  $("accChatInput").value="";
+  $("accChatSend").disabled=true;
+  var followup=text+'\n\n(直前のJSONを踏まえ、修正後の同じ形式のJSON({"accessories":[...]}、regionsは含めない)のみを出力してください。)';
+  P3D.scannerCallTextTurn(followup, [state.front.dataUrl, state.side.dataUrl, state.back.dataUrl], state.accessories.history).then(function(res){
+    state.accessories.history=res.history;
+    var d=P3D.parseJsonResponse(res.text);
+    state.accessories.list=d.accessories||[];
+    assignAccessoryColors(state.accessories.list);
+    renderAccList(state.accessories.list);
+    appendChatLine($("accChatLog"),"model","修正しました。");
+    $("accConfirmListBtn").disabled = state.accessories.list.length===0;
+    $("accChatSend").disabled=false;
+  }).catch(function(e){
+    appendChatLine($("accChatLog"),"model","エラー: "+e.message);
+    $("accChatSend").disabled=false;
+  });
+}
+$("accChatSend").onclick=sendAccChat;
+$("accChatInput").addEventListener("keydown",function(e){ if(e.key==="Enter") sendAccChat(); });
+$("accConfirmListBtn").onclick=function(){
+  if(!state.accessories.list || !state.accessories.list.length){ setMsg("先に一覧を検出してください。",true); return; }
+  // ★2026-07-09: 色許容誤差(colorTolerance)はパーツごとの値になり、実際の
+  // 抽出はジェネレータ側で行うようになったが、既定値だけはここで一覧確定時に
+  // 振っておく(ジェネレータ側で個別/一括に上書きできる)。
+  state.accessories.list.forEach(function(a){ if(a.colorTolerance===undefined) a.colorTolerance=12; });
+  $("accChatInput").disabled=true; $("accChatSend").disabled=true; $("accConfirmListBtn").disabled=true;
+  $("accUnconfirmBtn").style.display=""; $("accConfirmedNote").style.display="";
+  state.accessories.confirmed=true;
+  refreshColormapPromptText();
+  refreshColormapButtons();
+  setMsg("一覧を確定しました。次は色分けマップを生成(または手動アップロード)してください。マスクの抽出はジェネレータの「自動マスク」タブで行います。");
+};
+// 確定後に名前・色・ボーン等を直したくなった場合の再処理経路(再検出/チャットは
+// 確定すると無効化されるため、明示的に解除するボタンが無いと詰んでしまう)。
+// 色分けマップはaccessory一覧(特に色割当)に依存しているため、解除時に
+// まとめてリセットする(古い一覧のままの色分けマップが残る不整合を防ぐ)。
+function resetColormapAndMaskState(){
+  state.colormaps = { front:null, side:null, leftSide:null, back:null };
+  ["Front","Side","LeftSide","Back"].forEach(function(v){
+    var c=$("colormap"+v+"Preview");
+    if(c) c.getContext("2d").clearRect(0,0,c.width,c.height);
+  });
+  $("colormapProgress").textContent="";
+  state.accessories.confirmed=false;
+  refreshColormapButtons();
+}
+$("accUnconfirmBtn").onclick=function(){
+  $("accChatInput").disabled=false; $("accChatSend").disabled=false;
+  $("accConfirmListBtn").disabled=(!state.accessories.list||!state.accessories.list.length);
+  $("accUnconfirmBtn").style.display="none"; $("accConfirmedNote").style.display="none";
+  resetColormapAndMaskState();
+  setMsg("確定を解除しました。一覧を検出し直すかチャットで修正し、再度確定してください。");
+};
+
+/* ==================== タブ6-2: 色分けマップ生成→領域抽出(任意) ==================== */
+// GHOST_SCANNER_PLAN.md「計画(完了): アクセサリー抽出方式を『色分けマップ』方式に
+// 変更」節の通り、旧版(1件ずつ座標を当てさせるpromptAccessoryRegion/
+// runAccessoryRegions)を廃止し、front/side/back各1枚の色分けマップ画像
+// (体=黒・背景=白・各accessory=パレット色でベタ塗り)をGemini画像編集(または
+// 手動アップロード)で用意し、こちら側のcanvas処理(P3D.extractMaskFromColormap)
+// で色ごとにマスク(ラスタ)を機械的に抽出する。抽出結果は多角形(regions)とは
+// 別のacc.mask={front,side,back}(各{maskDataUrl,bbox}|undefined)に格納する
+// (データモデルは統合せず並存、既存のregions手動編集ロジックは無改修)。
+var VIEW_LABEL_JP = {front:"正面(front)", side:"側面・右(side)", leftSide:"側面・左(leftSide)", back:"背面(back)"};
+var COLORMAP_VIEWS = ["front","side","leftSide","back"];
+state.colormaps = { front:null, side:null, leftSide:null, back:null };
+// ★2026-07-09: 面ごとに個別確認・個別コピーしたいとの要望を受け、
+// P3D.scannerBuildColormapPrompt(list, view)で面ごとのプロンプトを個別に
+// 組み立てて表示するようにした(判断基準・塗り分けルール自体は共通のまま、
+// 冒頭の「この画像はどの面か」の説明文だけが面ごとに変わる)。
+function refreshColormapPromptText(){
+  var list = state.accessories.list||[];
+  COLORMAP_VIEWS.forEach(function(v){
+    var elId = "colormapPromptText"+v.charAt(0).toUpperCase()+v.slice(1);
+    var el=$(elId);
+    if(el) el.textContent = P3D.scannerBuildColormapPrompt(list, v);
+  });
+}
+function refreshColormapButtons(){
+  var ready = !!(state.accessories.list && state.accessories.list.length && state.front.confirmed);
+  $("colormapGenBtn").disabled = !ready;
+  ["Front","Side","LeftSide","Back"].forEach(function(v){ $("colormapUpload"+v+"Btn").disabled = !state.front.confirmed; });
+}
+async function showColormapPreview(view, dataUrl){
+  await showImageOnCanvas($("colormap"+view.charAt(0).toUpperCase()+view.slice(1)+"Preview"), dataUrl);
+}
+async function generateColormaps(){
+  var list = state.accessories.list;
+  if(!list || !list.length){ setMsg("先にアクセサリー一覧を確定してください。",true); return; }
+  $("colormapGenBtn").disabled=true;
+  // ★2026-07-09: front/side/leftSide/backを同一セッション(history)で順に
+  // 生成する(front/side/back生成のセッション継続と同じ理由。塗り分ける
+  // アクセサリーの左右割り当てが面ごとにブレるのを防ぐ)。
+  var history=[];
+  var views=COLORMAP_VIEWS;
+  for(var i=0;i<views.length;i++){
+    var v=views[i];
+    var ref = state[v] && state[v].dataUrl;
+    if(!ref){ $("colormapProgress").textContent=VIEW_LABEL_JP[v]+"の画像がありません(スキップ)。"; continue; }
+    var prompt = P3D.scannerBuildColormapPrompt(list, v);
+    $("colormapProgress").textContent="("+(i+1)+"/"+views.length+") "+VIEW_LABEL_JP[v]+"の色分けマップを生成中...";
+    try{
+      var res = await P3D.scannerGenerateImageInSession(prompt, ref, history);
+      state.colormaps[v]=res.dataUrl;
+      history=res.history;
+      await showColormapPreview(v, res.dataUrl);
+    }catch(e){
+      setMsg("「"+VIEW_LABEL_JP[v]+"」の色分けマップ生成に失敗しました: "+e.message,true);
+    }
+  }
+  $("colormapProgress").textContent="色分けマップ生成が完了しました(生成できなかった面は手動アップロードで補ってください)。";
+  refreshColormapButtons();
+}
+$("colormapGenBtn").onclick=generateColormaps;
+function wireColormapUpload(view){
+  var btn=$("colormapUpload"+view.charAt(0).toUpperCase()+view.slice(1)+"Btn");
+  var file=$("colormapUpload"+view.charAt(0).toUpperCase()+view.slice(1)+"File");
+  btn.onclick=function(){ file.click(); };
+  file.onchange=function(e){
+    var f=e.target.files && e.target.files[0];
+    if(!f) return;
+    P3D.scannerFileToDataUrl(f).then(function(dataUrl){
+      state.colormaps[view]=dataUrl;
+      return showColormapPreview(view, dataUrl);
+    }).then(function(){
+      setMsg(VIEW_LABEL_JP[view]+"の色分けマップを手動でアップロードしました。");
+      refreshColormapButtons();
+    }).catch(function(e){ setMsg("画像の読み込みに失敗しました: "+e.message,true); });
+    file.value="";
+  };
+}
+COLORMAP_VIEWS.forEach(wireColormapUpload);
+
+refreshColormapPromptText();
+refreshColormapButtons();
+
+$("paramsNextBtn").onclick=function(){
+  // タブ6→7は(実施していれば)会話を持ち越さない。
+  unlockNext("params"); switchTab("out");
+};
+
+/* ==================== タブ7: 出力(ジェネレータへ引き継ぎ) ==================== */
+// GHOST_SCANNER_PLAN.md「ジェネレータへの引き継ぎ」節の通り、
+// saveNormalSessionImages/loadNormalSessionImagesと同じ形のBlobを専用キーで保存し、
+// landmarks_ai.json相当のJSONをsessionStorage経由で渡す(generated_modelキーは
+// 契約が異なるため使わない。js/idb.jsとlandmark_tool.htmlの読み込み分岐を参照)。
+function dataUrlToBlob(dataUrl){
+  return fetch(dataUrl).then(function(r){ return r.blob(); });
+}
+async function buildLandmarksAiJson(){
+  // ★2026-07-09(UIレビュー): landmark_tool.html側が「front/side/back画像も
+  // JSONに埋め込んで単体で完結させる」形式に変わったため、こちらの引き継ぎJSON
+  // にも同じimage.{front,side,back}.dataUrlを含める。landmark_tool.htmlは
+  // 実ピクセルからanalysis(ytop/ybot/cx等)を自前で再計算するため、w/h等の
+  // メタデータはここでは付けずdataUrlのみで足りる。
+  var out={
+    version:2, generator:"ghost-scanner",
+    image:{
+      front:{dataUrl:state.front.dataUrl},
+      side:{dataUrl:state.side.dataUrl},
+      back:{dataUrl:state.back.dataUrl},
+    },
+    points_px:state.landmarks.pointsPx || {},
+  };
+  // leftSideは左右非対称なアクセサリー(mask.leftSide)がある場合だけ意味を
+  // 持つ任意の面なので、実際に生成/アップロードされている時だけ含める。
+  if(state.leftSide && state.leftSide.dataUrl) out.image.leftSide={dataUrl:state.leftSide.dataUrl};
+  // ★2026-07-09: マスク抽出(色分けマップ→パーツごとのラスタマスク)と、そこから
+  // 導かれるexclude_masksの合成は、ジェネレータ(landmark_tool.html)側の
+  // 「自動マスク」タブへ移した(色許容誤差をパーツごとに試行錯誤しながら
+  // その場でプレビューできるようにするため)。ここではaccessory一覧
+  // (名前/取り付け方式/ボーン/色/色許容誤差の既定値)と、抽出元となる
+  // 色分けマップ画像そのものを渡すところまでを担当する。
+  // ★2026-07-09: exclude_from_body_silhouette(除外マスク用フラグ)は、
+  // 全身のシルエットも色分けマップ由来の色許容誤差方式で抽出するように
+  // なり(アクセサリー色の画素は体色=黒と一致しないため自動的に除外される)
+  // 不要になったため廃止した。
+  if(state.accessories.list && state.accessories.list.length){
+    out.accessories=state.accessories.list.map(function(a){
+      return {
+        name:a.name, mode:a.mode, bones:a.bones, color:a.color,
+        colorTolerance:(a.colorTolerance!==undefined?a.colorTolerance:12),
+      };
+    });
+    var colormaps={};
+    COLORMAP_VIEWS.forEach(function(v){
+      if(state.colormaps && state.colormaps[v]) colormaps[v]=state.colormaps[v];
+    });
+    if(Object.keys(colormaps).length) out.colormaps=colormaps;
+  }
+  return out;
+}
+// ★2026-07-09(UIレビュー): 画像本体もbuildLandmarksAiJson()のJSONに
+// dataUrlとして埋め込むようになったため、以前あった「画像だけ別途Blobに
+// 変換してIndexedDBへ保存」という段取りは不要になった。JSON1つを
+// sessionStorageへ置くだけで済む(landmark_tool.html側のbootstrapFromJson()
+// が画像復元まで一括で行う)。
+$("outSendBtn").onclick=function(){
+  if(!state.front.confirmed||!state.side.confirmed||!state.back.confirmed||!state.landmarks.pointsPx){
+    setMsg("front/side/backの確定とランドマーク推定が必要です。",true); return;
+  }
+  $("outSendBtn").disabled=true;
+  setMsg("ジェネレータへ引き継ぐデータを準備中...");
+  buildLandmarksAiJson().then(function(json){
+    sessionStorage.setItem("scanner_handoff_json", JSON.stringify(json));
+    setMsg("引き継ぎ準備ができました。ジェネレータへ移動します...");
+    location.href="landmark_tool.html?source=scanner";
+  }).catch(function(e){
+    $("outSendBtn").disabled=false;
+    setMsg("引き継ぎの準備に失敗しました: "+e.message,true);
+  });
+};
+
+/* ==================== 自動保存/前回の続きから ==================== */
+// GHOST_SCANNER_PLAN.md「運用面の修正6点・⑥」: リロード/閉じるでfront/side/back
+// 生成やランドマーク推定(時間・場合によっては課金を伴うAPI呼び出しの結果)が
+// 消えてしまう問題への対応。landmark_tool.htmlの自動保存パターン(画像は
+// IndexedDBにBlob、それ以外はlocalStorageにJSON)を踏襲する。抽出済みの
+// アクセサリーマスクは色分けマップさえ残っていれば無料でローカル再抽出できる
+// ため保存対象外にする(保存対象を絞りBlob管理の複雑さを抑える設計)。
+var SESSION_JSON_KEY = "3dtoolJS_scanner_session_v1";
+function buildSessionJson(){
+  return {
+    curTab: state.curTab, unlockedUpTo: state.unlockedUpTo,
+    front:{confirmed:state.front.confirmed}, side:{confirmed:state.side.confirmed},
+    leftSide:{confirmed:state.leftSide.confirmed}, back:{confirmed:state.back.confirmed},
+    landmarks:{pointsPx:state.landmarks.pointsPx, confirmed:state.landmarks.confirmed},
+    accessories:{
+      list:(state.accessories.list||[]).map(function(a){
+        return {name:a.name, mode:a.mode, bones:a.bones, color:a.color, reason:a.reason,
+          colorTolerance:a.colorTolerance, visible_views:a.visible_views};
+      }),
+      confirmed: state.accessories.confirmed
+    },
+    calibration: state.calibration,
+  };
+}
+function saveSessionJson(){
+  try{ localStorage.setItem(SESSION_JSON_KEY, JSON.stringify(buildSessionJson())); }
+  catch(e){ console.warn("セッション保存に失敗しました:", e); }
+}
+async function saveSessionImages(){
+  var blobs={};
+  var pairs=[
+    ["source", state.sourceDataUrl],
+    ["front", state.front.dataUrl],
+    ["side", state.side.dataUrl],
+    ["leftSide", state.leftSide && state.leftSide.dataUrl],
+    ["back", state.back.dataUrl],
+    ["colormapFront", state.colormaps && state.colormaps.front],
+    ["colormapSide", state.colormaps && state.colormaps.side],
+    ["colormapLeftSide", state.colormaps && state.colormaps.leftSide],
+    ["colormapBack", state.colormaps && state.colormaps.back],
+  ];
+  for(var i=0;i<pairs.length;i++){
+    var k=pairs[i][0], url=pairs[i][1];
+    if(url) blobs[k]=await dataUrlToBlob(url);
+  }
+  try{ await P3D.saveScannerSessionImages(blobs); }
+  catch(e){ console.warn("画像セッション保存に失敗しました:", e); }
+}
+var scannerAutosaveInterval=null, lastScannerAutosaveJson=null;
+function startScannerAutosaveLoop(){
+  if(scannerAutosaveInterval) return;
+  scannerAutosaveInterval=setInterval(function(){
+    var json=JSON.stringify(buildSessionJson());
+    if(json===lastScannerAutosaveJson) return;
+    lastScannerAutosaveJson=json;
+    saveSessionJson();
+    saveSessionImages();
+  }, 4000);
+}
+async function checkScannerSessionAvailable(){
+  var raw=null;
+  try{ raw=localStorage.getItem(SESSION_JSON_KEY); }catch(e){}
+  var images=null;
+  try{ images = await P3D.loadScannerSessionImages(); }catch(e){}
+  return !!(raw && images && (images.source || images.front));
+}
+function blobToDataUrl(blob){
+  return new Promise(function(resolve,reject){
+    var fr=new FileReader();
+    fr.onload=function(){ resolve(fr.result); };
+    fr.onerror=function(){ reject(fr.error); };
+    fr.readAsDataURL(blob);
+  });
+}
+function restoreGenTabUI(name){
+  var st=state[name];
+  if(!st.dataUrl) return Promise.resolve();
+  return showImageOnCanvas($(name+"Preview"), st.dataUrl).then(function(){
+    $(name+"RetryBtn").disabled=false;
+    $(name+"ConfirmBtn").disabled=false;
+    var downloadBtn=$(name+"DownloadBtn"); if(downloadBtn) downloadBtn.disabled=false;
+    if(st.confirmed) $(name+"NextBtn").disabled=false;
+  });
+}
+async function restoreLandmarksUI(){
+  if(!state.landmarks.pointsPx || !state.front.dataUrl) return;
+  state.landmarks._img = await P3D.scannerLoadImage(state.front.dataUrl);
+  state.landmarks._detection = await P3D.scannerBuildDetectionCopy(state.front.dataUrl, 1000);
+  refreshLmPreview();
+  appendChatLine($("lmChatLog"),"model","(前回の続きから復元しました。チャットの会話履歴は引き継がれないため、修正する場合は改めて指示してください。)");
+  $("lmRunBtn").disabled=false;
+  $("lmChatInput").disabled=false; $("lmChatSend").disabled=false;
+  $("lmNextBtn").disabled=false;
+}
+function restoreAccessoriesUI(){
+  if(!state.accessories.list || !state.accessories.list.length) return;
+  renderAccList(state.accessories.list);
+  if(state.accessories.confirmed){
+    $("accChatInput").disabled=true; $("accChatSend").disabled=true; $("accConfirmListBtn").disabled=true;
+    $("accUnconfirmBtn").style.display=""; $("accConfirmedNote").style.display="";
+  }else{
+    $("accChatInput").disabled=false; $("accChatSend").disabled=false;
+    $("accConfirmListBtn").disabled=false;
+  }
+}
+async function restoreColormapsUI(){
+  var views=COLORMAP_VIEWS;
+  for(var i=0;i<views.length;i++){
+    var v=views[i];
+    if(state.colormaps[v]) await showColormapPreview(v, state.colormaps[v]);
+  }
+  refreshColormapPromptText();
+  refreshColormapButtons();
+}
+async function restoreScannerSession(){
+  var raw=localStorage.getItem(SESSION_JSON_KEY);
+  var json=JSON.parse(raw);
+  var images=await P3D.loadScannerSessionImages();
+  if(images.source){
+    state.sourceDataUrl=await blobToDataUrl(images.source);
+    await showImageOnCanvas($("uploadPreview"), state.sourceDataUrl);
+    $("uploadNextBtn").disabled=false; $("uploadDownloadBtn").disabled=false;
+  }
+  for(var i=0;i<["front","side","leftSide","back"].length;i++){
+    var name=["front","side","leftSide","back"][i];
+    if(images[name]){
+      state[name].dataUrl = await blobToDataUrl(images[name]);
+      state[name].confirmed = json[name] ? json[name].confirmed : false;
+      await restoreGenTabUI(name);
+    }
+  }
+  if(json.landmarks){
+    state.landmarks.pointsPx=json.landmarks.pointsPx;
+    state.landmarks.confirmed=json.landmarks.confirmed;
+    await restoreLandmarksUI();
+  }
+  if(json.accessories){
+    state.accessories.list=json.accessories.list||[];
+    state.accessories.confirmed=json.accessories.confirmed;
+    restoreAccessoriesUI();
+  }
+  if(json.calibration) state.calibration=json.calibration;
+  if(images.colormapFront) state.colormaps.front=await blobToDataUrl(images.colormapFront);
+  if(images.colormapSide) state.colormaps.side=await blobToDataUrl(images.colormapSide);
+  if(images.colormapLeftSide) state.colormaps.leftSide=await blobToDataUrl(images.colormapLeftSide);
+  if(images.colormapBack) state.colormaps.back=await blobToDataUrl(images.colormapBack);
+  await restoreColormapsUI();
+  state.unlockedUpTo = json.unlockedUpTo||0;
+  renderTabs();
+  switchTab(json.curTab||"upload");
+}
+$("resumeDiscardBtn").onclick=function(){
+  $("resumeCard").hidden=true;
+  try{ localStorage.removeItem(SESSION_JSON_KEY); }catch(e){}
+  P3D.clearScannerSessionImages().catch(function(){});
+  startScannerAutosaveLoop();
+};
+$("resumeBtn").onclick=function(){
+  $("resumeCard").hidden=true;
+  setMsg("前回の続きを復元中...");
+  restoreScannerSession().then(function(){
+    setMsg("前回の続きを復元しました。");
+  }).catch(function(e){
+    console.warn("前回の続きの復元に失敗しました:",e);
+    setMsg("前回の続きの復元に失敗しました。新規作成でやり直してください。",true);
+  }).then(function(){
+    startScannerAutosaveLoop();
+  });
+};
+async function initScannerSessionResume(){
+  var available=false;
+  try{ available = await checkScannerSessionAvailable(); }catch(e){}
+  if(available){ $("resumeCard").hidden=false; }
+  else{ startScannerAutosaveLoop(); }
+}
+
+/* ==================== 初期化 ==================== */
+refreshApiKeyStatus();
+renderTabs();
+switchTab("upload");
+initScannerSessionResume();
+})();
+</script>
+</body></html>

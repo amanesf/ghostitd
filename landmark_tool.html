@@ -1,0 +1,3412 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴーストジェネレータ</title>
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/BufferGeometryUtils.js"></script>
+<script src="js/vendor/SimplifyModifier.js"></script>
+<!-- ★2026-07-15(ユーザー報告「修正をデプロイしたのにサイトで直っていない」対応):
+     GitHub PagesはCDN配信のため、script srcのURLが変わらないとブラウザ/CDNに
+     古いJSがキャッシュされたまま残り得る。js/配下の自作ファイルにはバージョン
+     クエリを付け、コード変更時にここを更新することで確実に最新版を読み込ませる。 -->
+<script src="js/marching_cubes.js?v=20260715"></script>
+<script src="js/common.js?v=20260715"></script>
+<script src="js/carving.js?v=20260715"></script>
+<script src="js/skeleton.js?v=20260715"></script>
+<script src="js/profile.js?v=20260715"></script>
+<script src="js/atlas.js?v=20260715"></script>
+<script src="js/model_export.js?v=20260715"></script>
+<script src="js/visual_hull.js?v=20260715"></script>
+<script src="js/accessories.js?v=20260715"></script>
+<script src="js/pipeline.js?v=20260715"></script>
+<script src="js/idb.js?v=20260715"></script>
+<style>
+  :root{--bg:#07080a;--mut:#9aa3ad;--mint:#ff2fb0;--green:#39ff9e;--txt:#e8edf2;--line:rgba(255,255,255,.12);
+    --mono:"SFMono-Regular",Consolas,Menlo,monospace}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .page{max-width:460px;margin:0 auto;padding:14px 12px 28px}
+  /* ★2026-07-09(UIレビュー): スマホ縦持ち想定の460px固定幅だと、PC/タブレットの
+     広い画面でもキャンバス・自動マスクプレビュー等が常に小さく表示されていた。
+     画面幅に応じて段階的に広げる(スマホは従来通り460pxのまま)。 */
+  @media (min-width:640px){ .page{max-width:640px} }
+  @media (min-width:900px){ .page{max-width:840px} }
+  h1{font-size:16px;font-weight:700;margin:0 0 2px;letter-spacing:.01em}
+  h1 .eng{display:block;font-family:var(--mono);font-size:9.5px;color:var(--green);
+    letter-spacing:.22em;margin:5px 0 0;opacity:.85;font-weight:400}
+  .sub{font-size:11.5px;color:var(--mut);margin:6px 0 14px}
+  #wrap{width:100%;border-radius:12px;overflow:hidden;background:#000;border:1px solid var(--line);margin-bottom:10px}
+  #cvs{display:block;width:100%;touch-action:none}
+  .bar{display:flex;gap:7px;margin-bottom:10px;flex-wrap:wrap}
+  .btn{flex:1 1 0;min-width:0;height:42px;border-radius:11px;font-size:13px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--txt);
+    white-space:nowrap;display:flex;align-items:center;justify-content:center;user-select:none}
+  .btn:active{transform:scale(.97)}
+  .btn.mint{background:rgba(255,47,176,.14);color:var(--mint);border-color:rgba(255,47,176,.4)}
+  .btn.sm{flex:0 0 auto;height:34px;padding:0 10px;font-size:12px}
+  .btn[disabled]{opacity:.5}
+  #msg{font-size:11.5px;color:var(--mut);min-height:16px;line-height:1.5;margin-bottom:10px}
+  .legend{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{font-size:11px;padding:5px 9px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04)}
+  .chip.on{border-color:#ffe14d;background:rgba(255,225,77,.10);color:#ffe14d!important}
+  .hint{color:var(--mut);font-size:13px;margin-top:24px;text-align:center}
+  .modeCard{display:block;cursor:pointer;border:1px solid var(--line);border-radius:14px;
+    background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
+  .modeCard:active{background:rgba(255,47,176,.10);border-color:rgba(255,47,176,.4)}
+  .modeCard.mint{border-color:rgba(255,47,176,.4)}
+  .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
+  .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+  .modeCard.disabled{cursor:default;opacity:.45;pointer-events:none}
+  .modeCard.disabled b{color:var(--mut)}
+  .modeCard .sampleSelectRow{margin-top:10px}
+  .modeCard .sampleSelectRow select{width:100%;height:32px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(255,255,255,.06);color:var(--txt);font-size:12px}
+  .nudge{margin-top:12px;display:flex;flex-direction:column;gap:8px;align-items:center}
+  .nudge .sel{font-size:12px;color:var(--mut)}
+  .nudge .sel b{color:#ffe14d}
+  .nudgerow{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%}
+  .dpad{display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:48px 48px 48px;gap:6px;flex:0 0 auto}
+  .dpad button{width:56px;height:48px;font-size:22px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(255,255,255,.06);color:var(--txt);cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}
+  .dpad button:active{background:rgba(255,47,176,.18)}
+  .dpad button:disabled{opacity:.3;cursor:default}
+  .dpad button:disabled:active{background:rgba(255,255,255,.06)}
+  .hidden{display:none}
+  .btn.danger{border-color:rgba(255,107,107,.45);color:#ff8484}
+  .btn.danger:active{background:rgba(255,107,107,.14)}
+  .qbtn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+    border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.08);color:var(--mut);
+    font-size:11px;line-height:1;cursor:pointer;vertical-align:middle;margin-left:4px;flex:0 0 auto;padding:0}
+  .qbtn.on{color:#ffe14d;border-color:rgba(255,225,77,.5)}
+  .helpText{font-size:11px;color:var(--mut);line-height:1.6;margin:4px 0 10px;
+    background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .subhead{font-size:10.5px;font-weight:700;letter-spacing:.03em;color:var(--mut);margin:9px 0 4px}
+  .subhead:first-child{margin-top:0}
+  .legendGroups{display:flex;flex-direction:column;gap:2px}
+  .bonesGroups{display:flex;flex-direction:column;gap:2px;max-height:230px;overflow:auto}
+  .bonesRow{display:flex;flex-wrap:wrap;gap:4px}
+  .accgroup{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden;background:rgba(255,255,255,.02)}
+  .accgroup>summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;align-items:center;gap:8px;
+    font-size:12.5px;color:var(--txt);font-weight:600;user-select:none}
+  .accgroup>summary::-webkit-details-marker{display:none}
+  .accgroup>summary::before{content:"▸";color:var(--mut);font-size:11px;transition:transform .12s}
+  .accgroup[open]>summary::before{transform:rotate(90deg)}
+  .accgroup>summary .accCount{margin-left:auto;font-weight:400;color:var(--mut);font-size:11px}
+  .accgroup>summary .accDot{width:7px;height:7px;border-radius:50%;background:#ffe14d;flex:0 0 auto;
+    box-shadow:0 0 0 2px rgba(255,225,77,.18)}
+  .accgroup>.accbody{padding:0 12px 12px}
+  .accResetGrp{font-size:10.5px;color:var(--mut);border:1px solid var(--line);border-radius:6px;
+    background:rgba(255,255,255,.05);padding:2px 8px;cursor:pointer;flex:0 0 auto}
+  .accToolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .accToolbar button{font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:7px;
+    background:rgba(255,255,255,.05);padding:5px 10px;cursor:pointer}
+  #genOverlay{position:fixed;inset:0;background:rgba(8,10,13,.92);z-index:1000;
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:20px;text-align:center}
+  #genOverlay:not(.hidden){display:flex}
+  .genTag{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--green);letter-spacing:.16em}
+  .genTag .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:genBlink 1.4s infinite}
+  .genTag.err{color:#ff5a6e}
+  .genTag.err .dot{background:#ff5a6e;animation:none}
+  @keyframes genBlink{0%,100%{opacity:1}50%{opacity:.15}}
+  .viewbar{display:flex;gap:6px;margin-bottom:8px}
+  .viewbtn{flex:1;height:34px;border-radius:9px;font-size:12px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut)}
+  .viewbtn.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
+  #paintCanvasWrap{overflow:auto;max-height:min(70vh,560px);border-radius:8px;
+    border:1px solid var(--line)}
+  #paintCanvas{display:block;touch-action:none;cursor:crosshair}
+  .paintZoomRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .paintZoomBtns{display:flex;gap:6px;flex:0 0 auto}
+  .paintZoomBtns .btn{flex:0 0 auto;width:44px;height:34px}
+  /* ★2026-07-13追加: 既存の.dpad(ランドマークの微調整用十字キー)は、選択中の
+     点が無いと全ボタンを自動的にdisabled化するグローバル配線
+     (document.querySelectorAll(".dpad button")、下部のsel監視部分参照)を
+     持っており、同じクラスを使うとパン操作が常に無効化されてしまう
+     (CLAUDE.md記載の変数/クラス名衝突リスクの実例)。見た目は揃えつつ、
+     衝突を避けるため独立クラス名にした。 */
+  .paintDpad{display:grid;grid-template-columns:40px 40px 40px;grid-template-rows:34px 34px 34px;gap:6px;flex:0 0 auto}
+  .paintDpad button{width:40px;height:34px;font-size:18px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(255,255,255,.04);color:var(--txt);cursor:pointer}
+  .paintDpad button:active{background:rgba(255,47,176,.18)}
+  .paintChip{height:30px;padding:0 10px;border-radius:8px;font-size:11.5px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut);
+    display:inline-flex;align-items:center;gap:6px}
+  .paintChip.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
+  .paintChip .sw{width:11px;height:11px;border-radius:3px;border:1px solid rgba(255,255,255,.5);flex:0 0 auto}
+  .acpanel{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+  .acpanel h2{font-size:13px;margin:0 0 8px;color:var(--txt)}
+  .tabbar{display:flex;gap:6px;margin:14px 0 10px;flex-wrap:wrap}
+  .tabbtn{flex:1 1 0;min-width:0;height:38px;border-radius:10px;font-size:12px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut);white-space:nowrap}
+  .tabbtn.on{border-color:rgba(255,47,176,.5);background:rgba(255,47,176,.12);color:var(--mint)}
+  /* ★2026-07-20(設定タブUI見直し): 設定値タブの区分(旧アコーディオン)を横並び
+     サブタブに、さらに区分内の「話題」をサブサブタブにして縦スクロールを
+     減らした(#paramsPanel参照)。.tabbtnより一段小さい見た目にして階層を
+     視覚的に示す。 */
+  /* 区分(6個)・話題(最大4個)とも日本語ラベルの長さがバラバラで、main
+     .tabbtnのmin-width:0+white-space:nowrapのままだと1行に収めようとして
+     文字が潰れる(はみ出す)ため、ここだけ2〜3列に折り返せるようmin-widthを
+     持たせ、収まらないラベルはボタン内で2行に折り返す。 */
+  .paramGroupTabbar{margin:0 0 10px}
+  .paramGroupTabbar .tabbtn{flex:1 1 30%;min-width:112px;height:auto;min-height:34px;
+    white-space:normal;line-height:1.25;padding:6px 4px}
+  .paramSubTabbar{display:flex;gap:5px;margin:0 0 10px;flex-wrap:wrap}
+  .paramSubTabBtn{flex:1 1 30%;min-width:88px;height:auto;min-height:30px;border-radius:8px;font-size:11px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--mut);white-space:normal;line-height:1.25;
+    display:flex;align-items:center;justify-content:center;gap:4px;padding:5px 4px}
+  .paramSubTabBtn.on{border-color:rgba(57,255,158,.5);background:rgba(57,255,158,.10);color:var(--green)}
+  .tabDot{width:6px;height:6px;border-radius:50%;background:#ffe14d;flex:0 0 auto;display:inline-block;
+    box-shadow:0 0 0 2px rgba(255,225,77,.18);vertical-align:middle;margin-right:3px}
+  .tabpanel{display:none}
+  .tabpanel.on{display:block}
+  .tabpanel.acpanel{margin-top:0;border-top:none;padding-top:0}
+  /* ★2026-07-09(UIレビュー): 140pxでは色分けマップとの重なりズレが目視で
+     ほぼ確認できなかったため220pxへ拡大し、タップで全画面プレビューできる
+     ようにした(#automaskLightbox)。 */
+  /* ★2026-07-10(UIレビュー): 220pxの小さいサムネイルではマスクのズレや
+     色の重なりが見えづらいとの指摘を受け、#imgArea(マーク/設定値タブの
+     編集用画像、width:100%)と同じ、コンテナ幅いっぱいの1列表示にした。 */
+  #automaskColormaps{display:flex;flex-direction:column;gap:10px}
+  #automaskColormaps .automaskItem{width:100%}
+  #automaskColormaps canvas,#automaskColormaps img{width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block;cursor:zoom-in}
+  #automaskLightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:50;
+    align-items:center;justify-content:center;padding:20px}
+  #automaskLightbox.on{display:flex}
+  #automaskLightbox img,#automaskLightbox canvas{max-width:100%;max-height:100%;border-radius:10px}
+  .aclist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+  .acitem{display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,.04);
+    border:1px solid var(--line);border-radius:9px;padding:7px 9px;transition:background .6s ease,border-color .6s ease}
+  .acitem.flash{background:rgba(255,47,176,.22);border-color:rgba(255,47,176,.6)}
+  .acitem .nm{flex:1;color:var(--txt)}
+  .acitem .tag{color:var(--mut);font-size:10.5px}
+  .acitem .ed{color:var(--mint);cursor:pointer;font-size:11px;padding:2px 6px}
+  .acitem .rm{color:#ff6b6b;cursor:pointer;font-size:11px;padding:2px 6px}
+  .acitem input.acNameEdit{flex:1;min-width:0;background:rgba(255,255,255,.06);
+    border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:5px 7px;font-size:12px}
+  .acitem input[type=number]{background:rgba(255,255,255,.06);border:1px solid var(--line);
+    color:var(--txt);border-radius:7px;padding:4px 6px;font-size:12px}
+  .acform{display:flex;flex-direction:column;gap:8px;background:rgba(255,255,255,.03);
+    border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+  .acform label{font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px}
+  .acform input[type=text],.acform select{background:rgba(255,255,255,.06);border:1px solid var(--line);
+    color:var(--txt);border-radius:7px;padding:6px 8px;font-size:12px}
+  .acform .bonesRow label{flex-direction:row;align-items:center;gap:4px;font-size:10.5px;
+    background:rgba(255,255,255,.05);border-radius:6px;padding:3px 6px}
+  .acform .row{display:flex;gap:8px}
+  .acform .row>*{flex:1}
+  .acstep{font-size:11.5px;color:#ffe14d}
+</style></head>
+<body>
+<div class="page">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <button class="btn sm" id="backToIndex" style="flex:0 0 auto">← トップに戻る</button>
+  </div>
+  <h1>ゴーストジェネレータ<span class="eng">GHOST GENERATOR</span></h1>
+  <p class="sub">JSON(画像込み) を読み込む、またはサンプルで試す → ドラッグで微調整 → landmarks.json 出力</p>
+
+  <!-- ★2026-07-09(UIレビュー): 「JSON読み込み」は、以前は編集画面(#editor)の
+       中だけにあり、①「生成」タブの奥に埋もれて前回作業の再開に4タブ分クリック
+       が必要だった上に、②画像はJSONに含まれずimgs読み込み後でないと使えない
+       ガードもあった。画像もJSONに埋め込むようになった(buildJson参照)ため、
+       モード選択画面も含め常時見える最上位置に移し、真っさらな状態からでも
+       このボタン1つで開始できるようにした。 -->
+  <!-- ★2026-07-10: JSON読み込みはモード選択画面(#modeChoice)の「JSONから
+       読み込み」カード(#modeJsonBtn)からのみ行う運用に統一した(編集画面
+       に入った後は不要なため、そこに常時表示されていたボタンは廃止した)。
+       #jsonFile自体は#modeJsonBtnのクリック先として引き続き使うため残す。 -->
+  <input type="file" id="jsonFile" accept="application/json,.json" style="display:none"/>
+
+  <div id="editor" class="hidden">
+    <div class="tabbar" id="tabbar">
+      <button class="tabbtn on" data-tab="lm">マーク</button>
+      <button class="tabbtn" data-tab="automask">自動マスク</button>
+      <button class="tabbtn" data-tab="paintmask">手動マスク</button>
+      <button class="tabbtn" data-tab="params">設定値</button>
+      <button class="tabbtn" data-tab="gen">生成</button>
+    </div>
+
+    <div id="imgArea">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn sm" id="lockToggle" style="flex:0 0 auto">🔓 点をロック</button>
+      </div>
+      <div id="wrap"><canvas id="cvs"></canvas></div>
+      <div class="viewbar" id="viewbar" style="margin-top:8px">
+        <button class="viewbtn on" data-view="front">正面</button>
+        <button class="viewbtn" data-view="side">側面</button>
+        <button class="viewbtn" data-view="back">背面</button>
+      </div>
+      <div id="msg"></div>
+      <div class="nudge">
+        <div class="sel">微調整中: <b id="selName">未選択</b>（押しっぱなしで連続移動）</div>
+        <div class="sel" id="selDesc" style="min-height:14px;color:var(--mut)"></div>
+        <div class="nudgerow">
+          <button class="btn" id="viewReset" style="flex:0 0 auto;max-width:130px">表示リセット（拡大/位置）</button>
+          <div class="dpad">
+            <span></span><button id="nUp">▲</button><span></span>
+            <button id="nLeft">◀</button><span></span><button id="nRight">▶</button>
+            <span></span><button id="nDown">▼</button><span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabpanel on" data-tabpanel="lm">
+      <div class="acitem" style="margin-bottom:10px">
+        <span class="nm">ボーン表示/範囲プレビュー</span>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneOverlayToggleLM">ボーン表示</label>
+        <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="boneRegionToggleLM">ボーン範囲</label>
+      </div>
+      <div class="legendGroups" id="legend"></div>
+      <div class="bar" style="margin-top:14px">
+        <button class="btn danger" id="reset">初期配置に戻す</button>
+      </div>
+      <!-- ★2026-07-10(UIレビュー): アクセサリーの取り付けボーン設定は、
+           色許容誤差(色分けマップ由来の抽出処理)とは関心事が別なので、
+           自動マスクタブから切り離してこちら(マーク/骨格まわりのタブ)へ
+           移した(自動マスクタブには色許容誤差スライダーのみ残す)。 -->
+      <div id="automaskBoneList" style="margin-top:14px"></div>
+    </div>
+
+    <!-- 自動マスク(GHOST_SCANNER_PLAN.md「色分けマップ」方式):
+         front/side/leftSide/backの色分けマップ画像+抽出済みパーツ一覧を
+         同時表示する。★2026-07-09: マスク抽出処理自体(ゴーストスキャナー側
+         では固定の色許容誤差だった)をこちらへ移し、パーツごとに色許容誤差を
+         調整しながらその場で再抽出→プレビューできるようにした
+         (色分けマップがJSONに含まれている場合のみ。無い旧形式JSONでは
+         抽出済みのマスクをそのまま表示するだけになる)。 -->
+    <div class="tabpanel acpanel" data-tabpanel="automask">
+      <h2>自動マスク(色分けマップ由来)
+        <button type="button" class="qbtn" data-help="help-automask">?</button></h2>
+      <p class="helpText hidden" id="help-automask">
+        ゴーストスキャナーで生成/アップロードした色分けマップ(front/side/
+        leftSide/back、体=黒・背景=白・各accessory=パレット色でベタ塗り)から、
+        体色+全アクセサリー色を候補とした最近傍色分類でマスク(ラスタ)を
+        抽出した結果です(2026-07-11〜。各色ごとに色許容誤差を個別調整する
+        旧方式は、境界のグラデーション幅が許容誤差を超えるとどちらの判定にも
+        入らない未確定画素の帯を生む問題があったため廃止し、各画素が必ず
+        いずれか1色に確定的に割り当たる分類方式に統一した)。アクセサリーの
+        色(色分けマップ上の塗り分け色)を変更すると即座に再抽出してプレビュー
+        が更新されます(色分けマップがJSONに含まれている場合のみ。無い場合は
+        抽出済みのマスクをそのまま表示します)。<br><br>
+        <b>側面(右)/側面(左)の使い分け:</b> 全身(体そのもの)の奥行き
+        (前後の厚み)は常に側面(右)の画像だけを使う。側面(左)は全身の
+        奥行き計算には使わない。一方、ツインテール等パーツごとに抽出される
+        アクセサリーについては、側面(右)にそのパーツが写っていれば側面(右)
+        のマスクを、写っていなければ側面(左)のマスク(=そのパーツ自身の
+        奥行き形状として使われる)を使う、というパーツ単位の優先順位になって
+        いる(側面(右)優先、無ければ側面(左))。</p>
+      <div class="acitem" id="automaskVisibilityRow" style="margin-bottom:10px;flex-wrap:wrap">
+        <span class="nm">プレビューに表示する項目</span>
+        <button type="button" class="btn sm" id="automaskVisAllBtn" style="flex:0 0 auto">全選択</button>
+        <button type="button" class="btn sm" id="automaskVisNoneBtn" style="flex:0 0 auto">全解除</button>
+        <div id="automaskVisChecks" style="width:100%;display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"></div>
+      </div>
+      <div id="automaskColormaps" class="row" style="flex-wrap:wrap"></div>
+      <div id="automaskList" class="aclist"></div>
+      <p class="hint" id="automaskEmptyHint" style="font-size:11px;color:var(--mut)"></p>
+    </div>
+    <div id="automaskLightbox"></div>
+
+    <!-- ★2026-07-09: 手動マスク(除外範囲塗り、exclude_masks方式)タブは、
+         全身のシルエットが色分けマップ(体=黒)由来の抽出方式に一本化された
+         ことで不要になり廃止した(ユーザー合意済み)。
+         ★2026-07-13追加(ユーザー要望「昔あった手動マスク機能を復活して、
+         全身・パーツごとに塗れるように」): 上記とは別の目的で、色分けマップ
+         そのものへ直接ブラシで塗り足せる「手動マスク」タブを新設した。
+         例えばツインテールに隠れて後ろ髪の輪郭が写真上に存在しない場合、
+         隠れているはずの範囲を後ろ髪の色で塗り足せば、彫刻の入力データ自体が
+         実在するようになり、bone_bridgeのような幾何的な橋渡しに頼らず
+         根本的に隙間を埋められる(colormaps[view].canvasへ直接ペイントする
+         だけなので、既存の自動マスク抽出(extractAllAccessoryMasks)・
+         保存/書き出し(colormaps、buildJson参照)にそのまま乗る)。 -->
+    <div class="tabpanel acpanel" data-tabpanel="paintmask">
+      <h2>手動マスク(色分けマップに直接塗る)
+        <button type="button" class="qbtn" data-help="help-paintmask">?</button></h2>
+      <p class="helpText hidden" id="help-paintmask">
+        色分けマップ(front/side/leftSide/back)へ直接ブラシで塗り足して、体
+        または各アクセサリーの領域を追加/修正できます。例えばツインテールに
+        隠れて後ろ髪の輪郭が写真から読み取れない場合、隠れているはずの範囲を
+        「後ろ髪」の色で塗り足すと、そのぶん彫刻の入力データ自体が実在する
+        ようになり、パーツ間の隙間を根本から埋められます。塗った内容は自動
+        マスクの抽出結果やモデル生成にそのまま反映されます。この面の色分け
+        マップがまだ無い場合、最初の一筆で白背景(=未着色)の新規マップを
+        自動的に作成します。</p>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">面</span>
+        <div id="paintViewbar" style="display:flex;gap:6px;flex:1;flex-wrap:wrap"></div>
+      </div>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">塗る対象</span>
+        <div id="paintTargetList" style="display:flex;gap:6px;flex-wrap:wrap;flex:1"></div>
+      </div>
+      <div class="acitem" style="margin-bottom:8px">
+        <span class="nm">ブラシ/消しゴム</span>
+        <button type="button" class="btn sm on" id="paintModeBrush" style="flex:0 0 auto">🖌 ブラシ</button>
+        <button type="button" class="btn sm" id="paintModeEraser" style="flex:0 0 auto">🧹 消しゴム</button>
+      </div>
+      <div class="acitem" style="margin-bottom:8px">
+        <span class="nm">ブラシサイズ</span>
+        <input type="range" id="paintBrushSlider" min="2" max="150" value="24" style="flex:1">
+        <span id="paintBrushVal" style="width:36px;text-align:right;font-size:11px;color:var(--mut);flex:0 0 auto">24px</span>
+      </div>
+      <div class="paintZoomRow">
+        <span class="nm" style="flex:0 0 auto">表示</span>
+        <div class="paintZoomBtns">
+          <button type="button" class="btn sm" id="paintZoomOut" title="縮小">－</button>
+          <button type="button" class="btn sm" id="paintZoomReset" title="幅に合わせてリセット" style="width:64px">リセット</button>
+          <button type="button" class="btn sm" id="paintZoomIn" title="拡大">＋</button>
+        </div>
+        <div class="paintDpad">
+          <span></span><button type="button" id="paintPanUp">▲</button><span></span>
+          <button type="button" id="paintPanLeft">◀</button><span></span><button type="button" id="paintPanRight">▶</button>
+          <span></span><button type="button" id="paintPanDown">▼</button><span></span>
+        </div>
+      </div>
+      <div id="paintCanvasWrap" style="margin-bottom:8px"></div>
+      <p class="hint" id="paintEmptyHint" style="font-size:11px;color:var(--mut)"></p>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">輪郭拡張</span>
+        <input type="number" id="paintExpandPx" value="6" min="1" max="60" step="1" style="width:56px">
+        <span style="font-size:11px;color:var(--mut);flex:0 0 auto">px</span>
+        <button type="button" class="btn sm" id="paintExpandBtn" style="flex:0 0 auto">この対象の輪郭を拡張</button>
+      </div>
+      <p class="hint" style="font-size:11px;color:var(--mut);margin:-4px 0 8px">
+        「塗る対象」で選んだ領域を、指定px分だけ外側(他パーツの領域)へ一括で太らせます。ツインテールに隠れた後ろ髪の輪郭を隠れている側へ食い込ませて拡張する、といった用途を想定しています。背景(色分けマップ上で何も塗られていない範囲、体+全アクセサリーの合計シルエットの外側)へは広がらないため、実際には描かれていない架空の領域を作ってしまう心配はありません。ブラシで縁を1px単位でなぞる代わりに使えます。</p>
+      <div class="acitem" style="margin-bottom:8px;flex-wrap:wrap">
+        <span class="nm">隙間を自動で塞ぐ</span>
+        <input type="number" id="paintCloseGapPx" value="6" min="1" max="60" step="1" style="width:56px">
+        <span style="font-size:11px;color:var(--mut);flex:0 0 auto">px</span>
+        <button type="button" class="btn sm" id="paintCloseGapBtn" style="flex:0 0 auto">この面の隙間を塞ぐ</button>
+      </div>
+      <p class="hint" style="font-size:11px;color:var(--mut);margin:-4px 0 8px">
+        「輪郭拡張」は塗る対象を1つずつ選んで手動で広げますが、こちらはこの面
+        全体を見て、指定px以下の幅の隙間(パーツとパーツの間に残った細い背景の
+        帯)を自動的に検出し、隣接するパーツの色でまとめて塞ぎます(画像処理の
+        「クロージング」相当。塗る対象の選択には関係なく面全体に一度に効きます)。
+        全体の外周のシルエットは変えず、パーツ間の狭い隙間だけを埋められます。
+        指定px以上の広い隙間や背景そのものには影響しません。</p>
+      <div class="row">
+        <button class="btn" id="paintUndo">↩ 元に戻す</button>
+        <button class="btn danger" id="paintClearView">この対象をこの面で開いた時の状態に戻す</button>
+      </div>
+    </div>
+
+    <!-- ★Task3(GENERATOR_LIVE_PREVIEW_PLAN.md追加課題7): 「画像境界」タブ
+         (seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの編集UI)は
+         character_3d.html(ビューア)側に完全移管したため削除した。
+         2026-07-10に側面画像利用(seamAngles/seamNoSide)分だけ一度
+         このタブへ復活させたが、ビューア側(Task1「継ぎ目」パネル)に
+         既に同一機能があり単純な重複だったため再度削除した(ユーザー指摘)。
+         seamAngles/seamNoSide/seamSmoothIters/colorGradWidthの各変数自体と
+         buildJson()での出力は変更していない(既定値のままintermediate
+         パッケージへ渡り、ビューアの初期値として使われる)。 -->
+
+    <div class="tabpanel acpanel" data-tabpanel="params">
+      <h2>モデル生成パラメータ（試行錯誤用）
+        <button type="button" class="qbtn" data-help="help-params">?</button></h2>
+      <p class="helpText hidden" id="help-params">
+        pipeline.py側にハードコードされていた生成パラメータをここで調整できます。
+        landmarks_ai.json に保存され、次回パイプライン実行時に反映されます。
+        触らなければ全て既定値のまま動作します（各項目に既定値を記載）。</p>
+      <div id="paramsPanel"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn" id="paramsResetAll">全て既定値に戻す</button>
+      </div>
+    </div>
+
+    <div class="tabpanel acpanel" data-tabpanel="gen">
+      <h2>JSON</h2>
+      <div class="bar">
+        <button class="btn mint" id="export">landmarks.json 出力</button>
+        <button class="btn" id="copy">JSONをコピー</button>
+      </div>
+      <h2 style="margin-top:18px">モデル生成</h2>
+      <div class="bar">
+        <button class="btn mint" id="generateBtn" style="height:48px;font-size:14px">▶ モデル生成してビューアで見る</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="genOverlay" class="hidden">
+    <div class="genTag" id="genTag"><span class="dot"></span><span id="genTagText">GENERATING</span></div>
+    <div style="font-size:15px;color:var(--mint);font-weight:600" id="genStage">準備中…</div>
+    <div style="font-size:34px;font-variant-numeric:tabular-nums" id="genSeconds">0秒</div>
+    <div style="font-size:11.5px;color:var(--mut);max-width:280px" id="genNote">
+      端末内(ブラウザ)だけでモデルを生成しています。解像度が高いほど時間がかかります(数十秒〜数分)。</div>
+    <div id="genError" class="hidden" style="font-size:12px;color:#ff6b6b;max-width:300px"></div>
+  </div>
+
+  <div id="modeChoice" class="hidden" style="max-width:420px;margin:10px auto 0">
+    <p style="font-size:12.5px;color:var(--mut);margin:0 0 12px;text-align:center">モードを選んでください</p>
+    <!-- ★2026-07-09: setMsg()が書き込む#msgは編集画面(#editor)の中にあり、
+         モード選択画面表示中は隠れているため、ここでの読み込み失敗
+         (例: サンプル画像のfetch失敗)がsetMsg()だけだと画面上どこにも
+         表示されず、「ボタンを押しても反応がない」ように見えるバグが
+         あった。モード選択画面用に別のメッセージ欄を用意する。 -->
+    <p id="modeMsg" class="hidden" style="font-size:12px;color:#ff8484;margin:0 0 12px;text-align:center"></p>
+    <div class="modeCard mint" id="modeSampleBtn">
+      <b>サンプルモードで開く</b>
+      <span id="modeSampleDesc">同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。</span>
+      <span class="sampleSelectRow"><select id="sampleSelect"></select></span>
+      <span id="modeSampleResetRow" class="hidden" style="margin-top:6px">
+        <button type="button" class="btn sm" id="modeSampleReset" style="flex:0 0 auto;height:28px;font-size:11px">前回のサンプル編集を破棄して初期状態に戻す</button>
+      </span>
+    </div>
+    <!-- ★2026-07-09(UIレビュー): front/side/backを個別にアップロードする
+         「新規作成」モードは廃止した。画像もJSONに埋め込む形式に統一した
+         ため、新規のキャラクターもゴーストスキャナー(ghost_scanner.html)側で
+         写真を読み込み→画像込みのJSONを書き出す形にする。このツール単体では
+         画像込みJSONの読み込みが唯一の入口になる(ページ最上部の
+         「📂 JSON読み込み」ボタンと同じ動作)。 -->
+    <div class="modeCard" id="modeJsonBtn">
+      <b>JSONから読み込み</b>
+      <span>ゴーストスキャナー等で書き出した、画像込みのlandmarks_ai.jsonを読み込んで開始します。</span>
+    </div>
+    <div class="modeCard" id="modeContinueBtn">
+      <b>前回の続き</b>
+      <span id="modeContinueDesc">前回保存した通常モードの画像・ランドマークを読み込んで再開します。</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+// ★2026-07-10: STD(標準人体プロポーション)/buildMask/analyzeSilhouette/
+// placeAllLandmarksはjs/common.jsへ切り出し済み(ゴーストスキャナー側でも
+// AIを使わずランドマークを仮配置したい場合に再利用するため)。ここではその
+// 参照だけを保持する(既存コードの参照箇所は無改修で動くよう同名にしている)。
+const STD=P3D.STD;
+// フェーズ0(2026-07-07): 点定義/配色はjs/common.jsに切り出し済み(ゴースト
+// スキャナーの簡易プレビューでも同じ見た目を再利用するため)。ここではその
+// 参照だけを保持する(既存コードの参照箇所は無改修で動くよう同名にしている)。
+const LM=P3D.LM;
+const GCOL=P3D.GCOL;
+const LM_GROUP_ORDER=P3D.LM_GROUP_ORDER;
+const LM_GROUP_JP=P3D.LM_GROUP_JP;
+const BONES=["hips","torso","chest","neck","head",
+  "clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L",
+  "clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R",
+  "thigh_L","shin_L","foot_L","toe_L","thigh_R","shin_R","foot_R","toe_R"];
+// ボーンの部位グルーピング(アクセサリー取付ボーン選択・境目角度一覧の両方で使う)
+const BONE_GROUPS=[
+  {label:"体幹", bones:["hips","torso","chest","neck","head"]},
+  {label:"左腕", bones:["clavicle_L","upperarm_L","forearm_L","wrist_L","hand_L"]},
+  {label:"右腕", bones:["clavicle_R","upperarm_R","forearm_R","wrist_R","hand_R"]},
+  {label:"左脚", bones:["thigh_L","shin_L","foot_L","toe_L"]},
+  {label:"右脚", bones:["thigh_R","shin_R","foot_R","toe_R"]},
+];
+
+// ★2026-07-09(左右非対称キャラ対応): leftSide(左向き側面、色分けマップの
+// ことが多い)は任意。front/side/backと違い、マーク付け(ランドマーク)や
+// 除外範囲編集の対象画像としては扱わない(js/accessories.jsが左右非対称な
+// アクセサリーの彫刻にだけ使う)。
+let imgs={front:null,side:null,back:null,leftSide:null};
+let curView="front";
+function curImg(){return imgs[curView];}
+let accessories=[];
+const BONE_JP={hips:"腰",torso:"胴(下)",chest:"胸(上)",neck:"首",head:"頭",
+  clavicle_L:"鎖骨L",upperarm_L:"上腕L",forearm_L:"前腕L",wrist_L:"手首L",hand_L:"手L",
+  clavicle_R:"鎖骨R",upperarm_R:"上腕R",forearm_R:"前腕R",wrist_R:"手首R",hand_R:"手R",
+  thigh_L:"腿L",shin_L:"すねL",foot_L:"足L",toe_L:"つま先L",
+  thigh_R:"腿R",shin_R:"すねR",foot_R:"足R",toe_R:"つま先R"};
+let seamAngles={};
+let seamNoSide={}; // {boneName:true} または {"acc:"+名前:true} = 側面画像を使わない
+const SEAM_SIDE_DEFAULT_DEG=45; // atlas.jsのSEAM_DEFAULT_DEGと一致(角度未設定時の表示値)
+// ★2026-07-10に「標準では側面画像を使わない」という要望を受け、
+// normalizeSeamSideDefaults()でJSON読み込み・アクセサリー名変更のたびに
+// 未設定キーへ明示的にtrue(使わない)を補う処理を追加していたが、
+// これは「未指定キー=側面画像を使う」というseamNoSide本来の経路依存の既定値
+// (atlas.jsのloadSeamNoSide/loadAccessorySeamNoSide参照、チェックを入れて
+// 「使う」にするとキー自体をdeleteする実装、下のcheckboxハンドラ参照)と
+// 矛盾していた。ユーザーがチェックボックスで「使う」に変更してキーをdelete
+// しても、次にJSONを読み込み直すたび(ビューア往復・「前回の続き」等)に
+// normalizeSeamSideDefaultsが再度trueを補ってしまい、設定した「使う」が
+// 毎回「使わない」へ戻ってしまう不具合になっていた。加えて「既定は側面画像を
+// 使いたい」という要望(2026-07-17)を受け、この上書き自体を廃止し、
+// atlas.js本来の「未指定=使う」をそのまま既定値として使う。
+
+// ★2026-07-10: 素材(正面/側面/背面画像)の精度が高ければテクスチャ継ぎ目の
+// 平滑化は不要という判断により、既定を8→0(平滑化なし)に変更(ユーザー指摘)。
+// js/atlas.jsのopts.seamSmoothIters未指定時フォールバックも合わせて変更した。
+let seamSmoothIters=0; // 境界線平滑化の反復回数(atlas.jsのフォールバック既定と一致)
+const SEAM_DEFAULT_SMOOTH=0;
+let colorGradWidth=0; // 色のディザ(擬似)グラデーション幅(既定0=無効、js/atlas.js参照)
+const COLOR_GRAD_DEFAULT=0;
+let colorGradStrength=0.5; // 境目ちょうどでの最大ブレンド比率(0〜1)
+const COLOR_GRAD_STRENGTH_DEFAULT=0.5;
+// ★2026-07-10: 以前はjs/common.jsのP3D.DEFAULT_GEN_PARAMSと値を「一致させる」
+// 前提で、ここに丸ごとコピーした独自定義を持っていた。rigid_soft_widthが
+// こちらにしか存在しないという食い違いが生じていた(ユーザー指摘により発覚)ため、
+// P3D.DEFAULT_GEN_PARAMSを直接参照する形に統一し、定義元を1箇所にした
+// (ブラウザ版の既定値そのものの説明はjs/common.jsのコメント参照)。
+const DEFAULT_GEN_PARAMS=P3D.DEFAULT_GEN_PARAMS;
+// group: セクション見出し。type: "number"か"checkbox"。desc: 効果の説明
+// (「上げると/下げると」でどう変わるかを明記し、既定値はレンダ時に自動付記)。
+// ★2026-07-17(設定タブ整理): 従来は「輪郭抽出」「解像度/軽量化」「断面の
+// 丸み具合」「顔の彫刻」「パーツ境界」「ノイズ・ガタつき対策」「腕の彫刻」
+// 「手の彫刻」「エッジ処理」「背面/側面ズレ補正」「モデル調整」の11区分
+// あったが、処理工程の段階でグループ分けしていたため、同じ部位(腕・顔等)の
+// 設定が複数区分に分散し、名前だけでは何に効くのか分かりにくいという指摘を
+// 受けた(ユーザーとの棚卸し会話参照)。「最終的に何に対する処理か」を軸に
+// 6区分へ再編した:
+//   1. 画像読み取り: 入力の3枚絵(front/side/back)そのものの読み取り・位置合わせ
+//   2. モデルへの画像貼り付け: 彫刻済みモデルへ焼き込むテクスチャの処理
+//   3. モデルの細かさ: ボクセル解像度・間引きなど最終モデルの頂点数/重さ
+//   4. モデルの形: 断面の丸み・腕/手の彫刻方式など、狙った形状そのもの
+//   5. モデル補正: 抽出時の不具合(パーツ間の隙間等)を後から直す設定
+//   6. 動き方(スキニング): アニメーション時の関節の変形
+// あわせて、実サンプルで検証した結果「意味がない」と判断した項目
+// (face_sculpt/eye_socket_*、bone_bridge、track_win/track_gap_close_px/
+// depth_gap_close_px)を機能ごと削除した(js/common.js DEFAULT_GEN_PARAMS
+// 参照)。
+const PARAM_META=[
+ // ---- 1. 画像読み取り ----
+ {group:"画像読み取り", key:"subpixel_edges", label:"色分けマップ境界のサブピクセル補正", type:"checkbox",
+  desc:"ONだと、色分けマップ上の体・各アクセサリー・背景の境界(最近傍色分類による確定的な境界)を、アンチエイリアスで混ざった実際の色から1px未満の精度で補間する。OFFだと従来通り整数px単位の境界になる(輪郭がわずかにガタつく)。以前の輝度しきい値ベースのサブピクセル補正は色分けマップで不安定になった実績があるため、様子を見て問題があればOFFに戻せるようにしている。"},
+ {group:"画像読み取り", key:"back_offset_x", label:"背面画像 左右ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"背面写真は前面写真とは別に撮影/作画されるため、前面基準の彫り出し/貼り付けにpx単位のズレが残ることがある。正の値で背面の彫り出し/テクスチャ参照位置を右へ、負の値で左へずらす。実際のビューアで見た目を確認しながら調整する。"},
+ {group:"画像読み取り", key:"back_offset_y", label:"背面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はback_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"画像読み取り", key:"side_offset_x", label:"側面画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"側面写真の奥行き(前後)方向の基準ズレを補正する。正の値で奥行きの参照位置を右へ、負の値で左へずらす。"},
+ {group:"画像読み取り", key:"side_offset_y", label:"側面画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+ {group:"画像読み取り", key:"leftside_offset_x", label:"側面(左)画像 左右(奥行き)ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"左右非対称キャラ用のleftSide(左向き側面)画像のズレ補正。意味・使い方はside_offset_xと同じ(mask.leftSideを持つアクセサリーだけに影響する。全身の奥行きは常にside(右)画像のみを使い、leftSideは使わない)。"},
+ {group:"画像読み取り", key:"leftside_offset_y", label:"側面(左)画像 上下ズレ補正", type:"number", min:-100, max:100, step:1, unit:"px",
+  desc:"意味はleftside_offset_xと同じで上下方向。正の値で下へ、負の値で上へずらす。"},
+
+ // ---- 2. モデルへの画像貼り付け ----
+ // ★2026-07-17修正(ユーザー指摘): 以前の説明は「輪郭のディテールがわずかに
+ // 丸まる」としていたが誤りだった。にじみ(bleedEdges)は焼き込むテクスチャ
+ // 画像だけを加工する処理で、3Dモデルの輪郭(切り抜き/シルエット)は
+ // classifySilhouetteRaw由来の別処理で独立に決まる。にじみの効果は
+ // テクスチャのUV継ぎ目でのはみ出し防止マージンがどこまで届くかだけであり、
+ // 3D形状には一切影響しない。
+ {group:"モデルへの画像貼り付け", key:"alpha_dilate", label:"テクスチャのにじみマージン", type:"number", min:0, max:30, step:1, unit:"px",
+  desc:"テクスチャに焼き込む色にじみ(UV継ぎ目でのはみ出し防止マージン)がどこまで届くかの量。3Dモデルの輪郭(切り抜き形状)には影響しない、あくまでテクスチャ画像の色の広がりだけの設定。"},
+ {group:"モデルへの画像貼り付け", key:"bleed_inset_px", label:"にじみの起点を内側へずらす量", type:"number", min:0, max:15, step:1, unit:"px",
+  desc:"縁の色にじみ(上のマージン)は既定で輪郭ぎりぎりの画素を起点に外側へ伸ばすため、元イラストが輪郭を黒い縁取りストロークで描いていると、その黒色までにじんで縁取りが太って見えることがある。この値を増やすと、輪郭からこの分だけ内側(縁取りより内側の本来の塗り色)を起点ににじませるようになる。0で従来通り輪郭ぎりぎりから。"},
+ {group:"モデルへの画像貼り付け", key:"kb_per_face", label:"テクスチャ1面あたりの目標容量上限", type:"number", min:50, max:1000, step:10, unit:"KB"},
+
+ // ---- 3. モデルの細かさ ----
+ // ★2026-07-14追加(ユーザー指摘「横方向は490頂点も要らない、丸みは数式で
+ // 合成してるだけだから細かく作る必要ない。縦方向は画像の実測値だから重要」):
+ // 縦(Y、高さ方向)と横/奥行き(X・Z)の解像度を分離した(js/carving.jsの
+ // buildGrid参照)。縦は各行がfront/side/back画像の実測データそのものだが、
+ // 横/奥行きは各行の断面をsuperellipse数式で合成しているだけの近似形状
+ // なので、縦ほど細かくしても実質的な情報は増えない。
+ {group:"モデルの細かさ", key:"body_vox", label:"ボクセル解像度(縦・高さ方向)", type:"number", min:0.0005, max:0.02, step:0.0005, unit:"(model単位)", pxUnit:true,
+  desc:"小さくするほど滑らかになるが生成が遅く・データも重くなる。front/side/back画像の実測行をそのままサンプルする縦(Y、高さ)方向の解像度。「ボクセルを1pxに合わせる」ボタンで元画像のpx解像度にちょうど合わせられる(これ以上細かくしても元画像に存在しない情報を彫るだけで無駄)。"},
+ // ★2026-07-17修正(ユーザー指摘「髪の毛先とか細かくしないと表現できない」):
+ // 以前の説明は「縦方向ほど細かくしても見た目はほとんど変わらない」として
+ // いたが不正確だった。js/carving.jsのbuildWidthTracksはこの値より狭い
+ // (=細い)行セグメントを丸ごとノイズとして棄却するため、太い部位(胴体・脚
+ // 等)には確かに影響が薄い一方、髪の毛先のように元々細い部分はこの値が
+ // 粗いと物理的に消滅する。
+ {group:"モデルの細かさ", key:"body_vox_xz", label:"ボクセル解像度(横・奥行き方向)", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
+  desc:"太い部位(胴体・脚等)の断面は数式(superellipse)で合成しているだけの近似形状なので、この値を細かくしても見た目はほとんど変わらない。ただし、この値より細い(狭い)部分(髪の毛先等)はノイズとみなして丸ごと消えるため、細部を残したい場合は小さくする必要がある。既定値は縦解像度の4倍。大きくしすぎると太い部位の断面が多角形っぽくカクつき、かつ細い部分が消える。"},
+ {group:"モデルの細かさ", key:"decimate", label:"頂点数を間引く(体+アクセサリー共通)", type:"checkbox"},
+ {group:"モデルの細かさ", key:"decimate_strength", label:"間引きの強さ(体+アクセサリー共通)", type:"number", min:0, max:1, step:0.01, unit:"",
+  desc:"目標頂点数ではなく、間引きで許容する形状のズレの上限(誤差ベース、js/carving.jsのstrengthToMaxCost参照)。内部では「辺の長さ×その辺を挟む面同士の法線がなす角度」をコストとし、コストが低い(=目立たない)辺から間引く。大きいほど許容誤差が指数的に増え強く間引かれる。decimateがONの時のみ有効。"},
+ // ★2026-07-20追加(間引きスパイク対策、js/vendor/SimplifyModifier.jsの
+ // computeEdgeCollapseCost参照): エッジコラプスの副作用で生まれる辺が、
+ // 彫刻直後の元の近傍密度に対して大きく伸びる場合、そのコラプスをハード
+ // 禁止する。
+ {group:"モデルの細かさ", key:"decimate_spike_guard", label:"間引きスパイクの抑制", type:"checkbox",
+  desc:"間引き(エッジコラプス)の副作用で、周囲から孤立した頂点が細長い突起(スパイク)に見える不具合を防ぐ。彫刻直後の元の密度に対して大きく伸びる辺を生むコラプスを完全に禁止する(該当箇所はそれ以上間引かれず、密なまま残る)。彫刻結果(輪郭)は変更しない。decimateがONの時のみ有効。"},
+ {group:"モデルの細かさ", key:"decimate_spike_guard_ratio", label:"スパイク抑制の閾値(倍率)", type:"number", min:1.5, max:8, step:0.5, unit:"",
+  desc:"コラプスで新しくできる辺が、彫刻直後の元の近傍密度の何倍を超えたら禁止するか。小さいほど厳しく(間引きが弱まりやすい)、大きいほど緩い。"},
+
+ // ---- 4. モデルの形 ----
+ {group:"モデルの形", key:"psq_head", label:"頭の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"首より上(頭部)の断面形状。2に近いほど卵型(丸み)に近づき、大きくすると四角形に近づく(専門的には「スーパー楕円指数」と呼ぶ形状パラメータ)。"},
+ {group:"モデルの形", key:"psq_torso", label:"胴体の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"首〜腰(胸/腹/腰)の断面形状。2に近いほど楕円(丸み)に近づき、大きくすると四角形に近づく(角ばった衣装等で有効な場合がある)。腕/脚が胴体に接続する遷移帯の形状にも使われる。"},
+ {group:"モデルの形", key:"psq_legs", label:"脚の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"腰から下(脚)の断面形状。左右対称なので左右で共通の1個の値。意味はpsq_torsoと同じ。"},
+ {group:"モデルの形", key:"psq_arms", label:"腕の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"肩→肘→手首の円形断面(arm_circle有効時)に使う指数。左右対称なので左右で共通の1個の値。2に近いほど円形に近く自然な腕になる。"},
+ {group:"モデルの形", key:"psq_hands", label:"手の断面の丸み", type:"number", min:1.2, max:6, step:0.1, unit:"",
+  desc:"手首から先(手)の押し出し厚み(hand_extrude有効時)の奥行き方向の断面に使う指数。左右対称なので左右で共通の1個の値。大きくするほど厚みが一定の板に近づき、小さくすると縁が丸まったレンズ状になる。"},
+ {group:"モデルの形", key:"arm_circle", label:"腕をボーンに沿った円筒形にする", type:"checkbox",
+  desc:"ONだと肩→肘→手首の骨線に沿って、front画像の各列で腕の縦(y)方向の太さを測り、それを奥行き(z)に適用した円形断面で彫る(side計測は腕に使わない。腕が板状/胴体並みの厚みになるのを防ぐ)。OFFにすると従来通りside計測の奥行きをそのまま使う。"},
+ {group:"モデルの形", key:"arm_max_hw", label:"腕とみなす最大半径", type:"number", min:0.01, max:0.2, step:0.005, unit:"(model単位)", pxUnit:true,
+  desc:"腕の円形断面の半径(縦幅から傾き補正した値)の上限。これを超える列は腕とみなさない(骨線が肩の付け根など胴体内部を通る列を誤って円形化するのを防ぐ)。小さくしすぎると太い袖の腕が拾われなくなる。arm_circleがONの時のみ有効。"},
+ {group:"モデルの形", key:"hand_extrude", label:"手首から先を一定奥行きで押し出す", type:"checkbox",
+  desc:"ONだと手首から先(手)を、side計測の奥行き(その高さの胴体・腰の厚み)ではなく、front絵柄のシルエットをhand_depthの薄い奥行きでそのまま押し出した板として彫る。OFFだと従来通りside計測の奥行きになる。"},
+ {group:"モデルの形", key:"hand_depth", label:"手の厚み(半分の値)", type:"number", min:0.005, max:0.06, step:0.005, unit:"(model単位)", pxUnit:true,
+  desc:"手の押し出しの厚みの半分(全厚はこの2倍)。side計測やシルエット幅に関係なく、手の奥行きは常にこの設定値になる。hand_extrudeがONの時のみ有効。"},
+
+ // ---- 5. モデル補正 ----
+ // ★2026-07-12追加(ユーザー指摘「45度から見たらパーツ間隙間が開く」対応):
+ // 体+全アクセサリーは1つの共有グリッドへ統合彫刻されるが、各パーツの
+ // フィールドはそのパーツ自身のfront/side/back画像だけから独立に作られる
+ // ため、3方向どの投影でも輪郭が一致して見えても斜め方向には「どちらの
+ // パーツの表面も届いていない」隙間ができることがある(js/carving.jsの
+ // carveSdfField/carveUnifiedRegions参照)。
+ {group:"モデル補正", key:"part_gap_close", label:"パーツ間の隙間を距離で塞ぐ", type:"checkbox",
+  desc:"まだどのパーツも彫刻データを持たない空ボクセルのうち、異なる2パーツ以上の表面から同時に「パーツ間の隙間を塞ぐ距離」以内に届いている(=パーツとパーツに挟まれた細い隙間の中にある)ボクセルだけを実体で埋める。ボクセルグリッド上の実測3次元距離だけで判定する。同一パーツ内の凹みや、1パーツだけに近い外周(輪郭そのもの)には影響しない。"},
+ {group:"モデル補正", key:"part_gap_close_dist", label:"パーツ間の隙間を塞ぐ距離", type:"number", min:0.001, max:0.05, step:0.001, unit:"(model単位)", pxUnit:true,
+  desc:"この距離以内で2パーツ以上に挟まれている隙間を塞ぐ。大きいほど広い隙間まで塞げるが、離れた無関係なパーツ同士まで誤って繋がるリスクが増える。part_gap_closeがONの時のみ有効。"},
+ {group:"モデル補正", key:"smooth_iters", label:"表面平滑化回数(体+アクセサリー共通)", type:"number", min:0, max:60, step:1, unit:"回",
+  desc:"ボクセル化(marching cubes)特有の階段状のガタつきを均す回数。増やすほど滑らかになるが、細かい造形も鈍る。"},
+ // ★2026-07-18追加(ユーザー指摘「顔に横線が入る、全体平滑化では狙い撃ちで
+ // 消せない」対応): 上のsmooth_itersは彫刻後のメッシュ全体を均等にならす
+ // ため、上下方向(行と行の間)だけに出る段差を狙い撃ちできず、強くかけると
+ // 輪郭全体がぼやける。row_smoothは彫刻前(front/back画像から幅を読み取った
+ // 直後)にiy(行)方向だけへ移動平均をかけ、段差の発生自体を抑える
+ // (js/carving.jsのbuildWidthTracks参照)。
+ {group:"モデル補正", key:"row_smooth", label:"行ごとの幅を平滑化する", type:"checkbox",
+  desc:"front/back画像から行(高さ)ごとに独立に読み取るシルエット幅を、彫刻前に上下方向へ均して段差(顔などに入る横線)を抑える。全体の輪郭形状(丸み)にはほぼ影響しない。"},
+ {group:"モデル補正", key:"row_smooth_strength", label:"行の幅平滑化の強さ", type:"number", min:1, max:10, step:1, unit:"行",
+  desc:"上下何行分を平均するか(片側の行数、実際の窓幅はこの2倍+1行)。大きいほど段差は消えるが、髪の房の分かれ目等の細かい上下変化も鈍る。row_smoothがONの時のみ有効。"},
+
+ // ★2026-07-18追加→2026-07-19改訂(ユーザー要望「ガクガクして可愛くない、
+ // 丸み補正(ぷにぷに感)がほしい」→ユーザー指摘「まだ硬い、どこまで強さを
+ // 上げてもガクガクが取れない」→実測(実サンプル56,837頂点)でmesh上の単純
+ // Laplacian緩和は反復数十回では誤差レベルの変化しか出ず撤回→ユーザー指摘
+ // 「丸み補正は太らせる機能に変える、柔らかさ/ガクガクは別の代替案に任せる」
+ // 対応): puni_*は頂点を法線方向へ一様にオフセットして体型を太らせるだけの
+ // シンプルな処理(js/pipeline.jsのmeshFinishStage、js/carving.jsの
+ // inflateMeshAlongNormals参照)。ガクガク解消(本来の「丸み」)は下の
+ // 「輪郭のぼかし」(field_soften_*)が担当する。
+ {group:"モデル補正", key:"puni_enable", label:"体型を太らせる", type:"checkbox",
+  desc:"ONにすると、輪郭全体を法線方向へ一様に膨らませて体型をふっくらさせる(段差やガクガクを均す効果は無い、単純なサイズ変化)。"},
+ {group:"モデル補正", key:"puni_strength", label:"太らせる強さ", type:"number", min:1, max:10, step:1, unit:"",
+  desc:"大きいほど膨らむ量が増える(最大で輪郭が model単位0.05分だけ外側にオフセットされる)。puni_enableがONの時のみ有効。"},
+
+ // ★2026-07-19追加(「ぷにぷに」丸み補正の代替案、ユーザー要望「彫刻前に
+ // SDFフィールドをぼかす方式を追加してほしい」対応): mesh上のLaplacian
+ // (smooth_iters)は不規則なメッシュグラフ上を1ホップずつしか伝播せず、実
+ // メッシュくらい密だと視認できる効果を出すには数百〜千反復が必要で非現実的
+ // だった。fieldは規則格子(ボクセルグリッド)なので、軸ごとの1次元box blur
+ // (半径によらずO(要素数)、js/carving.jsのblurField3D参照)を3軸へかける
+ // だけで、少ない計算量のまま広い実効半径のぼかしを一度に効かせられる。
+ // marching cubes直前にかけるため、階段状のガクガクの発生源(ボクセル量子化)
+ // そのものを彫刻段階で削れる。彫刻(marching cubes)をやり直す必要がある
+ // (Tier2/3、ライブパラメータ編集の対象外)。ぼけた分だけ輪郭が痩せて見える
+ // 場合は上の「体型を太らせる」と併用する想定(この機能単体ではサイズを
+ // 戻す補正をしない)。
+ {group:"モデル補正", key:"field_soften_enable", label:"輪郭をぼかして丸くする(彫刻段階)", type:"checkbox",
+  desc:"ONにすると、marching cubes直前のボクセルデータそのものをぼかし、階段状のガクガクの発生源を彫刻段階で削る。ONで設定を変えるたびモデルの再生成が必要(ライブ編集非対応)。"},
+ {group:"モデル補正", key:"field_soften_strength", label:"輪郭のぼかしの強さ", type:"number", min:1, max:10, step:1, unit:"",
+  desc:"大きいほどぼかす半径(ボクセル単位1〜4)が増え、輪郭全体がより丸く滑らかになるが、強くしすぎると細かい造形(前髪の房・指等)がつぶれ、輪郭全体が痩せて見えることがある。field_soften_enableがONの時のみ有効。"},
+
+ // ---- 6. 動き方(スキニング) ----
+ {group:"動き方(スキニング)", key:"rigid_soft_width", label:"関節の剛体化の柔らかさ", type:"number", min:0, max:0.8, step:0.05, unit:"",
+  desc:"アニメーションで動かした時、関節周りがどれだけ柔らかく変形するか(0で完全に剛体的、大きいほど滑らかに変形する)。"},
+];
+// ★2026-07-15: seam_smooth_iters/color_grad_width/color_grad_strengthは
+// genParams(DEFAULT_GEN_PARAMS)ではなく別建ての変数(seamSmoothIters等、下記)
+// なので、上のPARAM_META(genParams専用の仕組み)には載せられない。継ぎ目角度
+// パネル(seamAngles/seamNoSide)と合わせてrenderSeamPanel()で個別に描画する。
+// ★2026-07-09(UIレビュー): arm_tolはUIから削除した。旧・行スキャン方式でしか
+// 使われておらず、現在の列スキャン方式(arm_circle)では一切参照されない
+// (js/common.jsのDEFAULT_GEN_PARAMSにはarm_tol:0.06のまま残す。互換性のため)。
+let genParams=Object.assign({},DEFAULT_GEN_PARAMS);
+
+// ★2026-07-20(設定タブUI見直し、ユーザー指摘「縦に長すぎる」対応): PARAM_META
+// のgroup(6区分)を横並びサブタブに変更した上で、さらに1区分の中に複数の
+// 「話題」がある場合はサブサブタブでもう1段階層化し、スクロール量を減らす。
+// 「話題が同じか違うか」だけを基準に区切り、項目数の多寡では判断しない
+// (項目1個だけの話題でも、他と話題が違うなら独立したサブサブタブにする。
+// 「画像読み取り」の境界精度、「モデル補正」の平滑化がこのケース。ユーザーとの
+// 棚卸し会話で一貫性重視の方針に合意済み)。1区分内の話題が実質1つしかない
+// 場合(「モデルの細かさ」以外の…ではなく、「動き方」のように項目そのものが
+// 1個で話題も1つの区分)はこのマップにエントリを作らず、サブサブタブなしで
+// 直接一覧表示する。
+// keys: そのサブサブタブに含めるPARAM_METAのkey(表示順そのまま)。
+// extra: PARAM_META以外の追加コンテンツ(renderParamExtraHtml参照)。
+// preview: このサブサブタブを開いている間、2Dプレビュー(にじみ効果の
+// その場表示)を出す対象view。「にじみ」サブサブタブ(alpha_dilate/
+// bleed_inset_px)だけが対象(旧PREVIEW_GROUPS、2026-07-17の経緯コメント
+// 参照: view切り替えはグループ単位でしか対応していないため、offset系や
+// 継ぎ目系のサブサブタブには付けない)。
+const PARAM_SUBGROUPS={
+ "画像読み取り":[
+  {label:"境界精度", keys:["subpixel_edges"]},
+  {label:"位置ズレ補正", keys:["back_offset_x","back_offset_y","side_offset_x","side_offset_y","leftside_offset_x","leftside_offset_y"]},
+ ],
+ "モデルへの画像貼り付け":[
+  {label:"にじみ", keys:["alpha_dilate","bleed_inset_px"], preview:{view:"front"}},
+  {label:"テクスチャ容量", keys:["kb_per_face"]},
+  {label:"色ブレンド", keys:[], extra:"seamBlend"},
+  {label:"側面画像の利用", keys:[], extra:"seamSide"},
+ ],
+ "モデルの細かさ":[
+  {label:"解像度", keys:["body_vox","body_vox_xz"], extra:"vox"},
+  {label:"間引き", keys:["decimate","decimate_strength"]},
+  {label:"間引きスパイクの抑制", keys:["decimate_spike_guard","decimate_spike_guard_ratio"]},
+ ],
+ "モデルの形":[
+  {label:"断面の丸み", keys:["psq_head","psq_torso","psq_legs","psq_arms","psq_hands"]},
+  {label:"腕", keys:["arm_circle","arm_max_hw"]},
+  {label:"手", keys:["hand_extrude","hand_depth"]},
+  {label:"アクセサリー個別: 丸み", keys:[], extra:"accPsq"},
+  {label:"アクセサリー個別: 奥行き帯", keys:[], extra:"accDepthBand"},
+  {label:"アクセサリー個別: 奥行き画像", keys:[], extra:"accDepthSide"},
+ ],
+ "モデル補正":[
+  {label:"隙間埋め", keys:["part_gap_close","part_gap_close_dist"]},
+  {label:"平滑化", keys:["smooth_iters"]},
+  {label:"行の幅平滑化", keys:["row_smooth","row_smooth_strength"]},
+  {label:"太らせる", keys:["puni_enable","puni_strength"]},
+  {label:"輪郭のぼかし(丸み)", keys:["field_soften_enable","field_soften_strength"]},
+ ],
+ // "動き方(スキニング)"はrigid_soft_width1個のみで話題も1つなのでエントリなし。
+};
+function paramGroups(){
+  const groups=[]; PARAM_META.forEach(m=>{if(!groups.includes(m.group))groups.push(m.group);});
+  return groups;
+}
+function paramSubgroupsOf(g){ return PARAM_SUBGROUPS[g]||null; }
+function paramItemsFor(keys){ return keys.map(k=>PARAM_META.find(m=>m.key===k)).filter(Boolean); }
+function paramKeysChanged(keys){ return keys.some(k=>genParams[k]!==DEFAULT_GEN_PARAMS[k]); }
+// 現在アクティブなトップレベルタブ(グループ)/サブサブタブ(話題)。タブ切替を
+// またいで選択状態を保つため、レンダリング関数の外側に保持する。
+let paramsActiveGroup=paramGroups()[0];
+let paramsActiveSubgroup={}; // group -> 現在選択中のサブサブタブlabel
+function currentParamsSubgroupEntry(){
+  const subs=paramSubgroupsOf(paramsActiveGroup);
+  if(!subs || !subs.length) return null;
+  const label=paramsActiveSubgroup[paramsActiveGroup];
+  return subs.find(s=>s.label===label) || subs[0];
+}
+
+/* ---------- フェーズ0: 2Dプレビュー(パラメータ展開中に効果をその場表示) ---------- */
+let previewActive=null; // {group,label,view} 現在プレビュー中のサブサブタブ(無ければnull)
+// プレビュー画像のキャッシュ(同一view+パラメータで毎フレーム再計算しない
+// ように、直前の入力をキーにして保持する)。
+let previewCache={key:null,view:null,canvas:null,w:0,h:0};
+function previewCacheKey(view){
+  return [view, genParams.alpha_dilate, genParams.bleed_inset_px, accessories.map(a=>a.color||"").join(",")].join("|");
+}
+// ★2026-07-09: 体シルエットの2値化を色分けマップ方式に統一したため、プレビュー
+// もbodyAlphaFromColormap(最近傍色分類)を使う(white_thr/除外マスク/輪郭線
+// 除去プレビューは全て廃止)。
+// ★2026-07-17修正(ユーザー指摘「にじみは本来全身+全アクセサリーなのに
+// 体だけでにじんでいる」): 実際のパイプライン(js/pipeline.jsのbleedFgAlpha
+// 参照)はbleedEdgesの前景に体だけでなく全アクセサリーのマスクも和集合で
+// 含めているが、このプレビューは体のシルエットだけを前景として使っていた。
+// アクセサリーのmaskDataUrlはImage読み込みが非同期のため、読み込み済みの
+// ものだけをキャッシュ(accMaskImgCache)から都度合成し、未読み込みのものは
+// 読み込み完了時にプレビューキャッシュを無効化して再描画を促す。
+let accMaskImgCache={}; // "view:accIndex" -> HTMLImageElement(読み込み済み)
+function unionAlphaWithAccessories(view, cm){
+  const alpha=bodyAlphaFromColormap(cm);
+  accessories.forEach((a,i)=>{
+    const m=a.mask&&a.mask[view];
+    if(!m||!m.maskDataUrl)return;
+    const ck=view+":"+i;
+    const cached=accMaskImgCache[ck];
+    if(cached && cached!=="loading" && cached.complete){
+      const c=document.createElement("canvas"); c.width=cm.w; c.height=cm.h;
+      const cx=c.getContext("2d"); cx.drawImage(cached,0,0,cm.w,cm.h);
+      const id=cx.getImageData(0,0,cm.w,cm.h).data;
+      for(let p=0;p<alpha.length;p++){ if(id[p*4+3]>127) alpha[p]=1; }
+    }else if(!cached){
+      accMaskImgCache[ck]="loading"; // 読み込み中(complete判定を再度triggerしないための仮登録)
+      const mi=new Image();
+      mi.onload=()=>{ accMaskImgCache[ck]=mi; previewCache.key=null; if(previewModeActive())draw(); };
+      mi.src=m.maskDataUrl;
+    }
+  });
+  return alpha;
+}
+function buildPreviewCanvas(view){
+  const img=imgs[view]; const cm=colormaps[view]; if(!img||!cm)return null;
+  const key=previewCacheKey(view);
+  if(previewCache.key===key && previewCache.view===view) return previewCache;
+  try{
+    const alpha=unionAlphaWithAccessories(view, cm);
+    const rgba=P3D.imageToImageData(img.el, img.w, img.h).data;
+    const bled=P3D.bleedEdges(rgba, img.w, img.h, alpha, genParams.alpha_dilate, genParams.bleed_inset_px);
+    const c=document.createElement("canvas");c.width=img.w;c.height=img.h;
+    c.getContext("2d").putImageData(new ImageData(bled,img.w,img.h),0,0);
+    previewCache={key,view,canvas:c,w:img.w,h:img.h};
+    return previewCache;
+  }catch(e){ console.error("プレビュー生成に失敗しました",e); return null; }
+}
+// プレビュー対応のサブサブタブを開いている間は「設定値」タブでプレビューを表示する。
+function previewModeActive(){
+  return curTab==="params" && !!previewActive;
+}
+// プレビュー対象view("設定値"タブでの自動切替先)を決める。プレビュー中の
+// サブサブタブの推奨viewを使い、その面の画像が無ければ現在のviewに
+// フォールバックする。
+function previewTargetView(){
+  const wantView=previewActive?previewActive.view:curView;
+  return imgs[wantView]?wantView:curView;
+}
+// アクティブなサブサブタブ(またはグループ全体)のプレビュー設定を
+// previewActiveへ同期する。プレビュー対応タブなら現在viewもそちらへ切り替える
+// (旧details toggleイベント内で行っていた処理をタブ切替の共通処理に統合)。
+function syncPreviewActiveFromParamsTabs(){
+  const entry=currentParamsSubgroupEntry();
+  const pv=entry&&entry.preview;
+  if(pv){
+    previewActive={group:paramsActiveGroup,label:entry.label,view:pv.view};
+    if(imgs[pv.view]){curView=pv.view;view={z:1,ox:0,oy:0};syncViewBtns();}
+  }else{
+    previewActive=null;
+  }
+}
+function paramGroupChanged(g){
+  return PARAM_META.some(m=>m.group===g && genParams[m.key]!==DEFAULT_GEN_PARAMS[m.key]);
+}
+// ★2026-07-11: アクセサリー個別の「断面の丸み(psq)」は、以前は自動マスクタブの
+// アクセサリー別カードに置かれていたが、マスク抽出(色分けマップの切り抜き)には
+// 一切影響しない3D彫刻専用パラメータなので、こちらの設定値タブ(モデルの形
+// グループ)へ移動した。PARAM_METAは1キー=1パラメータのフラットな配列だが、
+// これはアクセサリーごとに複数値を持つため、同グループの末尾に特別に追加描画する。
+// ★2026-07-12(ユーザー指摘「まとめて設定は意味がない」): アクセサリーごとに
+// 理想的な丸みが違うのが前提なので、全体共通の「まとめて設定」(旧psq_acc)と
+// 「個別設定」チェックボックスの二段構えをやめ、各アクセサリーが常に自分自身の
+// psq値を持つ単純な形にした(スライダーは常に有効、チェックボックスは無し)。
+// ★2026-07-20(設定タブUI見直し): アクセサリー1件=3行(名前/スライダー行/数値行)
+// だった表示を、名前+スライダー+数値を横並びの1行(.acitem)にして縦を圧縮した。
+// 見出しの「アクセサリー個別の」プレフィックスも、この関数の出力が「アクセサリー
+// 個別」サブサブタブの中身そのものになったため冗長として外した。
+function renderPsqAccessoryOverridesHtml(){
+  if(!accessories.length) return "";
+  const rows=accessories.map((a,idx)=>{
+    const psqVal=(a.psq!==undefined && a.psq!==null)?a.psq:2;
+    const nm=a.name||"(無名)";
+    return '<div class="acitem">'+
+      '<span class="nm" style="flex:0 0 92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+nm+'">'+nm+'</span>'+
+      '<input type="range" class="psqAccSlider" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" style="flex:1;min-width:40px">'+
+      '<input type="number" class="psqAccNum" data-i="'+idx+'" min="1.2" max="6" step="0.1" value="'+psqVal+'" style="width:56px;flex:0 0 auto">'+
+      '</div>';
+  }).join("");
+  // ★2026-07-20(設定タブUI見直し): 「アクセサリー個別: 丸み」サブサブタブの
+  // 中身そのものになったため、タブ名と重複する見出しは省いた。
+  return '<div class="aclist" style="margin-bottom:10px">'+rows+'</div>';
+}
+// ★2026-07-19(ユーザー指摘「和集合が悪さしている」対応): 1行に複数の奥行き帯
+// (front/side画像のside側スキャンで、パーツの端で輪郭が中心をまたがなくなり
+// 分裂した帯)がある場合の扱いをアクセサリー単位で選べるチェックボックス。
+// 既定は正面/背面とも使う(union、従来通り)。どちらかを外すと、その側の帯を
+// 除外する(実測でスカート腰周りの裂けに効果を確認済み、js/carving.jsの
+// depth_band_front/depth_band_back参照)。
+// ★2026-07-20(設定タブUI見直し): アクセサリー1件=3行(名前/正面チェック/背面
+// チェックがそれぞれ独立行になっていた、親が.acform=flex-columnだったため)
+// だった表示を、.acitem(flex-row)にして名前+正面+背面を1行に圧縮した。
+// チェックボックスのラベルも長い説明文から短縮し(詳しい意味は上の説明文へ
+// 一本化)、1行に収まるようにした。
+function renderDepthBandAccessoryOverridesHtml(){
+  if(!accessories.length) return "";
+  const rows=accessories.map((a,idx)=>{
+    const useFront=a.depthBandFront!==false, useBack=a.depthBandBack!==false;
+    const nm=a.name||"(無名)";
+    return '<div class="acitem">'+
+      '<span class="nm" style="flex:0 0 92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+nm+'">'+nm+'</span>'+
+      '<label style="font-size:10.5px;color:var(--mut);display:flex;align-items:center;gap:3px;flex:0 0 auto;white-space:nowrap">'+
+      '<input type="checkbox" class="depthBandFrontChk" data-i="'+idx+'" '+(useFront?"checked":"")+'> 正面</label>'+
+      '<label style="font-size:10.5px;color:var(--mut);display:flex;align-items:center;gap:3px;flex:0 0 auto;white-space:nowrap">'+
+      '<input type="checkbox" class="depthBandBackChk" data-i="'+idx+'" '+(useBack?"checked":"")+'> 背面</label>'+
+      '</div>';
+  }).join("");
+  // ★2026-07-20(設定タブUI見直し): タブ名(アクセサリー個別: 奥行き帯)と
+  // 重複する「奥行き帯」の見出し語は省き、注意書きだけ残した。
+  return '<div style="margin-bottom:10px">'+
+    '<div style="font-size:10.5px;color:var(--mut);margin-bottom:6px">1行に複数帯がある場合、両方offにはできません。パーツの端で輪郭が中心をまたがなくなり、奥行き方向に複数の帯へ分裂することがあります。両方使う(既定)と裂けが出る場合、片方だけに絞ると直ることがあります。</div>'+
+    '<div class="aclist">'+rows+'</div></div>';
+}
+// ★2026-07-19(右/左の選択制対応): 奥行きにside(右)/leftSide(左)のどちらの
+// 側面画像を使うかをアクセサリー単位で選べるチェックボックス。既定(両方とも
+// 未設定=auto)は従来通りleftSideがあればleftSideのみを使う(js/accessories.js
+// のbuildAccessoryCarveOptsList参照)。チェック状態のプレビューはこの既定の
+// 目安であり、実際の解決(データの有無によるフォールバック等)は生成時に
+// js/accessories.js側で行う。
+// ★2026-07-20(設定タブUI見直し): 上のrenderDepthBandAccessoryOverridesHtmlと
+// 同じ理由・同じ方法(.acitemで1行化)で圧縮した。
+function renderDepthSideAccessoryOverridesHtml(){
+  if(!accessories.length) return "";
+  const rows=accessories.map((a,idx)=>{
+    const hasLeftMask = !!(a.mask && a.mask.leftSide);
+    const useRight = a.depthSideRight!==undefined ? a.depthSideRight : !hasLeftMask;
+    const useLeft = a.depthSideLeft!==undefined ? a.depthSideLeft : hasLeftMask;
+    const nm=a.name||"(無名)";
+    return '<div class="acitem">'+
+      '<span class="nm" style="flex:0 0 92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+nm+'">'+nm+'</span>'+
+      '<label style="font-size:10.5px;color:var(--mut);display:flex;align-items:center;gap:3px;flex:0 0 auto;white-space:nowrap">'+
+      '<input type="checkbox" class="depthSideRightChk" data-i="'+idx+'" '+(useRight?"checked":"")+'> 右(side)</label>'+
+      '<label style="font-size:10.5px;color:var(--mut);display:flex;align-items:center;gap:3px;flex:0 0 auto;white-space:nowrap">'+
+      '<input type="checkbox" class="depthSideLeftChk" data-i="'+idx+'" '+(useLeft?"checked":"")+'> 左(leftSide)</label>'+
+      '</div>';
+  }).join("");
+  // ★2026-07-20(設定タブUI見直し): タブ名(アクセサリー個別: 奥行き画像)と
+  // 重複する「奥行き画像」の見出し語は省き、注意書きだけ残した。
+  return '<div style="margin-bottom:10px">'+
+    '<div style="font-size:10.5px;color:var(--mut);margin-bottom:6px">左右非対称な素材向け、両方offにはできません。既定はleftSide画像があればそちらのみ使用(自動)。両方チェックすると和集合(両方の輪郭を合成)、片方だけなら単独使用になります。</div>'+
+    '<div class="aclist">'+rows+'</div></div>';
+}
+// ★2026-07-14追加(ユーザー指摘「ボクセルとピクセルを一致させたら無駄がない」):
+// body_vox(model単位)を、元画像のpx解像度にちょうど1px=1voxelで合わせられる
+// ヘルパーを表示する。SCALE(px/model単位、js/pipeline.jsのrunCarvingStagesが
+// 生成時に計算するprof.YBOT-prof.YTOP)と全く同じ値を、ランドマーク配置時の
+// analysis.BH(=analysis.ybot-analysis.ytop)が既に持っている(2026-07-04の
+// 修正で両者を同じ2値化方式に揃え済み)。voxが元画像のpx解像度より細かいと、
+// 実際には存在しない副px情報を彫るだけで生成が遅く重くなるだけ無駄になる
+// (逆に粗すぎると実在する輪郭の情報を捨てることになる)。
+function renderVoxPxHelperHtml(){
+  if(!analysis || !analysis.BH) return "";
+  const scale=analysis.BH; // px / model単位(身長のpx実測値)
+  const curVox=genParams.body_vox;
+  const curPx=(curVox*scale).toFixed(2);
+  const fitVox=1/scale;
+  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
+    '<div style="font-size:11px;color:var(--mut)">現在の縦方向ボクセル解像度は元画像の約<b style="color:#7aa2ff">'+curPx+'px</b>相当です(身長実測'+Math.round(scale)+'pxから換算)。'+
+    '1pxより細かい設定は元画像に存在しない情報を彫るだけで、生成が遅く・重くなるだけで無駄になります。</div>'+
+    '<button type="button" class="btn sm" id="voxFitPxBtn" style="margin-top:6px">縦方向ボクセルを1pxに合わせる(推奨値 '+fitVox.toFixed(5)+')</button>'+
+    '</div>';
+}
+// ★2026-07-15(モデル調整機能のジェネレータ移植): character_3d.htmlの
+// 「フェーズ2」ライブ継ぎ目パネル(seamAngles/seamNoSide、BONE_GROUPS_V/
+// BONE_JP_Vを使ったボーン別編集+一括設定)をこちらに移植したもの。
+// BONE_GROUPS/BONE_JP/seamAngles/seamNoSide/SEAM_SIDE_DEFAULT_DEGは元々
+// このファイルに存在する(自動マスクタブのボーン選択等と共有)ため、新規に
+// 定義し直さずそのまま使う。ジェネレータには3Dプレビューが無いため、値を
+// 変えても再計算はせず(scheduleGenRecompute相当は無し)、生成ボタンを押した
+// 時点でfinishFromIntermediate()に渡る。
+// ★2026-07-16追加(ユーザー指摘「Array buffer allocation failedが出た、1px/1px
+// にしたからか?推定頂点数を出してほしい」対応): body_vox_xzも1pxにすると
+// グリッド(nx*ny*nz)がTポーズの腕先まで含む全体範囲を1pxで割った巨大なものに
+// なり(体格に対して不要に細かい)、field/ownerField(各Float32Array/
+// Int32Array)2本の確保だけで数GBに達してArrayBuffer確保が失敗することがある。
+// 実際に彫刻(marching cubes)を走らせる前に、この危険を数値で確認できるように
+// する(P3D.runCarvingStagesのestimateOnlyモード、js/pipeline.js参照)。
+function renderVertEstimateHtml(){
+  return '<div class="acform" style="margin-bottom:6px;border-top:1px solid var(--line);padding-top:8px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">推定頂点数・メモリ(体+全アクセサリー概算、間引き前後)</div>'+
+    '<button type="button" class="btn sm" id="estimateVertBtn">推定を計算</button>'+
+    '<div id="estimateVertResult" style="font-size:11px;color:var(--mut);margin-top:6px;line-height:1.6"></div>'+
+    '</div>';
+}
+let seamGroupOpen={}, seamBulkOpen=false;
+function seamRowHtml(label,key,v,ns){
+  return '<div class="acitem"><span class="nm">'+label+'</span>'+
+    '<label style="font-size:10.5px;color:var(--mut);margin-right:6px;white-space:nowrap">'+
+    '<input type="checkbox" data-seam-side="'+key+'" '+(ns?"":"checked")+' style="vertical-align:middle"> 側面画像を使う</label>'+
+    '<input type="range" min="1" max="89" step="1" value="'+v+'" data-seam-range="'+key+'" style="flex:1;min-width:40px" title="使う場合の切替角度">'+
+    '<input type="number" min="1" max="89" step="1" value="'+v+'" data-seam-key="'+key+'" style="width:44px" title="使う場合の切替角度">°'+
+    '</div>';
+}
+function seamAccKeys(){ return accessories.map(a=>"acc:"+a.name); }
+function renderSeamBulkHtml(){
+  return '<details class="accgroup" data-seamgroup="一括設定"'+(seamBulkOpen?" open":"")+'>'+
+    '<summary><span>側面画像の利用: 一括設定</span><span class="accCount">2項目</span></summary>'+
+    '<div class="accbody">'+
+    '<div class="acitem" style="margin-bottom:8px">'+
+    '<span class="nm">全パーツ一括</span>'+
+    '<input type="number" id="seamBulkVal" min="1" max="89" step="1" value="45" style="width:56px">°'+
+    '<button type="button" class="btn sm mint" id="seamBulkApply">全パーツに適用</button>'+
+    '</div>'+
+    '<div class="acitem" style="flex-wrap:wrap;row-gap:6px">'+
+    '<span class="nm" style="flex:1 1 100%">側面画像を使う(一括)</span>'+
+    '<button type="button" class="btn sm mint" id="seamSideAllOn" style="flex:1 1 auto">全パーツON</button>'+
+    '<button type="button" class="btn sm" id="seamSideAllOff" style="flex:1 1 auto">全パーツOFF</button>'+
+    '</div></div></details>';
+}
+function buildSeamGroupsHtml(){
+  const boneGroupsHtml=BONE_GROUPS.map(grp=>{
+    const rows=grp.bones.map(b=>{
+      const v=(seamAngles[b]!==undefined)?seamAngles[b]:SEAM_SIDE_DEFAULT_DEG;
+      return seamRowHtml(BONE_JP[b]||b,b,v,!!seamNoSide[b]);
+    }).join("");
+    const isOpen=!!seamGroupOpen[grp.label];
+    return '<details class="accgroup" data-seamgroup="'+grp.label+'"'+(isOpen?" open":"")+'>'+
+      '<summary><span>側面画像の利用: '+grp.label+'</span><span class="accCount">'+grp.bones.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }).join("");
+  const accKeys=seamAccKeys();
+  let accHtml="";
+  if(accKeys.length){
+    const rows=accKeys.map(key=>{
+      const v=(seamAngles[key]!==undefined)?seamAngles[key]:SEAM_SIDE_DEFAULT_DEG;
+      return seamRowHtml(key.replace(/^acc:/,""),key,v,!!seamNoSide[key]);
+    }).join("");
+    const isOpen=!!seamGroupOpen["アクセサリー"];
+    accHtml='<details class="accgroup" data-seamgroup="アクセサリー"'+(isOpen?" open":"")+'>'+
+      '<summary><span>側面画像の利用: アクセサリー個別</span><span class="accCount">'+accKeys.length+'項目</span></summary>'+
+      '<div class="accbody"><div class="aclist">'+rows+'</div></div></details>';
+  }
+  return boneGroupsHtml+accHtml;
+}
+// ★2026-07-20(設定タブUI見直し「もっとサブサブタブ分けるべき」対応):
+// 色のなじませ方(seamSmoothIters/colorGradWidth/colorGradStrength)と、
+// パーツごとにどちらの画像を使うか・切替角度(BONE_GROUPSアコーディオン)は
+// 話題として別物なので、旧renderSeamPanelHtmlを「色ブレンド」「側面画像の
+// 利用」の2サブサブタブに分割した。
+function renderSeamBlendPanelHtml(){
+  return [
+    {key:"seamSmoothIters", label:"継ぎ目の平滑化回数", val:seamSmoothIters, min:0,max:30,step:1,unit:"回"},
+    {key:"colorGradWidth", label:"色グラデーションの幅(境界からの距離)", val:colorGradWidth, min:0,max:1,step:0.01,unit:""},
+    {key:"colorGradStrength", label:"色グラデーションの強さ(最大ブレンド比率)", val:colorGradStrength, min:0,max:1,step:0.05,unit:""},
+  ].map(f=>'<div class="acform" style="margin-bottom:6px">'+
+    '<div style="color:var(--txt);font-size:12px;margin-bottom:6px">'+f.label+'</div>'+
+    '<div style="display:flex;align-items:center;gap:6px">'+
+    '<input type="range" data-seamfield-range="'+f.key+'" value="'+f.val+'" min="'+f.min+'" max="'+f.max+'" step="'+f.step+'" style="flex:1;min-width:60px">'+
+    '<input type="number" data-seamfield="'+f.key+'" value="'+f.val+'" min="'+f.min+'" max="'+f.max+'" step="'+f.step+'" style="width:78px;flex:0 0 auto">'+
+    (f.unit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+f.unit+'</span>':"")+
+    '</div></div>').join("");
+}
+function renderSeamSidePanelHtml(){
+  return '<div style="font-size:10.5px;color:var(--mut);margin-bottom:8px">パーツごとに継ぎ目で側面画像を使うか、使う場合は何度の傾きから切り替えるかを設定します。</div>'+
+    renderSeamBulkHtml()+buildSeamGroupsHtml();
+}
+// PARAM_SUBGROUPSのextra識別子 -> PARAM_META以外の追加コンテンツ描画。
+function renderParamExtraHtml(extraId){
+  if(extraId==="seamBlend") return renderSeamBlendPanelHtml();
+  if(extraId==="seamSide") return renderSeamSidePanelHtml();
+  if(extraId==="vox") return renderVoxPxHelperHtml()+renderVertEstimateHtml();
+  if(extraId==="accPsq") return renderPsqAccessoryOverridesHtml();
+  if(extraId==="accDepthBand") return renderDepthBandAccessoryOverridesHtml();
+  if(extraId==="accDepthSide") return renderDepthSideAccessoryOverridesHtml();
+  return "";
+}
+// ★2026-07-14追加(ユーザー指摘「設定値のモデル単位は全部px表記にしてほしい、
+// モデル単位だとわからない」): PARAM_METAでpxUnit:trueが付いた項目(元は
+// unit:"(model単位)"だった距離系パラメータ)は、model単位の生値はそのまま
+// genParams/DEFAULT_GEN_PARAMSに保持しつつ、UI表示・編集だけをpx換算で行う。
+// 換算にはvoxFitPxBtn(renderVoxPxHelperHtml)と同じSCALE(analysis.BH、px/
+// model単位)を使う。画像未読込等でanalysis.BHが無い場合はmodel単位のまま
+// 表示する(フォールバック)。
+function pxScale(){ return (analysis && analysis.BH) ? analysis.BH : null; }
+// 1パラメータ(PARAM_META 1件)ぶんの入力欄HTML。旧buildParamsPanelHtmlの
+// アコーディオン内loopから中身だけを抜き出したもので、ロジックは変えていない。
+function renderParamItemHtml(m){
+  const dv=DEFAULT_GEN_PARAMS[m.key];
+  const cur=genParams[m.key];
+  const scale=(m.pxUnit && m.type==="number") ? pxScale() : null;
+  const fmt=(n)=>Math.round(n*1000)/1000;
+  const dispUnit=scale ? "px" : m.unit;
+  const defTxt="既定値: "+(typeof dv==="boolean"?(dv?"ON":"OFF"):
+    ((scale?fmt(dv*scale):dv)+(dispUnit?(" "+dispUnit):"")));
+  const resetBtn='<button type="button" class="paramResetOne" data-reset-param="'+m.key+'" title="既定値に戻す" '+
+    'style="flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--line);'+
+    'background:rgba(255,255,255,.05);color:var(--mut);cursor:pointer;font-size:13px">↺</button>';
+  let body;
+  if(m.type==="checkbox"){
+    body='<label style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px">'+
+      '<span style="color:var(--txt);font-size:12px">'+m.label+'</span>'+
+      '<span style="display:flex;align-items:center;gap:6px">'+
+      '<input type="checkbox" data-param="'+m.key+'" '+(cur?"checked":"")+' style="width:18px;height:18px">'+resetBtn+'</span></label>';
+  }else{
+    const dispCur=scale?fmt(cur*scale):cur, dispMin=scale?fmt(m.min*scale):m.min,
+      dispMax=scale?fmt(m.max*scale):m.max, dispStep=scale?fmt(m.step*scale):m.step;
+    const pxFlag=scale?"1":"0";
+    body='<div style="color:var(--txt);font-size:12px;margin-bottom:6px">'+m.label+'</div>'+
+      '<div style="display:flex;align-items:center;gap:6px">'+
+      '<input type="range" data-param-range="'+m.key+'" data-px="'+pxFlag+'" value="'+dispCur+'" min="'+dispMin+'" max="'+dispMax+'" step="'+dispStep+'" style="flex:1;min-width:60px">'+
+      '<input type="number" data-param="'+m.key+'" data-px="'+pxFlag+'" value="'+dispCur+'" min="'+dispMin+'" max="'+dispMax+'" step="'+dispStep+'" style="width:78px;flex:0 0 auto">'+
+      (dispUnit?'<span style="color:var(--mut);font-size:10.5px;flex:0 0 auto">'+dispUnit+'</span>':"")+resetBtn+'</div>';
+  }
+  return '<div class="acform" style="margin-bottom:6px">'+body+
+    '<div style="font-size:10.5px;color:var(--mut)">'+m.desc+' <b style="color:#7aa2ff">('+defTxt+')</b></div>'+
+    '</div>';
+}
+// ★2026-07-20(設定タブUI見直し): PARAM_METAのgroup(6区分)をアコーディオン
+// で縦積みしていたのを横並びタブに、さらにPARAM_SUBGROUPSがあるグループは
+// もう1段(サブサブタブ)に分けて、必要な内容だけを表示するようにした。
+// 開閉状態はparamsActiveGroup/paramsActiveSubgroupで保持し、タブボタンの
+// クリック(wireParamsPanelEvents)経由でのみ変わる。
+function buildParamsPanelHtml(){
+  const groups=paramGroups();
+  const g=paramsActiveGroup;
+  const groupTabsHtml='<div class="tabbar paramGroupTabbar">'+groups.map(gg=>{
+    const changed=paramGroupChanged(gg), on=gg===g;
+    return '<button type="button" class="tabbtn'+(on?' on':'')+'" data-paramgroup="'+gg+'">'+
+      (changed?'<span class="tabDot" title="既定値から変更あり"></span>':"")+gg+'</button>';
+  }).join("")+'</div>';
+
+  const subs=paramSubgroupsOf(g);
+  let bodyHtml;
+  if(subs && subs.length){
+    const activeEntry=currentParamsSubgroupEntry();
+    const subTabsHtml='<div class="paramSubTabbar">'+subs.map(s=>{
+      const on=s===activeEntry, changed=paramKeysChanged(s.keys);
+      const previewMark=s.preview?'<span title="開くと画像プレビューが連動します">👁</span>':"";
+      return '<button type="button" class="paramSubTabBtn'+(on?' on':'')+'" data-paramsubgroup="'+s.label+'">'+
+        (changed?'<span class="tabDot" title="既定値から変更あり"></span>':"")+s.label+previewMark+'</button>';
+    }).join("")+'</div>';
+    // ★2026-07-20(ユーザー指摘「プレビューは当該項目より下に」対応): にじみの
+    // 効果プレビューは、対象パラメータ(alpha_dilate/bleed_inset_px)のスライダー
+    // より上ではなく下に出す。#imgArea自体はcanvas/イベント配線を持つ実体の
+    // あるDOMノードなので、ここでは空のプレースホルダだけを置き、実際の移動は
+    // renderParamsPanel側(placeImgArea)がinnerHTML確定後にappendChildで行う。
+    const previewAnchor=activeEntry.preview?'<div id="paramsPreviewAnchor" style="margin-bottom:10px"></div>':"";
+    bodyHtml=subTabsHtml+
+      paramItemsFor(activeEntry.keys).map(renderParamItemHtml).join("")+
+      previewAnchor+
+      (activeEntry.extra?renderParamExtraHtml(activeEntry.extra):"");
+  }else{
+    bodyHtml=PARAM_META.filter(m=>m.group===g).map(renderParamItemHtml).join("");
+  }
+
+  return groupTabsHtml+
+    '<div style="margin:0 0 10px">'+
+    '<button type="button" class="accResetGrp" data-reset-group="'+g+'">この区分を既定値に戻す</button>'+
+    '</div>'+bodyHtml;
+}
+function wireParamsPanelEvents(el){
+  [].forEach.call(el.querySelectorAll("[data-param]"),inp=>{
+    const key=inp.dataset.param;
+    const isPx=inp.dataset.px==="1";
+    const sync=()=>{
+      const rg=el.querySelector('[data-param-range="'+key+'"]');
+      if(rg) rg.value = isPx ? (genParams[key]*pxScale()) : genParams[key];
+    };
+    inp.onchange=()=>{
+      if(inp.type==="checkbox")genParams[key]=inp.checked;
+      else{
+        const n=parseFloat(inp.value);
+        if(isFinite(n)) genParams[key] = isPx ? (n/pxScale()) : n;
+        else genParams[key]=DEFAULT_GEN_PARAMS[key];
+      }
+      sync();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-param-range]"),rg=>{
+    const key=rg.dataset.paramRange;
+    const isPx=rg.dataset.px==="1";
+    rg.oninput=()=>{
+      const n=parseFloat(rg.value);
+      if(isFinite(n)) genParams[key] = isPx ? (n/pxScale()) : n;
+      else genParams[key]=DEFAULT_GEN_PARAMS[key];
+      const numEl=el.querySelector('[data-param="'+key+'"]'); if(numEl)numEl.value=rg.value;
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-reset-param]"),btn=>{
+    btn.onclick=(e)=>{
+      e.preventDefault();
+      const key=btn.dataset.resetParam;
+      genParams[key]=DEFAULT_GEN_PARAMS[key];
+      renderParamsPanel();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-reset-group]"),btn=>{
+    btn.onclick=(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const g=btn.dataset.resetGroup;
+      PARAM_META.forEach(m=>{ if(m.group===g)genParams[m.key]=DEFAULT_GEN_PARAMS[m.key]; });
+      renderParamsPanel();
+    };
+  });
+  // ★2026-07-20(設定タブUI見直し): PARAM_METAグループのアコーディオン(旧
+  // details.accgroup[data-accgroup])は横並びタブに置き換えたため、開閉toggle
+  // イベントではなくクリックでparamsActiveGroup/paramsActiveSubgroupを更新する。
+  // 実際のプレビュー同期・再描画はrenderParamsPanel側(syncPreviewActiveFromParamsTabs)
+  // に一本化した。
+  [].forEach.call(el.querySelectorAll("[data-paramgroup]"),btn=>{
+    btn.onclick=()=>{
+      const g=btn.dataset.paramgroup;
+      if(paramsActiveGroup===g) return;
+      paramsActiveGroup=g;
+      renderParamsPanel();
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-paramsubgroup]"),btn=>{
+    btn.onclick=()=>{
+      const label=btn.dataset.paramsubgroup;
+      if(paramsActiveSubgroup[paramsActiveGroup]===label) return;
+      paramsActiveSubgroup[paramsActiveGroup]=label;
+      renderParamsPanel();
+    };
+  });
+  // アクセサリー個別の断面の丸み(psq、renderPsqAccessoryOverridesHtml参照)。
+  // マスク抽出には影響しないためプレビュー再描画は不要(値の同期のみ)。
+  function setAccessoryPsq(i,n){
+    n=Math.max(1.2,Math.min(6,n));
+    accessories[i].psq=n;
+    const sl=el.querySelector('.psqAccSlider[data-i="'+i+'"]');
+    const num=el.querySelector('.psqAccNum[data-i="'+i+'"]');
+    if(sl)sl.value=n;
+    if(num)num.value=n;
+  }
+  [].forEach.call(el.querySelectorAll(".psqAccSlider"),sl=>{
+    sl.oninput=()=>{ setAccessoryPsq(+sl.dataset.i, parseFloat(sl.value)); };
+  });
+  const voxFitBtn=el.querySelector("#voxFitPxBtn");
+  if(voxFitBtn){
+    voxFitBtn.onclick=()=>{
+      if(!analysis || !analysis.BH) return;
+      genParams.body_vox=Math.round((1/analysis.BH)*100000)/100000;
+      renderParamsPanel();
+    };
+  }
+  [].forEach.call(el.querySelectorAll(".psqAccNum"),num=>{
+    num.onchange=()=>{ setAccessoryPsq(+num.dataset.i, parseFloat(num.value)||2); };
+  });
+  // アクセサリー個別の奥行き帯選択(depth_band_front/back、
+  // renderDepthBandAccessoryOverridesHtml参照)。両方offは意味を持たない
+  // (js/carving.js側はfallbackするが、UI上は「最低どちらか1つ」を維持する)。
+  function setAccessoryDepthBand(i,side,checked){
+    const a=accessories[i]; if(!a)return;
+    const key = side==="front" ? "depthBandFront" : "depthBandBack";
+    const otherKey = side==="front" ? "depthBandBack" : "depthBandFront";
+    a[key]=checked;
+    if(!checked && a[otherKey]===false){
+      a[otherKey]=true;
+      const otherChk=el.querySelector('.depthBand'+(side==="front"?"Back":"Front")+'Chk[data-i="'+i+'"]');
+      if(otherChk)otherChk.checked=true;
+    }
+  }
+  [].forEach.call(el.querySelectorAll(".depthBandFrontChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthBand(+chk.dataset.i,"front",chk.checked); };
+  });
+  [].forEach.call(el.querySelectorAll(".depthBandBackChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthBand(+chk.dataset.i,"back",chk.checked); };
+  });
+  // アクセサリー個別の奥行き画像選択(depthSideRight/depthSideLeft、
+  // renderDepthSideAccessoryOverridesHtml参照)。既定(未設定=auto)は
+  // js/accessories.js側でleftSideの有無から解決されるため、片方だけを
+  // 明示値にすると、もう片方が「未設定=auto」のまま実質false扱いに
+  // なってしまう(autoは「両方未設定」の時だけ働く仕様のため)。これを防ぐため、
+  // 変更していない側が未設定なら、現在の表示状態(auto解決込み)をそのまま
+  // 明示値として書き込んでおく。両方offは意味を持たない。
+  function setAccessoryDepthSide(i,side,checked){
+    const a=accessories[i]; if(!a)return;
+    const rightChk=el.querySelector('.depthSideRightChk[data-i="'+i+'"]');
+    const leftChk=el.querySelector('.depthSideLeftChk[data-i="'+i+'"]');
+    if(side==="right"){
+      a.depthSideRight=checked;
+      if(a.depthSideLeft===undefined && leftChk) a.depthSideLeft=leftChk.checked;
+    }else{
+      a.depthSideLeft=checked;
+      if(a.depthSideRight===undefined && rightChk) a.depthSideRight=rightChk.checked;
+    }
+    if(!checked){
+      const otherKey = side==="right" ? "depthSideLeft" : "depthSideRight";
+      if(a[otherKey]===false){
+        a[otherKey]=true;
+        const otherChk = side==="right" ? leftChk : rightChk;
+        if(otherChk)otherChk.checked=true;
+      }
+    }
+  }
+  [].forEach.call(el.querySelectorAll(".depthSideRightChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthSide(+chk.dataset.i,"right",chk.checked); };
+  });
+  [].forEach.call(el.querySelectorAll(".depthSideLeftChk"),chk=>{
+    chk.onchange=()=>{ setAccessoryDepthSide(+chk.dataset.i,"left",chk.checked); };
+  });
+  // 推定頂点数・メモリ(renderVertEstimateHtml)の配線。
+  const estimateBtn=el.querySelector("#estimateVertBtn");
+  if(estimateBtn){
+    estimateBtn.onclick=async()=>{
+      const resultEl=el.querySelector("#estimateVertResult");
+      if(!points||!analysis){ resultEl.textContent="先に正面/側面/背面画像を読み込んでください。"; return; }
+      resultEl.textContent="計算中…";
+      try{
+        const state={
+          imgs, points, analysis, deriveFromPoints,
+          accessories: accessories.map(a=>{
+            const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
+              psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+              depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+              depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
+            out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
+            return out;
+          }),
+          bodyMask: Object.keys(bodyMask).reduce((o,v)=>{ if(bodyMask[v]) o[v]={maskDataUrl:bodyMask[v].maskDataUrl,bbox:bodyMask[v].bbox}; return o; },{}),
+          colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength, genParams,
+          estimateOnly: true,
+        };
+        const est=await P3D.runCarvingStages(state, (label)=>{ resultEl.textContent="計算中: "+label; });
+        const gb=(est.estimatedBytes/1e9).toFixed(2);
+        const heavy=est.estimatedBytes>500*1024*1024;
+        const pct=genParams.decimate ? P3D.approxDecimateReductionPct(genParams.decimate_strength) : 0;
+        const afterVerts=Math.round(est.estimatedVertices*(1-pct/100));
+        resultEl.innerHTML=
+          '推定頂点数(間引き前): <b style="color:#7aa2ff">'+est.estimatedVertices.toLocaleString()+'</b><br>'+
+          '推定頂点数(間引き後・目安): <b style="color:#7aa2ff">'+afterVerts.toLocaleString()+'</b>'+
+          (genParams.decimate?'(約'+pct.toFixed(0)+'%削減、雰囲気の目安であり正確な値ではありません)':'(間引きOFF)')+'<br>'+
+          'グリッド: '+est.nx+'×'+est.ny+'×'+est.nz+' = '+est.gridCells.toLocaleString()+'セル、メモリ目安 '+
+          '<b style="color:'+(heavy?'#ff6b6b':'#7aa2ff')+'">'+gb+'GB</b>'+
+          (heavy?'<br><span style="color:#ffb84d">⚠ この規模だと生成に数分〜数十分かかる場合があります。</span>':"");
+      }catch(e){
+        resultEl.textContent="計算に失敗しました: "+((e&&e.message)||e);
+      }
+    };
+  }
+  // テクスチャ継ぎ目パネル(renderSeamPanelHtml)の配線。
+  [].forEach.call(el.querySelectorAll("details.accgroup[data-seamgroup]"),d=>{
+    d.addEventListener("toggle",()=>{
+      if(d.dataset.seamgroup==="一括設定") seamBulkOpen=d.open;
+      else seamGroupOpen[d.dataset.seamgroup]=d.open;
+    });
+  });
+  [].forEach.call(el.querySelectorAll("[data-seamfield]"),inp=>{
+    const key=inp.dataset.seamfield;
+    inp.onchange=()=>{
+      const n=parseFloat(inp.value);
+      if(key==="seamSmoothIters") seamSmoothIters=isFinite(n)?n:0;
+      else if(key==="colorGradWidth") colorGradWidth=isFinite(n)?n:0;
+      else if(key==="colorGradStrength") colorGradStrength=isFinite(n)?n:0.5;
+      const rg=el.querySelector('[data-seamfield-range="'+key+'"]'); if(rg)rg.value=inp.value;
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-seamfield-range]"),rg=>{
+    const key=rg.dataset.seamfieldRange;
+    rg.oninput=()=>{
+      const n=parseFloat(rg.value);
+      if(key==="seamSmoothIters") seamSmoothIters=isFinite(n)?n:0;
+      else if(key==="colorGradWidth") colorGradWidth=isFinite(n)?n:0;
+      else if(key==="colorGradStrength") colorGradStrength=isFinite(n)?n:0.5;
+      const numEl=el.querySelector('[data-seamfield="'+key+'"]'); if(numEl)numEl.value=rg.value;
+    };
+  });
+  function setSeamAngle(key,n){
+    if(!isFinite(n)||n<1||n>89) return;
+    seamAngles[key]=n;
+  }
+  [].forEach.call(el.querySelectorAll("[data-seam-key]"),inp=>{
+    inp.onchange=()=>{
+      const key=inp.dataset.seamKey, n=parseInt(inp.value,10);
+      setSeamAngle(key,n);
+      const rg=el.querySelector('[data-seam-range="'+key+'"]'); if(rg)rg.value=inp.value;
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-seam-range]"),rg=>{
+    rg.oninput=()=>{
+      const key=rg.dataset.seamRange, n=parseInt(rg.value,10);
+      setSeamAngle(key,n);
+      const numEl=el.querySelector('[data-seam-key="'+key+'"]'); if(numEl)numEl.value=rg.value;
+    };
+  });
+  [].forEach.call(el.querySelectorAll("[data-seam-side]"),cb=>{
+    cb.onchange=()=>{
+      const key=cb.dataset.seamSide;
+      if(cb.checked) delete seamNoSide[key]; else seamNoSide[key]=true;
+    };
+  });
+  const seamBulkApplyBtn=el.querySelector("#seamBulkApply");
+  if(seamBulkApplyBtn){
+    const accKeys=seamAccKeys();
+    seamBulkApplyBtn.onclick=()=>{
+      const v=parseInt(el.querySelector("#seamBulkVal").value,10);
+      if(!isFinite(v)||v<1||v>89) return;
+      BONES.concat(accKeys).forEach(b=>{ if(v===SEAM_SIDE_DEFAULT_DEG) delete seamAngles[b]; else seamAngles[b]=v; });
+      renderParamsPanel();
+    };
+    el.querySelector("#seamSideAllOn").onclick=()=>{ seamNoSide={}; renderParamsPanel(); };
+    el.querySelector("#seamSideAllOff").onclick=()=>{
+      BONES.forEach(b=>{ seamNoSide[b]=true; });
+      accKeys.forEach(k=>{ seamNoSide[k]=true; });
+      renderParamsPanel();
+    };
+  }
+}
+// ★2026-07-20(ユーザー指摘「プレビューは当該項目より下に」対応): #imgArea
+// (canvas/イベント配線を持つ実体のあるDOMノード、#editor直下が定位置)を、
+// にじみサブサブタブが選択されている間だけ#paramsPreviewAnchor(そのタブの
+// 対象パラメータより下、buildParamsPanelHtml参照)へ実際に付け替える。
+// #paramsPanel.innerHTMLを書き換えるたびに、その時点でimgAreaが#paramsPanel
+// の子孫になっていると丸ごと破棄されてしまう(canvasのイベント配線が消える)
+// ため、innerHTML書き換えの直前に必ずhomeImgArea()で安全な定位置(#editor直下、
+// マークタブパネルの直前)へ退避してから書き換える。
+function homeImgArea(){
+  const imgArea=$("imgArea");
+  const lmPanel=document.querySelector('.tabpanel[data-tabpanel="lm"]');
+  if(imgArea && lmPanel && imgArea.nextElementSibling!==lmPanel){
+    lmPanel.parentNode.insertBefore(imgArea, lmPanel);
+  }
+}
+// ★2026-07-20(設定タブUI見直し): タブ切替のたびに呼ばれる唯一の入口にし、
+// プレビュー状態の同期(syncPreviewActiveFromParamsTabs)・#imgAreaの表示/
+// 非表示/配置・必要な場合のdraw()呼び出しをここに一本化した(旧details toggle
+// イベント内に分散していたものを統合)。「プレビューは必要なタブだけ」
+// (にじみサブサブタブのみ)にする対応もimgAreaVisible()経由でここに集約する。
+function renderParamsPanel(){
+  const el=$("paramsPanel"); if(!el)return;
+  syncPreviewActiveFromParamsTabs();
+  homeImgArea(); // el.innerHTMLで消される前に必ず退避する
+  el.innerHTML=buildParamsPanelHtml();
+  wireParamsPanelEvents(el);
+  if(previewActive){
+    const anchor=document.getElementById("paramsPreviewAnchor");
+    if(anchor) anchor.appendChild($("imgArea"));
+  }
+  $("imgArea").classList.toggle("hidden",!imgAreaVisible());
+  if(imgAreaVisible()) draw();
+}
+// seamAngles/seamNoSideの編集UI自体はrenderSeamPanelHtml/wireParamsPanelEvents
+// (「モデルへの画像貼り付け」>「側面画像の利用」サブタブ)にあり、buildJson()で
+// intermediateパッケージへ渡ってビューア側のライブ編集の初期値にもなる。
+// ★2026-07-09: exclude_masks(体シルエット除外範囲)の概念自体を廃止した。
+// 全身のシルエットも色分けマップ(体=黒)由来の抽出方式になり、アクセサリー色
+// の画素は体色とは別候補に分類されるため、そもそもスカート等が体の輪郭に
+// 紛れ込む問題が起こらない(js/pipeline.jsのrunCarvingStages参照)。
+// 色分けマップ(front/side/leftSide/back、体=黒・背景=白・各accessory=パレット色)。
+// ゴーストスキャナーから引き継いだJSONに含まれていれば、ここでオフスクリーン
+// canvasとして保持し、P3D.classifySilhouetteRaw(最近傍色分類)で体+全
+// アクセサリーのマスクを一括抽出する(自動マスクタブ)。
+let colormaps={front:null,side:null,leftSide:null,back:null};
+let analysis=null, points=null, sel=null, dragPoint=null;
+let view={z:1,ox:0,oy:0};
+
+const $=id=>document.getElementById(id);
+const cvs=$("cvs"), wrap=$("wrap");
+function setMsg(t){ $("msg").textContent=t; }
+
+// 「新規作成」/「サンプルモードで開く」のどちらで今のセッションが始まったか。
+let currentMode=null; // "sample" | "normal"
+let currentSampleId="default"; // サンプルモード時、SAMPLESのどのidを選んでいるか(自動保存キーの区別に使う)
+
+// ★ビューア(character_3d.html)と行き来しても編集中のデータを失わないための
+// セッション保存(localStorage)。「モデル生成」でビューアへ移る直前に
+// buildJson()と同じ内容を保存し、モード選択画面の「前回の続き」(通常モード)
+// /次回の「サンプルモードで開く」(サンプルモード)で復元する。通常/サンプルで
+// 保存先キーを分け、片方の作業がもう片方を上書きしないようにする。
+// ★2026-07-07: 以前はサンプルモードを「常に同梱データに戻る決定的な状態」
+// として保存対象外にしていたが、サンプルモードで試行錯誤したパラメータ/
+// ランドマーク編集がビューア往復で消えてしまうのは不便との指摘を受け、
+// サンプルモードも自動保存の対象にした(画像本体は常に同梱のimages/*.pngを
+// 使う決定的なものなので保存不要。JSON相当の編集内容のみ保存する)。
+// ★2026-07-10: キー名自体はcharacter_3d.html(ビューア)からの書き戻しでも
+// 使うため、P3D.NORMAL_SESSION_KEY/SAMPLE_SESSION_KEY(js/common.js)に
+// 一元化した(2箇所で文字列リテラルを重複定義すると食い違いの元になるため)。
+const NORMAL_SESSION_KEY=P3D.NORMAL_SESSION_KEY;
+const SAMPLE_SESSION_KEY=P3D.SAMPLE_SESSION_KEY;
+// ★2026-07-11バグ修正(重大): buildJson()はfront/side/back/leftSideの実画像+
+// 色分けマップを丸ごとbase64で埋め込むため、そのままlocalStorageに保存すると
+// キャラクター1体分でも数MB超でQuotaExceededErrorになり、保存自体が毎回
+// (無言で)失敗していた(ユーザー指摘「ビューアから戻ると設定値が消える」)。
+// P3D.stripHeavyFieldsForSessionSave(js/common.js)で画像・色分けマップを
+// 除いた軽量な差分だけを保存する(画像は通常モードならsaveNormalSessionImages
+// 経由のIndexedDB、サンプルモードなら同梱の固定アセットから別途復元する)。
+function saveNormalSession(){
+  try{ localStorage.setItem(NORMAL_SESSION_KEY, JSON.stringify(P3D.stripHeavyFieldsForSessionSave(buildJson()))); }
+  catch(e){ console.warn("セッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
+}
+// ★サンプルが複数になったため、保存キーはサンプルidごとに分ける(単一キーの
+// ままだと、サンプル1で編集後にサンプル2に切り替えた際、サンプル2の画像に
+// サンプル1のランドマーク編集内容が誤って復元されてしまう)。
+function saveSampleSession(){
+  try{ localStorage.setItem(SAMPLE_SESSION_KEY+":"+currentSampleId, JSON.stringify(P3D.stripHeavyFieldsForSessionSave(buildJson()))); }
+  catch(e){ console.warn("サンプルセッション保存に失敗しました:", e); setMsg("自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
+}
+function imageElementToBlob(imgEl,w,h){
+  return new Promise(res=>{
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    c.getContext("2d").drawImage(imgEl,0,0,w,h);
+    c.toBlob(res,"image/png");
+  });
+}
+async function saveNormalSessionImages(){
+  const blobs={};
+  // ★leftSide(側面・左)もfront/side/backと同じ独立した画像スロットなので、
+  // 一緒に保存する(以前はここに含まれておらず、直下のcolormap保存ループ
+  // (leftSideを含む)と非対称だったため、leftSide画像を貼り付けても
+  // 「前回の続き」で復元されず消えてしまう不具合があった)。
+  for(const slot of ["front","side","back","leftSide"]){
+    const im=imgs[slot];
+    if(im) blobs[slot]=await imageElementToBlob(im.el,im.w,im.h);
+  }
+  // ★2026-07-11追加: 色分けマップは通常モードではユーザー自身が用意した
+  // データ(サンプルモードのような同梱の固定アセットではない)なので、
+  // buildJson()側(localStorage、stripHeavyFieldsForSessionSaveで除外済み)
+  // ではなくここで画像本体と同様にIndexedDBへBlobとして保存する。
+  for(const slot of ["front","side","leftSide","back"]){
+    const cm=colormaps[slot];
+    if(cm) blobs["colormap_"+slot]=await new Promise(res=>cm.canvas.toBlob(res,"image/png"));
+  }
+  try{ await P3D.saveNormalSessionImages(blobs); }
+  catch(e){ console.warn("画像セッション保存に失敗しました:", e); setMsg("画像の自動保存に失敗しました(ストレージ容量不足の可能性があります)。"); }
+}
+
+// ★常時オートセーブ: 以前は「モデル生成」完了時にしか保存されず、生成前に閉じると
+// 編集内容が失われていた。ランドマーク/パラメータ編集は呼び出し箇所が非常に多く
+// 全箇所にフックを仕込むのは漏れの元なので、変化があれば数秒おきに拾って保存する
+// ポーリング方式にする(内容が前回と同じならbuildJson()の再シリアライズ以外は何もしない)。
+let autosaveInterval=null, lastAutosaveJson=null;
+function startAutosaveLoop(){
+  if(autosaveInterval)return;
+  autosaveInterval=setInterval(()=>{
+    if(!points||(currentMode!=="normal"&&currentMode!=="sample"))return;
+    const json=JSON.stringify(buildJson());
+    if(json===lastAutosaveJson)return;
+    lastAutosaveJson=json;
+    if(currentMode==="normal"){
+      saveNormalSession();
+      saveNormalSessionImages();
+    }else{
+      saveSampleSession(); // 画像は同梱の固定アセットなので保存不要
+    }
+  },4000);
+}
+
+/* ---------- シルエット解析（stage_profile/stage_landmarks のJS移植） ---------- */
+// buildMask/analyze/placeAllはjs/common.jsのP3D.buildMask/P3D.analyzeSilhouette/
+// P3D.placeAllLandmarksへ移した(既存呼び出し箇所は無改修で動くよう同名の
+// ローカル参照を残す)。
+const buildMask=P3D.buildMask, analyze=P3D.analyzeSilhouette, placeAll=P3D.placeAllLandmarks;
+function deriveFromPoints(P,A){
+  const{ytop,BH}=A, v=y=>(y-ytop)/BH;
+  const sh_v=v((P.shoulder_L[1]+P.shoulder_R[1])/2);
+  const shw=Math.abs(P.shoulder_R[0]-P.shoulder_L[0])/2, waw=Math.abs(P.waist_R[0]-P.waist_L[0])/2;
+  const ef=(s,e,w)=>{const dn=w[0]-s[0],num=e[0]-s[0];return Math.abs(dn)>1e-3?num/dn:STD.elbow_frac;};
+  let efL=ef(P.shoulder_L,P.elbow_L,P.wrist_L),efR=ef(P.shoulder_R,P.elbow_R,P.wrist_R);
+  let elbow_frac=(Math.abs(efL)+Math.abs(efR))/2;if(!(elbow_frac>0.2&&elbow_frac<0.8))elbow_frac=STD.elbow_frac;
+  return{STD,shoulder_v:sh_v,shoulder_hw_px:shw,shoulder_detected:A.shoulder_detected,merge_end_v:A.merge_end_v,
+    waist_v:v((P.waist_L[1]+P.waist_R[1])/2),waist_hw_px:waw,waist_detected:A.waist_detected,
+    hip_v:v(P.hip[1]),hip_detected:A.hip_detected,head_bottom_v:v(P.chin[1]),
+    knee_v:v((P.knee_L[1]+P.knee_R[1])/2),ankle_v:v((P.ankle_L[1]+P.ankle_R[1])/2),elbow_frac};
+}
+function makeAnnotated(img,W,H,pts,maxDim){
+  maxDim=maxDim||1000;const sc=Math.min(1,maxDim/Math.max(W,H)),w=Math.round(W*sc),h=Math.round(H*sc);
+  const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d");x.drawImage(img,0,0,w,h);
+  x.font="bold 13px sans-serif";x.textAlign="left";x.textBaseline="middle";
+  LM.forEach((d,i)=>{const p=pts[d.k];if(!p)return;const px=p[0]*sc,py=p[1]*sc;
+    x.strokeStyle="rgba(255,45,85,.95)";x.lineWidth=1.5;
+    x.beginPath();x.moveTo(px-7,py);x.lineTo(px+7,py);x.moveTo(px,py-7);x.lineTo(px,py+7);x.stroke();
+    x.beginPath();x.arc(px,py,2.2,0,7);x.fillStyle="rgba(255,45,85,.95)";x.fill();
+    x.fillStyle="#00e0ff";x.fillText(String(i+1),px+8,py-7);});
+  return c.toDataURL("image/jpeg",0.9);
+}
+function cleanJpeg(img,W,H,maxDim){
+  maxDim=maxDim||800;const sc=Math.min(1,maxDim/Math.max(W,H)),w=Math.round(W*sc),h=Math.round(H*sc);
+  const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);
+  return c.toDataURL("image/jpeg",0.85);
+}
+
+/* ---------- 描画（view = ズーム/パン対応） ---------- */
+// フェーズ0(2026-07-07): 実装はjs/common.jsのP3D.drawCross/P3D.drawLabelに
+// 切り出し済み(ゴーストスキャナーの簡易プレビューと見た目を共有するため)。
+const drawCross=P3D.drawCross;
+const drawLabel=P3D.drawLabel;
+/* ---------- 汎用「操作可能な点」レジストリ ----------
+   19個の解剖学的ランドマーク(front専用)を、タップ選択/ドラッグ/十字キー
+   微調整という同じ操作で扱えるように統一する。 */
+function getInteractivePoints(view){
+  // タブごとに「そのタブの専門」の点だけを対象にする(表示・タップ選択・ドラッグ
+  // すべて共通でこの一覧を使うため、ここで絞ればマークタブでアクセサリー点に
+  // 触れてしまう、除外タブにランドマークが写り込む等の混線を防げる)。
+  const out=[];
+  if(curTab==="lm" && view==="front"){
+    LM.forEach(d=>{const p=points[d.k];if(!p)return;
+      out.push({key:"lm:"+d.k, pos:p, set:np=>{points[d.k]=np;}, color:GCOL[d.g], label:d.jp});});
+  }
+  return out;
+}
+// ボーンタブ用: 現在のランドマークからP3D.computePivots()を呼び、
+// 生成時と同じロジックでボーン位置(モデル座標)を求める(表示のみ、調整不可)。
+function computeBonePivots(){
+  if(!analysis||!points) return null;
+  try{
+    const derivedBase=deriveFromPoints(points,analysis);
+    const derivedLandmarks=P3D.buildDerivedLandmarks(points,analysis,derivedBase);
+    return P3D.computePivots(analysis.mask,analysis.W,analysis.H,analysis.ytop,analysis.ybot,analysis.cx,derivedLandmarks);
+  }catch(e){ console.error("computeBonePivots failed",e); return null; }
+}
+function drawBoneOverlay(x,sc,bp){
+  bp=bp||computeBonePivots();
+  if(!bp)return;
+  const pivots=Object.assign({},bp.pivots,bp.extraPivots);
+  const BH=analysis.BH, CX=analysis.cx, YBOT=analysis.ybot;
+  function toPx(p){ return [p[0]*BH+CX, YBOT-p[1]*BH]; }
+  function scPt(p){ const q=toPx(p); return [q[0]*sc+view.ox, q[1]*sc+view.oy]; }
+  x.save();
+  P3D.BONES.forEach(b=>{
+    const par=P3D.BHIER[b];
+    if(!par||!pivots[par]||!pivots[b])return;
+    const a=scPt(pivots[par]), c=scPt(pivots[b]);
+    x.lineWidth=3.5;x.strokeStyle="rgba(0,0,0,.55)";
+    x.beginPath();x.moveTo(a[0],a[1]);x.lineTo(c[0],c[1]);x.stroke();
+    x.lineWidth=1.6;x.strokeStyle="#ffe14d";
+    x.beginPath();x.moveTo(a[0],a[1]);x.lineTo(c[0],c[1]);x.stroke();
+  });
+  Object.keys(pivots).forEach(b=>{
+    const p=scPt(pivots[b]);
+    x.fillStyle="rgba(0,0,0,.6)";x.beginPath();x.arc(p[0],p[1],4.5,0,Math.PI*2);x.fill();
+    x.fillStyle="#ff5ad1";x.beginPath();x.arc(p[0],p[1],3,0,Math.PI*2);x.fill();
+  });
+  x.restore();
+}
+// 「マーク」「パーツ＋」タブ共通のボーン表示/範囲トグル状態(両タブの
+// チェックボックスを同じ状態に同期させる=同じオーバーレイの見せ方を共有)。
+let boneOverlayOn=false, boneRegionOn=false;
+// ボーン範囲(Voronoi風)オーバーレイ用の粗いグリッド解像度(front限定MVP)。
+const BONE_REGION_GRID_W=40, BONE_REGION_GRID_H=60;
+const BONE_REGION_COLORS={};
+(function(){
+  P3D.BONES.forEach((b,i)=>{ BONE_REGION_COLORS[b]="hsl("+Math.round(i*360/P3D.BONES.length)+",70%,55%)"; });
+})();
+function pointSegDist2(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay, len2=dx*dx+dy*dy;
+  let t=len2>1e-9?((px-ax)*dx+(py-ay)*dy)/len2:0;
+  t=Math.max(0,Math.min(1,t));
+  const cx=ax+t*dx, cy=ay+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy);
+}
+// front限定MVP: computeBonePivots()の座標系(model単位)をpxに変換した
+// 骨線分ごとに、粗いグリッド(既定40x60)の各セル中心から最も近い骨線分を
+// 求めてその骨の色で塗る、Voronoi風の担当領域プレビュー。フル解像度で
+// 毎フレーム計算しないことで負荷を抑える(セル単位のfillRectのみ)。
+function drawBoneRegionOverlay(x,sc,bp){
+  bp=bp||computeBonePivots();
+  if(!bp||!imgs.front)return;
+  const pivots=Object.assign({},bp.pivots,bp.extraPivots);
+  const BH=analysis.BH, CX=analysis.cx, YBOT=analysis.ybot;
+  const toPx=p=>[p[0]*BH+CX, YBOT-p[1]*BH];
+  const segs=[];
+  P3D.BONES.forEach(b=>{
+    const par=P3D.BHIER[b];
+    if(!par||!pivots[par]||!pivots[b])return;
+    const a=toPx(pivots[par]), c=toPx(pivots[b]);
+    segs.push({a,c,bone:b});
+  });
+  if(!segs.length)return;
+  const W=imgs.front.w, H=imgs.front.h;
+  const cellW=W/BONE_REGION_GRID_W, cellH=H/BONE_REGION_GRID_H;
+  x.save();x.globalAlpha=0.30;
+  for(let gy=0; gy<BONE_REGION_GRID_H; gy++){
+    const py=(gy+0.5)*cellH;
+    for(let gx=0; gx<BONE_REGION_GRID_W; gx++){
+      const px=(gx+0.5)*cellW;
+      let best=null, bestD=Infinity;
+      for(let i=0;i<segs.length;i++){
+        const s=segs[i];
+        const d=pointSegDist2(px,py,s.a[0],s.a[1],s.c[0],s.c[1]);
+        if(d<bestD){bestD=d;best=s;}
+      }
+      if(!best)continue;
+      const sx=gx*cellW*sc+view.ox, sy=gy*cellH*sc+view.oy;
+      x.fillStyle=BONE_REGION_COLORS[best.bone]||"#7aa2ff";
+      x.fillRect(sx,sy,cellW*sc+0.5,cellH*sc+0.5);
+    }
+  }
+  x.restore();
+}
+// フェーズ0: パラメータタブでの2Dプレビュー。展開中のグループ(または輪郭線
+// 除去プレビュー)に応じて、背景除去+縁の色にじみ(+輪郭線除去)を適用した
+// 加工後の画像を代わりに表示する。
+function drawPreviewLayer(x,sc,el,w,h){
+  const pv=previewTargetView();
+  let offX=0,offY=0;
+  if(pv==="back"){offX=genParams.back_offset_x||0;offY=genParams.back_offset_y||0;}
+  if(pv==="side"){offX=genParams.side_offset_x||0;offY=genParams.side_offset_y||0;}
+  const pc=buildPreviewCanvas(pv);
+  if(pc){
+    x.drawImage(pc.canvas,0,0,pc.w,pc.h, view.ox+offX*sc,view.oy+offY*sc, pc.w*sc, pc.h*sc);
+  }else{
+    x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  }
+  x.save();x.font="bold 11px sans-serif";x.fillStyle="#39ff9e";x.textAlign="left";
+  x.fillText("プレビュー中: "+(previewActive?previewActive.label:"")+"("+VIEWJP[pv]+")",8,16);
+  x.restore();
+}
+// マークタブの点だけをgetInteractivePoints側で絞っている。
+// 領域(除外)タブでは何も重ねない。
+function drawLandmarkPoints(x,sc){
+  getInteractivePoints(curView).forEach(p=>{
+    const px=p.pos[0]*sc+view.ox, py=p.pos[1]*sc+view.oy, on=sel===p.key;
+    drawCross(x,px,py,on,p.color);
+    drawLabel(x,p.label,px,py-13,on?"#ffe14d":p.color);
+  });
+}
+// 「マーク」「パーツ＋」タブ用のボーン表示/範囲トグル(既存のボーン専用
+// タブに切り替えなくても、ランドマーク/アクセサリー配置中に確認できる)。
+function drawBoneOverlaysIfEnabled(x,sc){
+  if((curTab!=="lm"&&curTab!=="ac")||curView!=="front")return;
+  // 両方ONの場合にcomputeBonePivots()を2回計算しないよう、1回だけ求めて共有する
+  // (ドラッグ中はdraw()が毎pointermoveで呼ばれるため、二重計算の削減効果が大きい)。
+  const sharedBp=(boneOverlayOn||boneRegionOn)?computeBonePivots():null;
+  if(boneOverlayOn)drawBoneOverlay(x,sc,sharedBp);
+  if(boneRegionOn)drawBoneRegionOverlay(x,sc,sharedBp);
+}
+function draw(){
+  const previewOn=previewModeActive();
+  const CI=previewOn?imgs[previewTargetView()]:curImg();
+  if(!CI||!points)return;
+  const{el,w,h}=CI, cw=wrap.clientWidth||360, base=cw/w;
+  cvs.width=cw; cvs.height=Math.round(h*base);
+  const x=cvs.getContext("2d"); x.clearRect(0,0,cvs.width,cvs.height);
+  const sc=base*view.z;
+  if(previewOn) drawPreviewLayer(x,sc,el,w,h);
+  else x.drawImage(el,0,0,w,h, view.ox,view.oy, w*sc, h*sc);
+  if(!previewOn) drawLandmarkPoints(x,sc);
+  drawBoneOverlaysIfEnabled(x,sc);
+}
+
+/* ---------- ファイル読み込み ---------- */
+// ★2026-07-09(UIレビュー): 個別ファイルアップロード(旧.slots UI、data-slot
+// 属性のinput[type=file])は廃止し、front/side/back画像も埋め込んだJSON
+// (buildJson()参照)を読み込む一本の経路に統一した。dataURL文字列から
+// imgs[slot]を組み立てる版。
+function loadImgFromDataUrl(dataUrl,slot){
+  return new Promise((resolve,reject)=>{
+    const el=new Image();
+    el.onload=()=>{
+      imgs[slot]={el,w:el.naturalWidth,h:el.naturalHeight};
+      previewCache={key:null,view:null,canvas:null,w:0,h:0};
+      resolve();
+    };
+    el.onerror=()=>{ reject(new Error("画像の読込に失敗しました("+slot+")")); };
+    el.src=dataUrl;
+  });
+}
+// 色分けマップのdataURLをオフスクリーンcanvasとして読み込む(loadImgFromDataUrlの
+// colormaps版。Imageのままではなくctxを直接持たせ、extractAccessoryMask()から
+// 何度でも同期的に再抽出できるようにする)。
+function loadColormapFromDataUrl(dataUrl,view){
+  return new Promise((resolve,reject)=>{
+    const el=new Image();
+    el.onload=()=>{
+      const c=document.createElement("canvas");
+      c.width=el.naturalWidth; c.height=el.naturalHeight;
+      const ctx=c.getContext("2d"); ctx.drawImage(el,0,0);
+      colormaps[view]={canvas:c,ctx,w:c.width,h:c.height};
+      resolve();
+    };
+    el.onerror=()=>{ reject(new Error("色分けマップの読込に失敗しました("+view+")")); };
+    el.src=dataUrl;
+  });
+}
+// JSON(画像dataUrl込み)から、画像復元→自動仮配置→残りのJSON内容の反映まで
+// 一括で行う。旧来の「新規作成(3枚アップロード)」「ゴーストスキャナーからの
+// IndexedDB経由引き継ぎ」「サンプルモードの静的ファイル取得」という3通りの
+// 画像読み込み経路を、この1つに統一する。
+async function bootstrapFromJson(d){
+  if(!d.image || !d.image.front || !d.image.front.dataUrl){
+    setMsg("このJSONには画像データが含まれていないため読み込めません(画像を含む新しい形式のJSONを使ってください)。");
+    return false;
+  }
+  try{
+    await loadImgFromDataUrl(d.image.front.dataUrl,"front");
+    if(d.image.side && d.image.side.dataUrl) await loadImgFromDataUrl(d.image.side.dataUrl,"side");
+    if(d.image.back && d.image.back.dataUrl) await loadImgFromDataUrl(d.image.back.dataUrl,"back");
+    // leftSideは左右非対称キャラ用の任意の面(無くても読み込みは成立する)。
+    if(d.image.leftSide && d.image.leftSide.dataUrl) await loadImgFromDataUrl(d.image.leftSide.dataUrl,"leftSide");
+    // 色分けマップ(あれば): ゴーストスキャナーから引き継いだJSONは含む、
+    // サンプル/旧形式のJSONは含まない(その場合はaccessories[].maskが
+    // 既に抽出済みの値としてそのまま使われる、applyLoadedJson参照)。
+    colormaps={front:null,side:null,leftSide:null,back:null};
+    if(d.colormaps){
+      for(const v of ["front","side","leftSide","back"]){
+        if(d.colormaps[v]) await loadColormapFromDataUrl(d.colormaps[v],v);
+      }
+    }
+  }catch(e){
+    setMsg("画像の復元に失敗しました: "+((e&&e.message)||e));
+    return false;
+  }
+  if(!(imgs.front&&imgs.side&&imgs.back)){
+    setMsg("front/side/backの3枚とも揃っていないJSONは読み込めません。");
+    return false;
+  }
+  const mc=$("modeChoice"); if(mc)mc.classList.add("hidden");
+  runAnalyze();
+  syncViewBtns();
+  applyLoadedJson(d);
+  return true;
+}
+function runAnalyze(){
+  // ★2026-07-09: 色分けマップが必須になったため、初期のランドマーク仮配置も
+  // 固定しきい値(旧buildMask)ではなく色分けマップ(体=黒)+最近傍色分類方式で
+  // シルエットを検出する(resyncAnalysisToProfileが使う方式と揃える)。
+  const{el,w,h}=imgs.front;
+  const cm=colormaps.front;
+  const mask=cm ? bodyAlphaFromColormap(cm) : buildMask(el,w,h);
+  const A=analyze(mask,w,h);
+  if(!A){setMsg("frontのシルエットを検出できません（背景が白以外？）");return;}
+  analysis=A;points=placeAll(A);sel=null;curView="front";
+  $("editor").classList.remove("hidden");
+  syncViewBtns();
+  resyncAnalysisToProfile();
+  draw();
+  setMsg("前処理OK  shoulder v="+A.shoulder_v.toFixed(3)+"(det="+A.shoulder_detected+") waist v="+A.waist_v.toFixed(3)+" hip v="+A.hip_v.toFixed(3));
+}
+// ★2026-07-04: ランドマーク配置用のanalysis.ytop/ybot/cxと、実際の生成
+// パイプラインが使うprofileが食い違い、ボーン/腕/手の位置が実メッシュと
+// ズレる原因になっていた。ここで両者を同じ2値化方式に揃えてanalysis.ytop/
+// ybot/BH/cxを上書きする(auto placement由来のshoulder_v等はそのまま)。
+// ★2026-07-09: 体シルエットの2値化を色分けマップ方式に統一したため、こちらも
+// 同じbodyAlphaFromColormap(js/pipeline.jsのrunCarvingStagesと同じ
+// P3D.classifySilhouetteRaw)を使う。
+function resyncAnalysisToProfile(){
+  if(!analysis || !imgs.front || !colormaps.front) return;
+  const {w,h}=imgs.front;
+  const cm=colormaps.front;
+  const alpha=bodyAlphaFromColormap(cm);
+  const fp=P3D.frontProfileOnly(alpha, w, h);
+  analysis.ytop=fp.YTOP; analysis.ybot=fp.YBOT; analysis.BH=fp.YBOT-fp.YTOP; analysis.cx=fp.CX;
+}
+
+/* ---------- 操作: 1本指=点ドラッグ または パン, 2本指=ピンチズーム ---------- */
+function canvasPt(e){const rc=cvs.getBoundingClientRect();
+  return[(e.clientX-rc.left)*(cvs.width/rc.width),(e.clientY-rc.top)*(cvs.height/rc.height)];}
+function toImg(e){const c=canvasPt(e),base=(wrap.clientWidth||360)/curImg().w,sc=base*view.z;
+  return[(c[0]-view.ox)/sc,(c[1]-view.oy)/sc];}
+
+/* ---------- 色分けマップからのマスク抽出(自動マスクタブ)。★2026-07-09:
+   従来はゴーストスキャナー側で固定色許容誤差(40)で一度だけ抽出していたが、
+   パーツ(と全身)ごとに許容誤差を変えて試行錯誤したいとの要望を受け、
+   抽出処理そのものをこちらへ移した。colormapsが必須(旧形式JSONは廃止)。
+   ★2026-07-11(切り抜き精度向上): 各パーツを独立に「色距離が許容誤差以内か」で
+   判定する固定tolerance方式は、色分けマップの境界にあるグラデーション幅が
+   toleranceを超えると体・アクセサリーどちらの判定にも入らない未確定画素の
+   帯を生んでいた(js/common.jsのP3D.fillColorGaps参照、廃止済み)。体色+全
+   アクセサリー色を候補とした最近傍色分類(P3D.classifySilhouetteRaw)に
+   置き換え、1回の分類で体・全アクセサリーのマスクを同時に(境界が必ず
+   一致する形で)抽出するようにした。tolerance自体が不要になったため、
+   colorTolerance/body_color_tolerance関連のUI(自動マスクタブの色許容誤差
+   スライダー)も削除した。 ---------- */
+function hasColormaps(){
+  return !!(colormaps.front || colormaps.side || colormaps.leftSide || colormaps.back);
+}
+// 体シルエットを、現在のaccessories色一覧込みの最近傍色分類で抽出する
+// (js/pipeline.jsのrunCarvingStagesと同じP3D.classifySilhouetteRawを使うため、
+// 生成時の体シルエットとプレビュー/ランドマーク配置基準が常に一致する)。
+function bodyAlphaFromColormap(cm){
+  if(!cm) return null;
+  const accColors=accessories.filter(a=>a.color).map(a=>a.color);
+  const raw=P3D.classifySilhouetteRaw(cm.ctx, cm.w, cm.h, "#000000", accColors);
+  const comp=P3D.significantComponentsMask(raw.bodyRaw, cm.w, cm.h);
+  return P3D.fillHoles(comp, cm.w, cm.h);
+}
+function extractAllAccessoryMasks(){
+  if(!hasColormaps())return;
+  ["front","side","leftSide","back"].forEach(v=>{
+    const cm=colormaps[v];
+    if(!cm) return;
+    const withColor=accessories.filter(a=>a.color);
+    const accColors=withColor.map(a=>a.color);
+    const raw=P3D.classifySilhouetteRaw(cm.ctx, cm.w, cm.h, "#000000", accColors);
+    withColor.forEach((a,idx)=>{
+      a.mask=a.mask||{};
+      // ★2026-07-18(手動マップ独立ペイント層対応): 以前はcolormapがマスクの
+      // 唯一の情報源だったため、JSON読込のたびに無条件で再分類していても
+      // 常に同じ結果に収束していた。今は手動マップタブでcolormapとは独立に
+      // パーツごとの領域を編集できるため、JSONに保存済みのマスク(手動編集
+      // 結果を含む)がある面は上書きせず、まだマスクが無い面(新規追加された
+      // 色・面)だけをこの自動分類で補う。
+      if(a.mask[v] && a.mask[v].maskDataUrl) return;
+      const comp=P3D.significantComponentsMask(raw.accRaw[idx], cm.w, cm.h);
+      const m=P3D.packRawMaskToResult(comp, cm.w, cm.h);
+      if(m) a.mask[v]=m; else delete a.mask[v];
+    });
+    accessories.filter(a=>!a.color).forEach(a=>{ if(a.mask) delete a.mask[v]; });
+  });
+}
+const ptrs=new Map(); let ptrMode=null,lastX=0,lastY=0,pinchD=0;
+let pointsLocked=false; // trueの間は画像上のタップ/ドラッグが常にパンになり、
+                        // 点には触れない(拡大/縮小・位置合わせ中に誤って
+                        // 点を動かしてしまう事故を防ぐ)。
+function _mid(){const v=[...ptrs.values()];return[(v[0].x+v[1].x)/2,(v[0].y+v[1].y)/2];}
+function _dist(){const v=[...ptrs.values()];return Math.hypot(v[0].x-v[1].x,v[0].y-v[1].y);}
+cvs.addEventListener("pointerdown",e=>{
+  if(!points)return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  try{cvs.setPointerCapture(e.pointerId);}catch(_){}
+  if(ptrs.size===1){
+    let near=null,nd=1e9;
+    if(!pointsLocked){
+      const p=toImg(e);
+      const pts=getInteractivePoints(curView);
+      pts.forEach(pp=>{const dd=Math.hypot(pp.pos[0]-p[0],pp.pos[1]-p[1]);if(dd<nd){nd=dd;near=pp;}});
+    }
+    const sc=((wrap.clientWidth||360)/curImg().w)*view.z;
+    if(near&&nd<20/sc){ptrMode="point";dragPoint=near;sel=near.key;syncChips();draw();}
+    else{ptrMode="pan";lastX=e.clientX;lastY=e.clientY;}
+  }else if(ptrs.size===2){ptrMode="pinch";pinchD=_dist();dragPoint=null;}
+});
+cvs.addEventListener("pointermove",e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrMode==="pinch"&&ptrs.size>=2){
+    const d=_dist();
+    if(pinchD>0){const rc=cvs.getBoundingClientRect(),m=_mid();
+      const mx=(m[0]-rc.left)*(cvs.width/rc.width),my=(m[1]-rc.top)*(cvs.height/rc.height);
+      const base=(wrap.clientWidth||360)/curImg().w,z0=view.z;let z1=z0*d/pinchD;z1=Math.max(0.5,Math.min(8,z1));
+      const imx=(mx-view.ox)/(base*z0),imy=(my-view.oy)/(base*z0);
+      view.z=z1;view.ox=mx-imx*base*z1;view.oy=my-imy*base*z1;draw();}
+    pinchD=d;
+  }else if(ptrMode==="point"&&dragPoint){
+    const p=toImg(e);dragPoint.set([Math.round(p[0]),Math.round(p[1])]);draw();
+  }else if(ptrMode==="pan"){
+    view.ox+=(e.clientX-lastX);view.oy+=(e.clientY-lastY);lastX=e.clientX;lastY=e.clientY;draw();
+  }
+});
+function endPtr(e){ptrs.delete(e.pointerId);
+  if(ptrs.size===0){ ptrMode=null;dragPoint=null; }
+  else if(ptrs.size===1){const v=[...ptrs.values()][0];ptrMode="pan";lastX=v.x;lastY=v.y;}
+  else if(ptrs.size>=2){pinchD=_dist();}}
+cvs.addEventListener("pointerup",endPtr);
+cvs.addEventListener("pointercancel",endPtr);
+addEventListener("resize",()=>{if(points)draw();});
+
+/* ---------- 出力 ---------- */
+// imgオブジェクト(loadImg等が{el,w,h}の形で作る)を、front/side/back画像を
+// 別途アップロード/選択せずJSON単体で完結させるためのPNG dataURLに変換する。
+function imgObjToDataUrl(imgObj){
+  const c=document.createElement("canvas");
+  c.width=imgObj.w; c.height=imgObj.h;
+  c.getContext("2d").drawImage(imgObj.el,0,0,imgObj.w,imgObj.h);
+  return c.toDataURL("image/png");
+}
+function buildJson(){
+  const w=imgs.front.w,h=imgs.front.h,points_px={};
+  LM.forEach(d=>{points_px[d.k]={img:"front",x:points[d.k][0],y:points[d.k][1]};});
+  return{version:2,generator:"ai-landmark-tool",
+    // ★2026-07-09(UIレビュー): 従来はfront/side/back画像はJSONに含めず、
+    // 「画像は別途読み込み済みのものを使う」前提だった(通常モードの個別
+    // アップロード・ゴーストスキャナーからのIndexedDB経由引き継ぎ・サンプル
+    // モードの静的ファイル取得、と読み込み経路がバラバラだった)。マスク
+    // (accessories[].mask[view].maskDataUrl)は既にJSON埋め込み済みだったのに
+    // 画像本体だけ別管理という非対称さが分かりにくいとの指摘を受け、画像本体も
+    // dataUrlとしてJSONに埋め込み、JSON単体で完全に復元できるようにする。
+    image:{front:{w,h,ytop:analysis.ytop,ybot:analysis.ybot,cx:Math.round(analysis.cx),dataUrl:imgObjToDataUrl(imgs.front)},
+      side:imgs.side?{w:imgs.side.w,h:imgs.side.h,dataUrl:imgObjToDataUrl(imgs.side)}:null,
+      back:imgs.back?{w:imgs.back.w,h:imgs.back.h,dataUrl:imgObjToDataUrl(imgs.back)}:null,
+      // ★2026-07-09(左右非対称キャラ対応): leftSideは任意(mask.leftSideを
+      // 持つアクセサリーが無ければ不要)。
+      leftSide:imgs.leftSide?{w:imgs.leftSide.w,h:imgs.leftSide.h,dataUrl:imgObjToDataUrl(imgs.leftSide)}:null},
+    points_px,derived:deriveFromPoints(points,analysis),
+    accessories:accessories.map(a=>{
+      const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
+        psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+        depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+        depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
+      out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
+      return out;
+    }),
+    // ★2026-07-18(手動マップの体ペイント対応): 体を手動マップタブで編集した
+    // 場合の独立ペイント層。accessories[].maskと同じ{maskDataUrl,bbox}形式。
+    body_mask:Object.keys(bodyMask).reduce((o,v)=>{ if(bodyMask[v]) o[v]={maskDataUrl:bodyMask[v].maskDataUrl,bbox:bodyMask[v].bbox}; return o; },{}),
+    // ★2026-07-09: 色分けマップは書き出しにも含める(再読み込み時にマスクを
+    // 再抽出できるようにするため。必須のため常に含む)。
+    colormaps:(function(){
+      const out={};
+      ["front","side","leftSide","back"].forEach(v=>{
+        if(colormaps[v])out[v]=colormaps[v].canvas.toDataURL("image/png");
+      });
+      return out;
+    })(),
+    seam_angles:Object.assign({},seamAngles),
+    seam_no_side:Object.assign({},seamNoSide),
+    seam_smooth_iters:seamSmoothIters,
+    color_grad_width:colorGradWidth,
+    color_grad_strength:colorGradStrength,
+    gen_params:Object.assign({},genParams)};
+}
+function exportJson(){
+  if(!points||!analysis)return;
+  try{
+    const str=JSON.stringify(buildJson(),null,1),blob=new Blob([str],{type:"application/json"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="landmarks_ai.json";
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    setMsg("landmarks_ai.json を書き出しました。失敗する場合は「コピー」を使ってください。");
+  }catch(e){
+    console.warn("landmarks_ai.json の書き出しに失敗しました:", e);
+    setMsg("書き出しに失敗しました。「コピー」をお試しください。");
+  }
+}
+async function copyJson(){
+  if(!points||!analysis)return;
+  const str=JSON.stringify(buildJson(),null,1);
+  try{await navigator.clipboard.writeText(str);setMsg("JSONをコピーしました。landmarks_ai.json として保存してください。");}
+  catch(_){const t=document.createElement("textarea");t.value=str;document.body.appendChild(t);t.select();
+    try{document.execCommand("copy");setMsg("JSONをコピーしました。");}catch(__){setMsg("コピー不可。出力ボタンをお試しください。");}t.remove();}
+}
+function applyLoadedJson(d){
+  if(!points){setMsg("先に正面画像を読み込んでください。");return;}
+  if(d.points_px){
+    LM.forEach(lm=>{const p=d.points_px[lm.k];if(p)points[lm.k]=[p.x,p.y];});
+  }
+  // accessoryはマスク(mask、色分けマップ由来・自動抽出のみ)形式のみを持つ
+  // (多角形(regions)形式は2026-07-09に廃止。既存の多角形形式の保存済みJSONとの
+  // 互換性は維持しない方針のため、旧形式の救済処理は行わない)。
+  // ★2026-07-11: colorTolerance(パーツごとの色許容誤差)は最近傍色分類への
+  // 置き換えに伴い廃止した(旧JSONにcolorToleranceが残っていても単に無視する)。
+  // color(抽出元の色)は分類の候補として引き続き必要。d.accessories[].maskは、
+  // 下のextractAllAccessoryMasks()が色分けマップから再抽出するまでの
+  // 初期値(JSONに保存されていた前回の抽出結果)として使う。
+  accessories=(d.accessories||[]).map(a=>{
+    const out={name:a.name||"",mode:a.mode||"rigid",bones:a.bones||[],
+      color:a.color||null,
+      psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+      depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+      depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
+    out.mask=Object.keys(a.mask||{}).reduce((o,v)=>{
+      const m=a.mask[v];
+      if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
+      return o;
+    },{});
+    return out;
+  });
+  // ★2026-07-18(手動マップの体ペイント対応): 体の独立ペイント層(body_mask)を
+  // 読み込む。パーツごとのpaintAlpha/paintAlphaSeed(手動マップタブ内の
+  // 編集キャッシュ)はJSON読込のたびにリセットする。ensurePaintAlphaは
+  // タブを開いた時点でcolormapからの再分類をシードにするが、それでは保存済み
+  // (手動編集済み)のa.mask/bodyMaskが無視されてしまうため、
+  // primePaintAlphaFromSavedMasks()で保存内容を先読みしてpaintAlpha/
+  // paintAlphaSeedへ直接入れておく(タブを開く前に完了していれば、ensure側は
+  // 既にあるものをそのまま使うので再分類は起きない)。
+  bodyMask=Object.keys(d.body_mask||{}).reduce((o,v)=>{
+    const m=d.body_mask[v];
+    if(m&&m.maskDataUrl)o[v]={maskDataUrl:m.maskDataUrl,bbox:m.bbox};
+    return o;
+  },{});
+  paintAlpha={}; paintAlphaSeed={}; paintUndoStack=[];
+  primePaintAlphaFromSavedMasks();
+  seamAngles=Object.assign({},d.seam_angles||{});
+  seamNoSide=Object.assign({},d.seam_no_side||{});
+  seamSmoothIters=(d.seam_smooth_iters!==undefined)?d.seam_smooth_iters:SEAM_DEFAULT_SMOOTH;
+  const seamSmoothEl=$("seamSmoothVal"); if(seamSmoothEl) seamSmoothEl.value=seamSmoothIters;
+  const seamSmoothSl=$("seamSmoothSlider"); if(seamSmoothSl) seamSmoothSl.value=seamSmoothIters;
+  colorGradWidth=(d.color_grad_width!==undefined)?d.color_grad_width:COLOR_GRAD_DEFAULT;
+  const colorGradEl=$("colorGradVal"); if(colorGradEl) colorGradEl.value=colorGradWidth;
+  const colorGradSl=$("colorGradSlider"); if(colorGradSl) colorGradSl.value=colorGradWidth;
+  colorGradStrength=(d.color_grad_strength!==undefined && d.color_grad_strength!==null)?d.color_grad_strength:COLOR_GRAD_STRENGTH_DEFAULT;
+  genParams=Object.assign({},DEFAULT_GEN_PARAMS,d.gen_params||{});
+  renderParamsPanel();
+  // ★2026-07-09: 色分けマップから全身/アクセサリー双方のマスクを再抽出する
+  // (自動マスクタブを開かなくても生成できるようにするため)。
+  resyncAnalysisToProfile();
+  extractAllAccessoryMasks();
+  sel=null;
+  syncChips();syncViewBtns();draw();
+  setMsg("landmarks_ai.json を読み込みました(正面/側面/背面画像は別途読み込み済みのものを使います)。");
+}
+function loadJsonFile(file){
+  const r=new FileReader();
+  r.onload=()=>{
+    let d;
+    try{ d=JSON.parse(r.result); }
+    catch(e){ setMsg("JSON読み込みに失敗しました: "+((e&&e.message)||e)); return; }
+    // 画像未読込(=まだ編集画面に入っていない、新規のJSON読み込みでの開始)の
+    // 場合はbootstrapFromJson()でJSON内蔵の画像から復元する。既に編集中
+    // (points有り)の場合は、そのセッションの画像はそのまま使い、ランドマーク/
+    // アクセサリー等の内容だけ差し替える(従来通りのapplyLoadedJson単体呼び出し)。
+    if(points){ applyLoadedJson(d); }
+    else{ currentMode="normal"; bootstrapFromJson(d); }
+  };
+  r.readAsText(file);
+}
+
+/* ---------- タブ(ランドマーク/自動マスク/設定値/生成を切り替え) ---------- */
+// curTabは既存の値("lm"/"params"/"gen"等)をそのまま使い続ける
+// (CLAUDE.mdの通り、単一の巨大IIFEスコープでの変数衝突リスクを避けるため
+// 全体grep済み。他に"curTab"という名前の別意味の変数は無い)。
+// ★2026-07-09: 「手動マスク」タブ(data-tab="manualmask"、サブタブ"ex")は
+// 廃止した。exclude_masksは色分けマップ由来のaccessoryマスクから自動合成
+// されるため、手塗り編集は不要という判断(ユーザー合意済み)。
+let curTab="lm";
+// 画像(front/side/back)を見る必要があるタブだけ#imgAreaを表示する。それ以外の
+// タブ(自動マスク/設定値/生成)では画像・十字キー等をまとめて隠し、縦の余白を空ける。
+const IMG_TABS=["lm","params"];
+// ★2026-07-20(設定タブUI見直し「プレビューは必要なタブだけ」対応): 以前は
+// 「設定値」タブなら常に#imgAreaを表示していた(どの区分を開いていても
+// ランドマーク編集用の画像がそのまま出続け、プレビュー効果の無い区分でも
+// 縦の場所を取っていた)。区分をアコーディオンからサブタブへ移した今回、
+// 「設定値」タブでは実際にプレビュー対応のサブサブタブ(にじみ)を開いている
+// 時だけ#imgAreaを出すようにした(previewActive、syncPreviewActiveFromParamsTabs
+// 参照)。
+function imgAreaVisible(){
+  if(curTab==="lm") return true;
+  if(curTab==="params") return !!previewActive;
+  return false;
+}
+function syncTabs(){
+  [].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{b.classList.toggle("on",b.dataset.tab===curTab);});
+  [].forEach.call(document.querySelectorAll(".tabpanel"),p=>{
+    p.classList.toggle("on",p.dataset.tabpanel===curTab);
+  });
+  if(curTab==="automask") renderAutomaskTab();
+  if(curTab==="paintmask") renderPaintTab();
+  if(curTab==="lm") renderAccessoryBoneList();
+  // ★2026-07-11: アクセサリー個別の断面の丸み(psq)を設定値タブへ移動した
+  // ため、マークタブでの名前変更等を反映できるようタブ切替時に再描画する。
+  // (renderParamsPanel内でpreviewActiveの同期・#imgAreaの表示切替/配置も行う。)
+  if(curTab==="params") renderParamsPanel();
+  // ★2026-07-20: 「設定値」タブ以外に切り替えた時は、前回にじみプレビュー中
+  // だった名残で#imgAreaが#paramsPreviewAnchor配下(既に破棄済み)を指したまま
+  // にならないよう、必ず定位置(マークタブパネルの直前)へ戻す。
+  else homeImgArea();
+  $("imgArea").classList.toggle("hidden",!imgAreaVisible());
+}
+[].forEach.call(document.querySelectorAll("#tabbar > .tabbtn"),b=>{
+  b.onclick=()=>{
+    curTab = b.dataset.tab;
+    syncTabs();
+    syncViewBtns();
+    if(imgAreaVisible())draw();
+  };
+});
+
+/* ---------- アクセサリー(ヘッドホン/猫耳/カメラ小物/スカート等) ---------- */
+function syncViewBtns(){
+  document.querySelectorAll("#viewbar .viewbtn").forEach(b=>{
+    b.classList.toggle("on",b.dataset.view===curView);
+    b.disabled=!imgs[b.dataset.view];
+  });
+}
+const VIEWJP={front:"正面",side:"側面(右)",leftSide:"側面(左)",back:"背面"};
+
+/* ---------- 手動マスク(パーツごとに独立したペイント層、2026-07-13追加/
+   2026-07-18再設計) ----------
+   ★2026-07-18(ユーザー指摘「後ろ髪を拡張したらツインテールが上書きされる」
+   「色分けマップと手動マップは別々に保持してほしい」対応): 当初はcolormaps[v]
+   (体+全アクセサリー共有の1枚のcanvas)へ直接ブラシで塗る方式だったが、
+   1画素は1色(=1パーツ)にしかなれない共有ラスタだったため、あるパーツを
+   塗って拡張すると、その画素を以前占有していた別パーツの領域を実質的に
+   奪ってしまっていた(自動マスク抽出=classifySilhouetteRawが画素ごとに
+   最も近い1色だけを選ぶ最近傍分類のため)。
+   パーツ(体+各accessory)ごとに独立したUint8Arrayのペイント層(paintAlpha)
+   を持つ方式に変更した。各パーツのペイント層は、そのパーツのタブを最初に
+   開いた時点でcolormaps[v]を1回だけ最近傍分類(classifySilhouetteRaw)して
+   種(シード、paintAlphaSeed)を作り、以降はそのコピーを直接編集する
+   (ブラシ=1を立てる、消しゴム=0に戻す)。他パーツのペイント層は一切
+   参照・変更しないため、パーツ間の上書き事故が構造的に起きない。
+   colormaps[v]自体はこの機能からはもう変更されない(読み取り専用の種)。
+   編集結果はストローク完了のたびにaccessories[i].mask[v](体はbodyMask[v])
+   へ{maskDataUrl,bbox}として書き戻し、既存の保存/書き出し(buildJson)・
+   生成(js/pipeline.js)にそのまま乗せる(syncPaintAlphaToMask参照)。 */
+const PAINT_BODY_COLOR="#000000";
+let paintView="front";
+let paintTarget="body"; // "body" または accessories配列のindexを文字列化したもの
+let paintMode="brush"; // "brush"(塗る、alpha=1) | "eraser"(消す、alpha=0)
+let paintBrushSize=24;
+let paintUndoStack=[]; // {target, view, data:Uint8Array}の配列(直近PAINT_UNDO_MAX手分)
+const PAINT_UNDO_MAX=20;
+let paintDrawing=false, paintLastImgPt=null;
+let paintAlpha={}; // paintAlpha[target][view] = Uint8Array(w*h)、そのパーツの現在の編集状態
+let paintAlphaSeed={}; // paintAlphaSeed[target][view] = Uint8Array、開いた時点のスナップショット(「初期状態に戻す」用)
+let bodyMask={}; // bodyMask[view] = {maskDataUrl,bbox}(accessories[i].maskと同じ形式、体用)
+let paintZoom=1; // 表示倍率(1=コンテナ幅に合わせたフィット表示)。内部解像度は
+                 // 常にimg.w×img.hのままなので、paintCanvasToImgPtの座標変換は
+                 // ズーム値に関わらず変更不要(getBoundingClientRectの実測サイズを
+                 // 使っているため)。
+let paintCurScale=1; // 直近に適用した実表示倍率(フィット基準×paintZoom)。
+                     // ブラシカーソルの線の太さを画面上一定に保つために使う。
+let paintHoverPt=null; // 直近のポインタ位置(画像内部px座標)。ブラシ円の表示用。
+function paintableAccessories(){
+  return accessories.map((a,i)=>({a,i})).filter(x=>x.a.color);
+}
+function paintTargetColorHex(){
+  if(paintTarget==="body") return PAINT_BODY_COLOR;
+  const a=accessories[+paintTarget];
+  return (a&&a.color) ? a.color : null;
+}
+// この面の色分けマップがまだ無ければ、白背景(=未着色)の新規canvasを作る
+// (ゴーストスキャナーを使わず手動マスクだけでこの面を完結させたい場合に対応)。
+function ensurePaintColormap(v){
+  if(colormaps[v]) return colormaps[v];
+  const im=imgs[v];
+  if(!im) return null;
+  const c=document.createElement("canvas");
+  c.width=im.w; c.height=im.h;
+  const ctx=c.getContext("2d");
+  ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,c.width,c.height);
+  colormaps[v]={canvas:c,ctx:ctx,w:c.width,h:c.height};
+  return colormaps[v];
+}
+// この面のcolormapを体+全paintableアクセサリーで一括分類し、各対象の
+// 生マスク(Uint8Array)を{target:mask}の形で返す(1回の分類で全対象ぶん
+// まとめて求めることで、対象を切り替えるたびに再分類しなくて済む)。
+// ★2026-07-18バグ修正: 最近傍分類の生の結果(raw.bodyRaw/raw.accRaw)を
+// そのままシードにすると、既存のextractAllAccessoryMasks()/
+// bodyAlphaFromColormap()が捨てているノイズ(孤立した小さな誤分類画素)まで
+// シードに含んでしまい、タブを開いただけで既存の保存済みマスクよりわずかに
+// 大きい領域が「初期状態」として扱われてしまう(何もしなくても再保存すると
+// マスクが変わる不具合)。それぞれ同じフィルタ(significantComponentsMask、
+// 体はさらにfillHoles)をかけてから使う。
+function classifyRawForView(v){
+  const cm=ensurePaintColormap(v);
+  if(!cm) return null;
+  const accs=paintableAccessories();
+  const raw=P3D.classifySilhouetteRaw(cm.ctx, cm.w, cm.h, PAINT_BODY_COLOR, accs.map(x=>x.a.color));
+  const byTarget={body:P3D.fillHoles(P3D.significantComponentsMask(raw.bodyRaw, cm.w, cm.h), cm.w, cm.h)};
+  accs.forEach((x,idx)=>{ byTarget[String(x.i)]=P3D.significantComponentsMask(raw.accRaw[idx], cm.w, cm.h); });
+  return byTarget;
+}
+// target(=paintTargetと同じ形式のキー、"body"またはaccessories index文字列)の
+// この面での編集可能ペイント層を返す。まだ無ければ、この面の全対象ぶんを
+// 一括で最近傍分類してシード(paintAlphaSeed、「初期状態に戻す」の復元先)を
+// 作り、そのコピーをpaintAlphaとして返す。
+function ensurePaintAlpha(target, v){
+  if(paintAlpha[target] && paintAlpha[target][v]) return paintAlpha[target][v];
+  const im=imgs[v];
+  if(!im) return null;
+  const byTarget=classifyRawForView(v);
+  if(byTarget){
+    Object.keys(byTarget).forEach(t=>{
+      paintAlpha[t]=paintAlpha[t]||{};
+      paintAlphaSeed[t]=paintAlphaSeed[t]||{};
+      if(!paintAlpha[t][v]){
+        paintAlpha[t][v]=byTarget[t];
+        paintAlphaSeed[t][v]=byTarget[t].slice();
+      }
+    });
+  }
+  paintAlpha[target]=paintAlpha[target]||{};
+  if(!paintAlpha[target][v]) paintAlpha[target][v]=new Uint8Array(im.w*im.h);
+  return paintAlpha[target][v];
+}
+// ★2026-07-18(手動マップの保存/復元対応): JSON読込直後に呼ぶ。保存済みの
+// a.mask[v]/bodyMask[v](=前回の手動編集結果を含む)を、colormapからの
+// 再分類を待たずに直接paintAlpha/paintAlphaSeedへデコードしておくことで、
+// 手動マップタブを開いた時に保存内容がそのまま復元されるようにする
+// (ensurePaintAlphaはpaintAlpha[target][v]が既にあればそれを使うだけで、
+// 再分類は行わない)。
+async function primePaintAlphaFromSavedMasks(){
+  const jobs=[];
+  function prime(target,v,m){
+    const im=imgs[v];
+    if(!im||!m||!m.maskDataUrl) return;
+    jobs.push(P3D.loadMaskAlphaAsync(m.maskDataUrl, im.w, im.h).then(alpha=>{
+      paintAlpha[target]=paintAlpha[target]||{};
+      paintAlphaSeed[target]=paintAlphaSeed[target]||{};
+      paintAlpha[target][v]=alpha;
+      paintAlphaSeed[target][v]=alpha.slice();
+    }));
+  }
+  Object.keys(bodyMask).forEach(v=>prime("body",v,bodyMask[v]));
+  accessories.forEach((a,i)=>{
+    Object.keys(a.mask||{}).forEach(v=>prime(String(i),v,a.mask[v]));
+  });
+  if(jobs.length) await Promise.all(jobs);
+}
+function pushPaintUndo(target,v){
+  const arr=ensurePaintAlpha(target,v);
+  if(!arr) return;
+  paintUndoStack.push({target:target, view:v, data:arr.slice()});
+  if(paintUndoStack.length>PAINT_UNDO_MAX) paintUndoStack.shift();
+}
+function paintAlphaStampCircle(arr,w,h,x,y,r,val){
+  const x0=Math.max(0,Math.floor(x-r)), x1=Math.min(w-1,Math.ceil(x+r));
+  const y0=Math.max(0,Math.floor(y-r)), y1=Math.min(h-1,Math.ceil(y+r));
+  const r2=r*r;
+  for(let py=y0;py<=y1;py++){
+    const dy=py-y;
+    for(let px=x0;px<=x1;px++){
+      const dx=px-x;
+      if(dx*dx+dy*dy<=r2) arr[py*w+px]=val;
+    }
+  }
+}
+// ドラッグ中はpointermoveの間隔が空くと点線状になるため、前回点から補間して
+// 一定間隔でスタンプする。val: 1=ブラシ(塗る)、0=消しゴム(消す)。
+function paintStrokeTo(v,x,y,r,val){
+  const arr=ensurePaintAlpha(paintTarget,v);
+  if(!arr) return;
+  const im=imgs[v];
+  if(!paintLastImgPt){ paintAlphaStampCircle(arr,im.w,im.h,x,y,r,val); paintLastImgPt=[x,y]; return; }
+  const lx=paintLastImgPt[0], ly=paintLastImgPt[1];
+  const dist=Math.hypot(x-lx,y-ly);
+  const step=Math.max(r*0.5,1);
+  const n=Math.max(1,Math.ceil(dist/step));
+  for(let i=1;i<=n;i++){
+    const t=i/n;
+    paintAlphaStampCircle(arr,im.w,im.h, lx+(x-lx)*t, ly+(y-ly)*t, r, val);
+  }
+  paintLastImgPt=[x,y];
+}
+// targetの現在のpaintAlpha[v]を、既存の保存/生成が読む{maskDataUrl,bbox}
+// 形式へ書き戻す(accessoriesはa.mask[v]、体はbodyMask[v])。あわせて
+// .alphaも(このセッション内だけの高速参照用に)一緒に持たせておく
+// (buildJson側はmaskDataUrl/bboxだけを抜き出して保存するため、余分な
+// .alphaフィールドがJSONへ漏れることはない)。
+function syncPaintAlphaToMask(target,v){
+  const arr=paintAlpha[target] && paintAlpha[target][v];
+  const im=imgs[v];
+  if(!arr || !im) return;
+  const packed=P3D.packRawMaskToResult(arr, im.w, im.h);
+  if(target==="body"){
+    bodyMask[v] = packed ? Object.assign({}, packed, {alpha:arr}) : null;
+  }else{
+    const a=accessories[+target];
+    if(!a) return;
+    a.mask=a.mask||{};
+    if(packed) a.mask[v]=Object.assign({}, packed, {alpha:arr});
+    else delete a.mask[v];
+  }
+}
+// 塗り終わり(1ストローク完了)・アンドゥ・初期状態への復元の後に共通で呼ぶ:
+// 編集中の対象/面だけをmaskへ書き戻し、パネル全体(面/対象一覧/キャンバス)を
+// 再描画する。★2026-07-18: 以前はここでextractAllAccessoryMasks()(colormap
+// 全体を毎回再分類)を呼んでいたが、それだと人が塗った内容が次の分類結果で
+// 上書きされてしまうため廃止した。
+function refreshAfterPaintChange(){
+  syncPaintAlphaToMask(paintTarget, paintView);
+  resyncAnalysisToProfile();
+  renderPaintTab();
+}
+function paintUndo(){
+  const entry=paintUndoStack.pop();
+  if(!entry) return;
+  paintAlpha[entry.target]=paintAlpha[entry.target]||{};
+  paintAlpha[entry.target][entry.view]=entry.data;
+  paintTarget=entry.target; paintView=entry.view;
+  syncPaintAlphaToMask(entry.target, entry.view);
+  resyncAnalysisToProfile();
+  renderPaintTab();
+}
+// ★2026-07-18(名称変更): 以前は「この面を全消去」(色分けマップを白へ)
+// だったが、パーツごとに独立したペイント層になったことで「このタブを開いた
+// 時点の状態(=最初のシード)に戻す」という意味に変わった。
+function paintResetCurrentTarget(){
+  const seed=paintAlphaSeed[paintTarget] && paintAlphaSeed[paintTarget][paintView];
+  if(!seed) return;
+  if(!confirm("「"+paintTargetLabelText()+"」の"+(VIEWJP[paintView]||paintView)+"面の編集を、最初に開いた時の状態に戻します。よろしいですか？")) return;
+  pushPaintUndo(paintTarget,paintView);
+  paintAlpha[paintTarget][paintView]=seed.slice();
+  refreshAfterPaintChange();
+}
+function paintTargetLabelText(){
+  if(paintTarget==="body") return "体";
+  const a=accessories[+paintTarget];
+  return (a&&a.name) || "(無名)";
+}
+// ★2026-07-14追加(ユーザー要望「輪郭領域をパーツごとに拡張できる機能」):
+// ブラシで縁を1px単位でなぞらずに済むよう、選択中の対象の現在の色分け領域を
+// 指定px分だけ外側へ一括で太らせる。生成時と同じ最近傍色分類
+// (P3D.classifyColorsNearest、classifySilhouetteRawと同じ候補構成)で対象の
+// 現在の領域を特定し、そこを起点に8近傍の複数始点BFSで距離を測ることで
+// O(幅×高さ)で膨張範囲を求める(pxが大きくても遅くならない)。距離が
+// px以下になった、まだ対象色ではない画素だけを対象の色で上書きする
+// (ツインテールに隠れた後ろ髪の輪郭を、隠れている側へ食い込ませて
+// 拡張する、といった用途を想定)。
+// ★2026-07-14追加(ユーザー指摘「本当の輪郭にははみ出ないようにできる？」):
+// 素朴な膨張だと背景(白)側にも際限なく広がり、実際には描かれていない
+//架空の領域を作ってしまう。背景と分類された画素へはBFSが一切踏み込まない
+// ようにし、体+全アクセサリーの合計シルエット(=色分けマップ上で何らかの
+// 色が塗られている範囲)の内側だけで、他パーツの領域を対象色に置き換える
+// 形に制限する。これにより「本当の輪郭(合計シルエットの外周)」を超えて
+// 拡張されることはなくなる。
+// ★2026-07-18再設計: 以前はcolormaps[view](共有canvas)へ対象の色を直接
+// 書き込んでいたため、拡張が他パーツの領域を上書きしてしまい得た。
+// パーツごとに独立したペイント層になったので、対象自身のpaintAlpha配列
+// だけをBFSで拡張する(他パーツの層には一切触れない)。「本当の輪郭」の
+// 判定(どこまでが合計シルエットの内側か)には、読み取り専用の種として
+// 残っているcolormaps[view]を引き続き使う。
+function expandTargetContour(){
+  const im=imgs[paintView];
+  if(!im) return;
+  const arr=ensurePaintAlpha(paintTarget,paintView);
+  if(!arr) return;
+  const px=parseInt($("paintExpandPx").value,10)||0;
+  if(px<=0) return;
+  const cm=ensurePaintColormap(paintView);
+  if(!cm) return;
+  const accColors=accessories.filter(a=>a.color).map(a=>a.color);
+  const candidates=[P3D.hexToRgb("#ffffff"), P3D.hexToRgb("#000000")].concat(accColors.map(P3D.hexToRgb));
+  const w=cm.w, h=cm.h, n=w*h;
+  const labels=P3D.classifyColorsNearest(cm.ctx, w, h, candidates); // 0=背景
+  const dist=new Int32Array(n).fill(-1);
+  const queue=new Int32Array(n);
+  let qHead=0, qTail=0;
+  for(let i=0;i<n;i++){ if(arr[i]){ dist[i]=0; queue[qTail++]=i; } }
+  if(qTail===0){
+    alert("この面にはまだ「"+paintTargetLabelText()+"」の領域がありません。先にブラシで少し塗ってから拡張してください。");
+    return;
+  }
+  const dx8=[-1,0,1,-1,1,-1,0,1], dy8=[-1,-1,-1,0,0,1,1,1];
+  while(qHead<qTail){
+    const idx=queue[qHead++];
+    const d=dist[idx];
+    if(d>=px) continue;
+    const x=idx%w, y=(idx/w)|0;
+    for(let k=0;k<8;k++){
+      const nx=x+dx8[k], ny=y+dy8[k];
+      if(nx<0||nx>=w||ny<0||ny>=h) continue;
+      const nidx=ny*w+nx;
+      if(labels[nidx]===0) continue; // 背景(合計シルエットの外側)へは広げない
+      if(dist[nidx]===-1){ dist[nidx]=d+1; queue[qTail++]=nidx; }
+    }
+  }
+  pushPaintUndo(paintTarget,paintView);
+  for(let i=0;i<n;i++){
+    if(!arr[i] && dist[i]!==-1 && dist[i]<=px) arr[i]=1;
+  }
+  refreshAfterPaintChange();
+}
+// ★2026-07-14追加(ユーザー要望「パーツ間の設定距離に応じて塞ぐ機能」):
+// 「輪郭拡張」は1つの対象を選んで手動で広げる操作だが、こちらは対象を選ばず
+// この面全体を見て、指定px以下の幅の隙間(パーツ同士の間に残った細い背景の
+// 帯)を自動的に検出してまとめて塞ぐ。標準的な画像処理の「クロージング」
+// (dilateしてerode)に相当する処理をBFSで実装する:
+//  1) 全ての前景画素(体+全アクセサリー)を起点に、半径R以内の背景画素へ
+//     多始点BFSで広がる(dilate)。このとき最も近い前景の色(nearestLabel)も
+//     一緒に伝搬する。
+//  2) dilate後の「非前景」画素を起点に、同じ半径Rで多始点BFSする。この距離が
+//     Rを超える(=外側から遠く、狭い隙間の内部にしかない)画素だけがerode後も
+//     残る。
+//  3) 元は背景で、erode後も残った画素だけを、その画素にとって最も近かった
+//     前景の色(nearestLabel)で塗る。
+// 結果として、幅がR以下の細い隙間だけが埋まり、外周の広い背景やR超の
+// 大きい隙間には影響しない(標準的なクロージングの性質)。
+// ★2026-07-18再設計: 「隙間塞ぎ」は元々、対象を選ばず面全体を見て複数パーツに
+// またがって塞ぐ操作のため、パーツごとに独立したペイント層になった後も
+// 対象をまたぐ処理自体は残す必要がある。ただし書き込み先はもうcolormaps[view]
+// (共有canvas)ではなく、塞いだ画素の塗り先として選ばれた対象自身のpaintAlpha
+// 配列にする(各対象の現在のペイント層から合成ラベルを作り、新たに塞がれた
+// 画素だけをそれぞれの対象へ書き戻す)。
+function autoCloseGaps(){
+  const im=imgs[paintView];
+  if(!im) return;
+  const R=parseInt($("paintCloseGapPx").value,10)||0;
+  if(R<=0) return;
+  const w=im.w, h=im.h, n=w*h;
+  const accs=paintableAccessories();
+  const targetKeys=["body"].concat(accs.map(x=>String(x.i)));
+  const targetArrs=targetKeys.map(t=>ensurePaintAlpha(t,paintView));
+  // 各対象の現在のペイント層から合成ラベル(0=背景,1=体,2+=アクセサリー)を作る。
+  // 複数の対象が同じ画素を持つ(=既に手動で重なって塗られている)場合は、
+  // 配列順(体→アクセサリー順)で後勝ちにする(隙間塞ぎの対象選定にしか
+  // 使わないため、既存の重なりそのものには影響しない)。
+  const labels=new Int32Array(n);
+  targetArrs.forEach((arr,k)=>{ if(!arr) return; for(let i=0;i<n;i++){ if(arr[i]) labels[i]=k+1; } });
+  const dx8=[-1,0,1,-1,1,-1,0,1], dy8=[-1,-1,-1,0,0,1,1,1];
+
+  // 1) dilate: 前景から半径R以内の背景画素へ広がりつつ、最も近い前景ラベルを伝搬
+  const dist1=new Int32Array(n).fill(-1);
+  const nearestLabel=new Int32Array(n).fill(-1);
+  const queue1=new Int32Array(n);
+  let q1Head=0, q1Tail=0;
+  for(let i=0;i<n;i++){
+    if(labels[i]!==0){ dist1[i]=0; nearestLabel[i]=labels[i]; queue1[q1Tail++]=i; }
+  }
+  while(q1Head<q1Tail){
+    const idx=queue1[q1Head++];
+    const d=dist1[idx];
+    if(d>=R) continue;
+    const x=idx%w, y=(idx/w)|0;
+    for(let k=0;k<8;k++){
+      const nx=x+dx8[k], ny=y+dy8[k];
+      if(nx<0||nx>=w||ny<0||ny>=h) continue;
+      const nidx=ny*w+nx;
+      if(dist1[nidx]===-1){ dist1[nidx]=d+1; nearestLabel[nidx]=nearestLabel[idx]; queue1[q1Tail++]=nidx; }
+    }
+  }
+  const dilated=new Uint8Array(n);
+  for(let i=0;i<n;i++){ dilated[i]=(labels[i]!==0 || dist1[i]!==-1) ? 1 : 0; }
+
+  // 2) erode: dilate後の「非前景」画素を起点に半径R以内かどうかを見る
+  const dist2=new Int32Array(n).fill(-1);
+  const queue2=new Int32Array(n);
+  let q2Head=0, q2Tail=0;
+  for(let i=0;i<n;i++){ if(!dilated[i]){ dist2[i]=0; queue2[q2Tail++]=i; } }
+  while(q2Head<q2Tail){
+    const idx=queue2[q2Head++];
+    const d=dist2[idx];
+    if(d>=R) continue;
+    const x=idx%w, y=(idx/w)|0;
+    for(let k=0;k<8;k++){
+      const nx=x+dx8[k], ny=y+dy8[k];
+      if(nx<0||nx>=w||ny<0||ny>=h) continue;
+      const nidx=ny*w+nx;
+      if(dist2[nidx]===-1){ dist2[nidx]=d+1; queue2[q2Tail++]=nidx; }
+    }
+  }
+
+  // 塞ぐ画素を対象ごとに集計する(先に変更点だけリスト化し、対象ごとの
+  // アンドゥスナップショットを取ってから反映する)。
+  const pending=[]; // [targetsIdx(0始まり), pixelIdx]
+  for(let i=0;i<n;i++){
+    if(labels[i]!==0) continue; // 元々前景の画素は変更しない
+    const survivesErosion = dilated[i] && (dist2[i]===-1 || dist2[i]>R);
+    if(!survivesErosion) continue;
+    const lb=nearestLabel[i];
+    if(lb<1 || !targetArrs[lb-1]) continue;
+    pending.push([lb-1,i]);
+  }
+  if(pending.length===0){
+    alert("この面には、指定した距離("+R+"px)以内で塞げる隙間が見つかりませんでした。");
+    return;
+  }
+  const changedTargets=new Set(pending.map(p=>targetKeys[p[0]]));
+  changedTargets.forEach(t=>pushPaintUndo(t,paintView));
+  pending.forEach(([tIdx,i])=>{ targetArrs[tIdx][i]=1; });
+  changedTargets.forEach(t=>syncPaintAlphaToMask(t,paintView));
+  resyncAnalysisToProfile();
+  renderPaintTab();
+}
+function paintCanvasToImgPt(canvas,e){
+  const rc=canvas.getBoundingClientRect();
+  const sx=canvas.width/rc.width, sy=canvas.height/rc.height;
+  return [(e.clientX-rc.left)*sx, (e.clientY-rc.top)*sy];
+}
+function renderPaintViewbar(){
+  const wrap=$("paintViewbar"); if(!wrap) return;
+  wrap.innerHTML=["front","side","leftSide","back"].map(v=>{
+    const has=!!imgs[v];
+    return '<button type="button" class="paintChip'+(v===paintView?" on":"")+'" data-v="'+v+'"'+
+      (has?"":" disabled")+' style="'+(has?"":"opacity:.4;cursor:not-allowed")+'">'+(VIEWJP[v]||v)+'</button>';
+  }).join("");
+  [].forEach.call(wrap.querySelectorAll(".paintChip"),b=>{
+    b.onclick=()=>{
+      if(b.disabled) return;
+      paintView=b.dataset.v;
+      paintLastImgPt=null;
+      renderPaintTab();
+    };
+  });
+}
+function renderPaintTargetList(){
+  const wrap=$("paintTargetList"); if(!wrap) return;
+  const accs=paintableAccessories();
+  let html='<button type="button" class="paintChip'+(paintTarget==="body"?" on":"")+'" data-t="body">'+
+    '<span class="sw" style="background:'+PAINT_BODY_COLOR+'"></span>体</button>';
+  html+=accs.map(({a,i})=>'<button type="button" class="paintChip'+(paintTarget===String(i)?" on":"")+'" data-t="'+i+'">'+
+    '<span class="sw" style="background:'+a.color+'"></span>'+(a.name||"(無名)")+'</button>').join("");
+  wrap.innerHTML=html;
+  [].forEach.call(wrap.querySelectorAll(".paintChip"),b=>{
+    b.onclick=()=>{ paintTarget=b.dataset.t; paintLastImgPt=null; renderPaintTargetList(); renderPaintCanvas(); };
+  });
+}
+// コンテナ幅にフィットさせる基準倍率(paintZoom=1の時の実表示倍率)。
+function paintFitScale(){
+  const wrap=$("paintCanvasWrap");
+  const im=imgs[paintView];
+  if(!wrap||!im) return 1;
+  return (wrap.clientWidth||360)/im.w;
+}
+// canvas要素自体は作り直さず、CSS表示サイズだけをpaintZoomに合わせて更新する
+// (ピンチ操作が難しい環境向けに拡大/縮小ボタンのみで操作できるようにした、
+// 2026-07-13追加)。内部解像度(canvas.width/height)は常に画像そのままの
+// 解像度を保つため、ブラシ座標変換(paintCanvasToImgPt)はズーム後も無改修で
+// 正しく動く。
+function applyPaintCanvasSize(){
+  const canvas=$("paintCanvas");
+  const im=imgs[paintView];
+  if(!canvas||!im) return;
+  paintCurScale=paintFitScale()*paintZoom;
+  canvas.style.width=(im.w*paintCurScale)+"px";
+  canvas.style.height=(im.h*paintCurScale)+"px";
+}
+function setPaintZoom(z){
+  paintZoom=Math.max(0.25,Math.min(8,z));
+  applyPaintCanvasSize();
+}
+function paintPanStepX(){ const w=$("paintCanvasWrap"); return w?Math.max(60,w.clientWidth*0.35):80; }
+function paintPanStepY(){ const w=$("paintCanvasWrap"); return w?Math.max(60,w.clientHeight*0.35):80; }
+function renderPaintCanvas(){
+  const wrap=$("paintCanvasWrap"), hint=$("paintEmptyHint");
+  if(!wrap) return;
+  const im=imgs[paintView];
+  if(!im){
+    wrap.innerHTML="";
+    if(hint) hint.textContent="この面の画像がまだありません。";
+    return;
+  }
+  if(hint) hint.textContent="";
+  const canvas=document.createElement("canvas");
+  canvas.id="paintCanvas";
+  canvas.width=im.w; canvas.height=im.h;
+  const ctx=canvas.getContext("2d");
+  ctx.drawImage(im.el,0,0,im.w,im.h);
+  drawPaintOverlay(ctx);
+  wrap.innerHTML=""; wrap.appendChild(canvas);
+  applyPaintCanvasSize();
+  wirePaintCanvasEvents(canvas);
+}
+// ★2026-07-18再設計: 以前はcolormaps[view](体+全アクセサリー共有の1枚の
+// canvas)をそのまま重ねていたが、パーツごとに独立したペイント層になった
+// ため、表示側も「今開いている対象(paintTarget)自身の層だけ」を、その対象の
+// 色で塗って重ねる形に変更した(他パーツの層はここでは一切見えない)。
+function drawPaintOverlay(ctx){
+  const im=imgs[paintView];
+  if(!im) return;
+  const arr=ensurePaintAlpha(paintTarget,paintView);
+  if(!arr) return;
+  const colorHex=paintTargetColorHex();
+  const maskCanvas=alphaToMaskCanvas(arr,im.w,im.h);
+  const tinted=tintMaskCanvas(maskCanvas,im.w,im.h,colorHex);
+  ctx.save(); ctx.globalAlpha=0.55; ctx.drawImage(tinted,0,0,im.w,im.h); ctx.restore();
+}
+function wirePaintCanvasEvents(canvas){
+  const ctx=canvas.getContext("2d");
+  function redrawComposite(){
+    const im=imgs[paintView];
+    if(!im) return;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(im.el,0,0,im.w,im.h);
+    drawPaintOverlay(ctx);
+    // ★2026-07-13追加: 塗りペンのサイズが分かるよう、ポインタ位置にブラシ半径の
+    // 円を重ね描きする(白地+黒地どちらの上でも見えるよう二重線にする)。線の
+    // 太さはpaintCurScaleで割ることで、ズーム倍率に関わらず画面上ほぼ一定の
+    // 太さに見えるようにしている。
+    if(paintHoverPt){
+      const hx=paintHoverPt[0], hy=paintHoverPt[1];
+      const lw=Math.max(0.75, 2.5/(paintCurScale||1));
+      ctx.save();
+      ctx.lineWidth=lw*1.6; ctx.strokeStyle="rgba(255,255,255,.95)";
+      ctx.beginPath(); ctx.arc(hx,hy,paintBrushSize,0,Math.PI*2); ctx.stroke();
+      ctx.lineWidth=lw; ctx.strokeStyle=(paintMode==="eraser")?"rgba(255,60,60,.95)":"rgba(0,0,0,.95)";
+      ctx.beginPath(); ctx.arc(hx,hy,paintBrushSize,0,Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+  }
+  canvas.addEventListener("pointerdown",e=>{
+    try{canvas.setPointerCapture(e.pointerId);}catch(_){}
+    pushPaintUndo(paintTarget,paintView);
+    paintDrawing=true; paintLastImgPt=null;
+    const p=paintCanvasToImgPt(canvas,e);
+    paintHoverPt=p;
+    paintStrokeTo(paintView,p[0],p[1],paintBrushSize,paintMode==="eraser"?0:1);
+    redrawComposite();
+  });
+  canvas.addEventListener("pointermove",e=>{
+    const p=paintCanvasToImgPt(canvas,e);
+    paintHoverPt=p;
+    if(paintDrawing){
+      paintStrokeTo(paintView,p[0],p[1],paintBrushSize,paintMode==="eraser"?0:1);
+    }
+    redrawComposite();
+  });
+  function endStroke(){
+    if(!paintDrawing) return;
+    paintDrawing=false; paintLastImgPt=null;
+    refreshAfterPaintChange();
+  }
+  canvas.addEventListener("pointerup",endStroke);
+  canvas.addEventListener("pointercancel",endStroke);
+  canvas.addEventListener("pointerleave",()=>{
+    paintHoverPt=null;
+    if(paintDrawing) endStroke(); else redrawComposite();
+  });
+}
+function renderPaintTab(){
+  renderPaintViewbar();
+  renderPaintTargetList();
+  renderPaintCanvas();
+}
+if($("paintBrushSlider")){
+  $("paintBrushSlider").oninput=()=>{
+    paintBrushSize=parseInt($("paintBrushSlider").value,10);
+    $("paintBrushVal").textContent=paintBrushSize+"px";
+  };
+}
+if($("paintUndo")) $("paintUndo").onclick=paintUndo;
+if($("paintClearView")) $("paintClearView").onclick=paintResetCurrentTarget;
+function setPaintMode(m){
+  paintMode=m;
+  if($("paintModeBrush")) $("paintModeBrush").classList.toggle("on",m==="brush");
+  if($("paintModeEraser")) $("paintModeEraser").classList.toggle("on",m==="eraser");
+}
+if($("paintModeBrush")) $("paintModeBrush").onclick=()=>setPaintMode("brush");
+if($("paintModeEraser")) $("paintModeEraser").onclick=()=>setPaintMode("eraser");
+if($("paintExpandBtn")) $("paintExpandBtn").onclick=expandTargetContour;
+if($("paintCloseGapBtn")) $("paintCloseGapBtn").onclick=autoCloseGaps;
+if($("paintZoomIn")) $("paintZoomIn").onclick=()=>setPaintZoom(paintZoom*1.25);
+if($("paintZoomOut")) $("paintZoomOut").onclick=()=>setPaintZoom(paintZoom/1.25);
+if($("paintZoomReset")) $("paintZoomReset").onclick=()=>setPaintZoom(1);
+// ★2026-07-18(ユーザー指摘「スマホ/タブレットで上下左右ボタンが効かない」):
+// .onclickは合成click(タッチ→click変換)に依存するため、環境によっては
+// 反応しない/遅延することがある。ランドマーク移動ボタン(nLeft/nUp/nDown/
+// nRight、holdBtn参照)と同じpointerdownベースの確実な方式に揃える
+// (押しっぱなしでの連続パンにも対応する)。
+function holdPanBtn(id,axis,sign){
+  var b=$(id); if(!b) return;
+  var t=null;
+  var run=function(){
+    var w=$("paintCanvasWrap"); if(!w) return;
+    if(axis==="y") w.scrollTop+=sign*paintPanStepY();
+    else w.scrollLeft+=sign*paintPanStepX();
+  };
+  var start=function(e){ if(b.disabled)return; e.preventDefault(); run(); t=setInterval(run,120); };
+  var stop=function(){ if(t){clearInterval(t);t=null;} };
+  b.addEventListener("pointerdown",start);
+  b.addEventListener("pointerup",stop);
+  b.addEventListener("pointerleave",stop);
+  b.addEventListener("pointercancel",stop);
+}
+holdPanBtn("paintPanUp","y",-1);
+holdPanBtn("paintPanDown","y",1);
+holdPanBtn("paintPanLeft","x",-1);
+holdPanBtn("paintPanRight","x",1);
+
+// 「自動マスク」タブ: front/side/backの画像に、色分けマップ由来のマスク
+// (acc.mask[view].maskDataUrl、白RGB+アルファ=前景のラスタ)を重ね描きした
+// プレビューと、抽出済みパーツ一覧を同時表示する(GHOST_SCANNER_PLAN.md
+// 「自動マスク」タブ節)。このタブでは再抽出はできない(ゴーストスキャナー側
+// でやり直してから、改めて引き継ぐ)。
+let automaskRendered=false;
+// マスク由来accessoryの名前・取付ボーンは、点編集を伴わないため、
+// 自動マスクタブ側で直接編集できるようにする(BONE_GROUPS/BONE_JPを使った
+// 簡易フォーム)。
+// ★2026-07-10(UIレビュー): 「取り付け方式/取り付けボーン」は自動マスクタブから
+// マークタブ(#automaskBoneList)へ移した。
+function buildAutomaskItemHtml(a, idx){
+  const views=["front","side","leftSide","back"].filter(v=>a.mask[v]);
+  // ★2026-07-11: 色許容誤差(colorTolerance)は最近傍色分類への置き換えに伴い
+  // 廃止した(色分けマップ上の塗り分け色は一覧確定時に決まり、この画面では
+  // 変更しない前提のため、再抽出はJSON読込時のextractAllAccessoryMasks()の
+  // みで十分)。
+  // ★2026-07-11: 断面の丸み(psq)個別設定UIは、マスク抽出に一切影響しない
+  // 3D彫刻専用パラメータのため、設定値タブ(モデルの形グループ)へ移動した
+  // (renderPsqAccessoryOverridesHtml参照)。
+  return '<div class="acform" style="margin-bottom:8px">'+
+    '<span class="tag">自動マスク / 面: '+views.join(",")+'</span>'+
+    '<label>名前<input type="text" class="automaskNameEdit" data-i="'+idx+'" value="'+(a.name||"").replace(/"/g,"&quot;")+'" placeholder="(無名)"></label>'+
+    '</div>';
+}
+function wireAutomaskItemEvents(){
+  [].forEach.call(document.querySelectorAll(".automaskNameEdit"),inp=>{
+    inp.oninput=()=>{
+      // ★2026-07-10: キーは実際の生成時(pipeline.js allAccName)に使われる
+      // 生の名前(空文字許容、"accessory"のような補完はしない)と揃える。
+      const i=+inp.dataset.i, oldKey="acc:"+(accessories[i].name||"");
+      accessories[i].name=inp.value;
+      const newKey="acc:"+(accessories[i].name||"");
+      if(oldKey!==newKey){
+        if(seamAngles[oldKey]!==undefined){ seamAngles[newKey]=seamAngles[oldKey]; delete seamAngles[oldKey]; }
+        if(seamNoSide[oldKey]!==undefined){ seamNoSide[newKey]=seamNoSide[oldKey]; delete seamNoSide[oldKey]; }
+      }
+      renderAccessoryBoneList(); // 名前変更をマークタブ側の一覧にも反映
+    };
+  });
+}
+// ★2026-07-10(UIレビュー): アクセサリーの取り付けボーン設定一覧
+// (マークタブ#automaskBoneList)。色許容誤差(自動マスクタブ)とは独立に、
+// accessories配列があればいつでも表示できる(マスク未抽出でも名前/ボーンは
+// 編集できる)。
+// ★2026-07-20(ユーザー指摘「ボーン選択はチェックボックスじゃなくプルダウンに」
+// 対応): BONE_GROUPS×BONE数ぶんのチェックボックスを全部並べる方式は、
+// アクセサリー1件あたり20項目前後×アクセサリー数ぶん縦に伸びるため
+// (前段の設定値タブの縦圧縮と同じ問題)、<select>ドロップダウンに置き換えた。
+// rigid(1ボーン固定)は選ぶと即座に確定する単一ドロップダウンで十分。
+// soft(複数ボーン追従)は複数選択が要るため、ドロップダウン+「追加」ボタンで
+// タグのように積み上げ、行ごとに削除ボタンを付ける方式にした(ユーザー指定)。
+function boneSelectOptionsHtml(selectedBone){
+  return BONE_GROUPS.map(grp=>{
+    const opts=grp.bones.map(b=>'<option value="'+b+'"'+(b===selectedBone?" selected":"")+'>'+(BONE_JP[b]||b)+'</option>').join("");
+    return '<optgroup label="'+grp.label+'">'+opts+'</optgroup>';
+  }).join("");
+}
+function buildAccessoryBoneItemHtml(a, idx){
+  const isRigid=a.mode==="rigid";
+  let boneUi;
+  if(isRigid){
+    const selectedBone=(a.bones&&a.bones[0])||"";
+    boneUi='<select class="automaskBoneSelectRigid" data-i="'+idx+'">'+
+      '<option value=""'+(selectedBone?"":" selected")+'>(未選択)</option>'+
+      boneSelectOptionsHtml(selectedBone)+'</select>';
+  }else{
+    const addedBones=a.bones||[];
+    const rows=addedBones.map(b=>
+      '<div class="acitem"><span class="nm">'+(BONE_JP[b]||b)+'</span>'+
+      '<button type="button" class="btn sm danger automaskBoneRemove" data-i="'+idx+'" data-bone="'+b+'">削除</button></div>'
+    ).join("");
+    boneUi='<div class="row" style="margin-bottom:6px">'+
+      '<select class="automaskBoneSelectSoft" data-i="'+idx+'">'+
+      '<option value="">(ボーンを選択)</option>'+boneSelectOptionsHtml(null)+'</select>'+
+      '<button type="button" class="btn sm mint automaskBoneAdd" data-i="'+idx+'" style="flex:0 0 auto">追加</button>'+
+      '</div>'+
+      (rows?'<div class="aclist">'+rows+'</div>':'<div style="font-size:11px;color:var(--mut)">未選択</div>');
+  }
+  return '<div class="acform" style="margin-bottom:8px">'+
+    '<span class="tag">'+(a.name||"(無名)")+'</span>'+
+    '<label>取り付け方式</label>'+
+    '<div class="row">'+
+    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="rigid"?" mint":"")+'" data-i="'+idx+'" data-mode="rigid">rigid(1ボーン固定)</button>'+
+    '<button type="button" class="btn sm automaskModeBtn'+(a.mode==="soft"?" mint":"")+'" data-i="'+idx+'" data-mode="soft">soft(複数ボーン追従)</button>'+
+    '</div>'+
+    '<label>取り付けボーン('+(isRigid?"1つ選択":"複数選択可")+')'+boneUi+'</label>'+
+    '</div>';
+}
+function wireAccessoryBoneEvents(){
+  [].forEach.call(document.querySelectorAll(".automaskModeBtn"),btn=>{
+    btn.onclick=()=>{
+      const i=+btn.dataset.i, a=accessories[i];
+      a.mode=btn.dataset.mode;
+      if(a.mode==="rigid"&&a.bones.length>1)a.bones=a.bones.slice(0,1);
+      renderAccessoryBoneList();
+    };
+  });
+  // rigid: ドロップダウン1つで即確定。
+  [].forEach.call(document.querySelectorAll(".automaskBoneSelectRigid"),sel=>{
+    sel.onchange=()=>{
+      const i=+sel.dataset.i, a=accessories[i];
+      a.bones = sel.value ? [sel.value] : [];
+    };
+  });
+  // soft: 「追加」ボタンで選択中のボーンを一覧へ積み上げる(重複追加はしない)。
+  [].forEach.call(document.querySelectorAll(".automaskBoneAdd"),btn=>{
+    btn.onclick=()=>{
+      const i=+btn.dataset.i, a=accessories[i];
+      const sel=document.querySelector('.automaskBoneSelectSoft[data-i="'+i+'"]');
+      if(!sel || !sel.value) return;
+      if(!a.bones) a.bones=[];
+      if(a.bones.indexOf(sel.value)<0) a.bones.push(sel.value);
+      renderAccessoryBoneList();
+    };
+  });
+  [].forEach.call(document.querySelectorAll(".automaskBoneRemove"),btn=>{
+    btn.onclick=()=>{
+      const i=+btn.dataset.i, a=accessories[i];
+      a.bones=(a.bones||[]).filter(x=>x!==btn.dataset.bone);
+      renderAccessoryBoneList();
+    };
+  });
+}
+function renderAccessoryBoneList(){
+  const el=$("automaskBoneList"); if(!el)return;
+  const maskAccs=[];
+  accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
+  if(!maskAccs.length){
+    el.innerHTML='<p class="hint" style="font-size:11px;color:var(--mut)">自動マスク(色分けマップ由来)のパーツはありません。</p>';
+    return;
+  }
+  el.innerHTML='<div class="subhead">アクセサリーの取り付けボーン</div>'+
+    maskAccs.map(({a,i})=>buildAccessoryBoneItemHtml(a,i)).join("");
+  wireAccessoryBoneEvents();
+}
+// マスク画像(白RGB+アルファ=前景)を、そのaccessoryの実際の色(a.color)で
+// 塗り直したcanvasを作る。★2026-07-09(UIレビュー): 以前は白いマスクを
+// 単純に薄く重ねるだけで、どのパーツがどこにあるのか色で見分けられず
+// 分かりづらかった(「マスク画像の色を載せるべき」との指摘)。
+function tintMaskCanvas(maskImg,w,h,color){
+  const c=document.createElement("canvas");c.width=w;c.height=h;
+  const cx=c.getContext("2d");
+  cx.drawImage(maskImg,0,0,w,h);
+  cx.globalCompositeOperation="source-in";
+  cx.fillStyle=color||"#ff2828";
+  cx.fillRect(0,0,w,h);
+  return c;
+}
+// 自動マスクタブ上部の色分けマップ+マスク重ね描きプレビュー(automaskColormaps)
+// だけを再描画する(色許容誤差スライダーのドラッグ中に呼ばれるため、
+// リスト側(automaskList、スライダー自体を含む)は再構築しない)。
+// 全身のシルエット(alpha配列)を、accessoryのmaskDataUrlと同じ「白RGB+
+// アルファ」形式のcanvasに変換する(tintMaskCanvasにそのまま渡せるように)。
+function alphaToMaskCanvas(alpha,w,h){
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const cx=c.getContext("2d");
+  const id=cx.createImageData(w,h);
+  for(let i=0;i<alpha.length;i++){
+    const v=alpha[i]?255:0;
+    id.data[i*4]=255; id.data[i*4+1]=255; id.data[i*4+2]=255; id.data[i*4+3]=v;
+  }
+  cx.putImageData(id,0,0);
+  return c;
+}
+const AUTOMASK_BODY_TINT="#3388ff";
+// ★2026-07-10(UIレビュー): 全身+複数のアクセサリーを同時に色付き表示すると
+// 重なって見分けがつかないとの指摘を受け、プレビューに表示する項目
+// (全身/パーツ別)をチェックボックスで個別にON/OFFできるようにした。
+// 既定は全部ON。キーは"body"またはaccessories配列のindex(文字列)。
+let automaskVisible={body:true};
+function renderAutomaskVisibilityChecks(maskAccs){
+  const wrap=$("automaskVisChecks");
+  if(!wrap)return;
+  if(automaskVisible.body===undefined)automaskVisible.body=true;
+  wrap.innerHTML='<label style="display:flex;align-items:center;gap:4px;font-size:11.5px">'+
+    '<input type="checkbox" class="automaskVisChk" data-key="body" '+(automaskVisible.body?"checked":"")+'>全身</label>'+
+    maskAccs.map(({a,i})=>{
+      if(automaskVisible[i]===undefined)automaskVisible[i]=true;
+      return '<label style="display:flex;align-items:center;gap:4px;font-size:11.5px">'+
+        '<input type="checkbox" class="automaskVisChk" data-key="'+i+'" '+(automaskVisible[i]?"checked":"")+'>'+(a.name||"(無名)")+'</label>';
+    }).join("");
+  [].forEach.call(wrap.querySelectorAll(".automaskVisChk"),cb=>{
+    cb.onchange=()=>{ automaskVisible[cb.dataset.key]=cb.checked; renderAutomaskPreviews(); };
+  });
+}
+function renderAutomaskPreviews(){
+  const colWrap=$("automaskColormaps");
+  if(!colWrap)return;
+  const maskAccs=[];
+  accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
+  colWrap.innerHTML="";
+  ["front","side","leftSide","back"].forEach(v=>{
+    const im=imgs[v];
+    if(!im)return;
+    const c=document.createElement("canvas");
+    c.width=im.w; c.height=im.h;
+    const cx=c.getContext("2d");
+    cx.drawImage(im.el,0,0,im.w,im.h);
+    // ★2026-07-10(UIレビュー): 抽出された全身のシルエットも(アクセサリーと
+    // 同様に)色付きで重ね描きするようにした(青、アクセサリーより薄め)。
+    const cm=colormaps[v];
+    if(cm && automaskVisible.body){
+      const bodyAlpha=bodyAlphaFromColormap(cm);
+      const bodyMaskCanvas=alphaToMaskCanvas(bodyAlpha,cm.w,cm.h);
+      const bodyTinted=tintMaskCanvas(bodyMaskCanvas,im.w,im.h,AUTOMASK_BODY_TINT);
+      cx.save(); cx.globalAlpha=0.35; cx.drawImage(bodyTinted,0,0,im.w,im.h); cx.restore();
+    }
+    maskAccs.forEach(({a,i})=>{
+      if(!automaskVisible[i])return;
+      const m=a.mask[v];
+      if(!m||!m.maskDataUrl)return;
+      const mi=new Image();
+      mi.onload=()=>{
+        const tinted=tintMaskCanvas(mi,im.w,im.h,a.color);
+        cx.save(); cx.globalAlpha=0.6; cx.drawImage(tinted,0,0,im.w,im.h); cx.restore();
+      };
+      mi.src=m.maskDataUrl;
+    });
+    const wrap=document.createElement("div");
+    wrap.className="automaskItem";
+    const label=document.createElement("div");
+    label.style.cssText="font-size:10.5px;color:var(--mut);margin-bottom:2px";
+    label.textContent=VIEWJP[v]||v;
+    wrap.appendChild(label);
+    wrap.appendChild(c);
+    colWrap.appendChild(wrap);
+    // ★2026-07-09(UIレビュー): サムネイル(220px)だけではマスクと色分けマップの
+    // 重なりズレが確認しづらいため、タップで全画面プレビューを開けるようにする。
+    c.onclick=()=>{
+      const lb=$("automaskLightbox");
+      lb.innerHTML="";
+      const big=document.createElement("canvas");
+      big.width=c.width; big.height=c.height;
+      big.getContext("2d").drawImage(c,0,0);
+      lb.appendChild(big);
+      lb.classList.add("on");
+    };
+  });
+}
+function renderAutomaskTab(){
+  const listWrap=$("automaskList"), hint=$("automaskEmptyHint");
+  const maskAccs=[];
+  accessories.forEach((a,i)=>{ if(a.mask&&Object.keys(a.mask).length) maskAccs.push({a,i}); });
+  listWrap.innerHTML="";
+  renderAccessoryBoneList();
+  const visRow=$("automaskVisibilityRow");
+  if(visRow) visRow.classList.toggle("hidden", !maskAccs.length);
+  if(!maskAccs.length){
+    $("automaskColormaps").innerHTML="";
+    hint.textContent="自動マスク(色分けマップ由来)のパーツはありません。ゴーストスキャナーで色分けマップとアクセサリー一覧を引き継いでください。";
+    return;
+  }
+  hint.textContent="";
+  renderAutomaskVisibilityChecks(maskAccs);
+  renderAutomaskPreviews();
+  listWrap.innerHTML=maskAccs.map(({a,i})=>buildAutomaskItemHtml(a,i)).join("");
+  wireAutomaskItemEvents();
+}
+/* ---------- 凡例チップ ---------- */
+function buildLegend(){
+  const wrapEl=$("legend");wrapEl.innerHTML="";
+  LM_GROUP_ORDER.forEach(g=>{
+    const items=LM.filter(d=>d.g===g); if(!items.length)return;
+    const h=document.createElement("div");
+    h.className="subhead";h.style.color=GCOL[g];h.textContent=LM_GROUP_JP[g]||g;
+    wrapEl.appendChild(h);
+    const row=document.createElement("div");
+    row.className="legend";
+    items.forEach(d=>{const s=document.createElement("span");s.className="chip";s.textContent=d.jp;
+      s.dataset.k=d.k;s.style.color=GCOL[d.g];s.title=d.desc;
+      s.onclick=()=>{const key="lm:"+d.k;sel=(sel===key)?null:key;syncChips();draw();};row.appendChild(s);});
+    wrapEl.appendChild(row);
+  });
+}
+function syncChips(){
+  // sel はgetInteractivePoints()と同じ"lm:"+ランドマーク名の形式(凡例チップ・
+  // 画像上タップのどちらで選択しても統一。以前はチップ経由だけ素の名前が
+  // 入ってしまい、十字キー(nudge()はgetInteractivePoints経由でしか探さない)
+  // が反応しないバグがあった)。
+  [].forEach.call($("legend").querySelectorAll(".chip"),s=>{s.classList.toggle("on",("lm:"+s.dataset.k)===sel);});
+  [].forEach.call(document.querySelectorAll(".dpad button"),b=>{b.disabled=!sel;});
+  var lmKey=(sel&&sel.indexOf("lm:")===0)?sel.slice(3):null;
+  var d=LM.filter(function(x){return x.k===lmKey;})[0];
+  var sn=document.getElementById("selName"), sd=document.getElementById("selDesc");
+  if(d){ if(sn)sn.textContent=d.jp; if(sd)sd.textContent=d.desc; return; }
+  var p=getInteractivePoints(curView).filter(function(pp){return pp.key===sel;})[0];
+  if(sn)sn.textContent=p?p.label:"未選択";
+  if(sd)sd.textContent="";
+}
+
+/* ---------- 配線 ---------- */
+$("reset").onclick=()=>{
+  if(!analysis)return;
+  if(!confirm("初期配置に戻しますか？現在のランドマークの微調整はすべて失われます。"))return;
+  points=placeAll(analysis);sel=null;view={z:1,ox:0,oy:0};syncChips();draw();setMsg("前処理の初期配置に戻しました。");
+};
+$("export").onclick=exportJson;
+$("copy").onclick=copyJson;
+// ★2026-07-09(UIレビュー): 画像もJSONに埋め込むようになったため、「先に
+// 正面画像を読み込んでください」というガードは不要になった。points未確定
+// (=まだ編集画面に入っていない)状態でも、画像込みのJSONを直接読み込んで
+// そこから開始できる(loadJsonFile()内のbootstrapFromJson()分岐)。
+$("jsonFile").onchange=e=>{const f=e.target.files[0];if(f)loadJsonFile(f);e.target.value="";};
+
+/* ---------- モデル生成(3DtoolJS: ブラウザ完結でGLBを作りビューアへ遷移) ---------- */
+let genTimer=null, genStartMs=0;
+function genOverlayShow(){
+  $("genError").classList.add("hidden");$("genError").textContent="";
+  $("genTag").classList.remove("err");$("genTagText").textContent="GENERATING";
+  $("genStage").textContent="準備中…";
+  $("genSeconds").textContent="0秒";
+  $("genOverlay").classList.remove("hidden");
+  genStartMs=Date.now();
+  genTimer=setInterval(()=>{
+    const s=Math.floor((Date.now()-genStartMs)/1000);
+    $("genSeconds").textContent=s+"秒";
+  },1000);
+}
+function genOverlayHide(){
+  if(genTimer){clearInterval(genTimer);genTimer=null;}
+  $("genOverlay").classList.add("hidden");
+}
+function genOverlayError(msg){
+  if(genTimer){clearInterval(genTimer);genTimer=null;}
+  $("genTag").classList.add("err");$("genTagText").textContent="ERROR";
+  $("genStage").textContent="生成に失敗しました";
+  const err=$("genError");
+  err.textContent=msg+"\n(タップで閉じます)";
+  err.classList.remove("hidden");
+  $("genOverlay").onclick=()=>{genOverlayHide();$("genOverlay").onclick=null;};
+}
+$("generateBtn").onclick=async()=>{
+  if(!points||!analysis){setMsg("先に正面/側面/背面画像を読み込んでください。");return;}
+  if(!imgs.front||!imgs.side||!imgs.back){setMsg("正面/側面/背面の3枚とも読み込んでください。");return;}
+  genOverlayShow();
+  try{
+    const state={
+      imgs, points, analysis, deriveFromPoints,
+      accessories: accessories.map(a=>{
+        // ★2026-07-10: colorは元々マスク抽出(自動マスクタブ)にしか使わず
+        // 生成用stateには含めていなかったが、js/pipeline.jsの境界ギャップ埋め
+        // (P3D.fillColorGaps)が「このアクセサリーの登録色」を必要とするため
+        // ここでも渡すようにした(無いとギャップ埋めが常にスキップされ無効化する)。
+        const out={name:a.name,mode:a.mode,bones:a.bones,color:a.color,
+          psq:(a.psq!==undefined&&a.psq!==null)?a.psq:2,
+          depthBandFront:a.depthBandFront!==false, depthBandBack:a.depthBandBack!==false,
+          depthSideRight:a.depthSideRight, depthSideLeft:a.depthSideLeft};
+        // ★2026-07-08バグ修正: bboxだけ渡すとpipeline.js/accessories.js側は
+        // 「bbox内で白背景でない場所」を彫るしかなく、bbox内にある体側の
+        // ピクセルまで拾って本体位置まで彫ってしまっていた。パレット色による
+        // ピクセル単位の正確なマスクraster(maskDataUrl)も渡し、
+        // pipeline.jsでUint8Arrayにラスタライズしてaccessories.js側で直接
+        // 使えるようにする。
+        out.mask=Object.keys(a.mask).reduce((o,v)=>{o[v]={maskDataUrl:a.mask[v].maskDataUrl,bbox:a.mask[v].bbox};return o;},{});
+        return out;
+      }),
+      bodyMask: Object.keys(bodyMask).reduce((o,v)=>{ if(bodyMask[v]) o[v]={maskDataUrl:bodyMask[v].maskDataUrl,bbox:bodyMask[v].bbox}; return o; },{}),
+      colormaps, seamAngles, seamNoSide, seamSmoothIters, colorGradWidth, colorGradStrength, genParams,
+    };
+    // ★2026-07-15(ユーザー指摘「1px/1pxにするとビューアが重すぎる、モデル調整
+    // 機能はジェネレータに移した方がいい」対応): 以前(フェーズ1〜2)は彫刻
+    // (marching cubes)までの中間データだけ作ってビューアに渡し、平滑化/間引き/
+    // テクスチャ焼き込み/GLB化はビューア側でライブパラメータ編集しながら行って
+    // いたが、生メッシュを保持したままの再計算がビューアを重くする原因になって
+    // いた。「生成」ボタンを押した時点でP3D.finishFromIntermediate()まで完了
+    // させ、完成GLBだけをビューアに渡すようにする(js/idb.jsのコメント参照)。
+    const inter=await P3D.runToIntermediate(state, (label)=>{ $("genStage").textContent=label; });
+    const pkgForFinish={
+      raw_unified: inter.rawUnified,
+      parts_meta: inter.partsMeta,
+      bled_canvases: inter.bledCanvases,
+      pivots: inter.pivots,
+      calib: inter.calib,
+    };
+    const liveParams={
+      gp: genParams, seamAngles, seamNoSide,
+      seamSmoothIters, colorGradWidth, colorGradStrength,
+    };
+    const glb=await P3D.finishFromIntermediate(pkgForFinish, liveParams,
+      (label)=>{ $("genStage").textContent=label; });
+    const pkg={
+      glb: glb,
+      landmarks_json: buildJson(),
+      // ★2026-07-10: ビューアの「戻る」でジェネレータの自動保存セッションへ
+      // 遷移する際、どのlocalStorageキー(通常/サンプルどれか)を開けば
+      // よいかをビューア側は知らないため、ここで教えておく。
+      session_mode: currentMode,
+      session_sample_id: currentSampleId,
+    };
+    await P3D.saveGeneratedModel(pkg);
+    if(currentMode==="normal"){
+      saveNormalSession();
+      await saveNormalSessionImages();
+    }else if(currentMode==="sample"){
+      saveSampleSession();
+    }
+    genOverlayHide();
+    location.href="character_3d.html?source=generated";
+  }catch(e){
+    console.error(e);
+    genOverlayError((e&&e.message)||String(e));
+  }
+};
+$("paramsResetAll").onclick=()=>{
+  genParams=Object.assign({},DEFAULT_GEN_PARAMS);
+  renderParamsPanel();
+  setMsg("パラメータを全て既定値に戻しました。");
+};
+[].forEach.call(document.querySelectorAll("#viewbar .viewbtn"),b=>{
+  b.onclick=()=>{
+    if(!imgs[b.dataset.view]){setMsg("先に"+b.textContent+"画像を読み込んでください。");return;}
+    curView=b.dataset.view;view={z:1,ox:0,oy:0};sel=null;syncChips();syncViewBtns();
+    draw();
+  };
+});
+function nudge(dx,dy){
+  if(!sel){setMsg("先に点（下のチップ or 画像をタップ）を選んでください");return;}
+  const p=getInteractivePoints(curView).filter(pp=>pp.key===sel)[0];
+  if(!p){setMsg("選択中の点は表示中の面にありません。");return;}
+  p.set([p.pos[0]+dx,p.pos[1]+dy]);draw();
+}
+function holdBtn(id,dx,dy){var b=$(id),t=null;
+  var run=function(){nudge(dx,dy);};
+  var start=function(e){if(b.disabled)return;e.preventDefault();run();t=setInterval(run,55);};
+  var stop=function(){if(t){clearInterval(t);t=null;}};
+  b.addEventListener("pointerdown",start);b.addEventListener("pointerup",stop);
+  b.addEventListener("pointerleave",stop);b.addEventListener("pointercancel",stop);}
+holdBtn("nLeft",-1,0);holdBtn("nUp",0,-1);holdBtn("nDown",0,1);holdBtn("nRight",1,0);
+$("viewReset").onclick=function(){view={z:1,ox:0,oy:0};draw();};
+$("lockToggle").onclick=function(){
+  pointsLocked=!pointsLocked;
+  $("lockToggle").textContent=pointsLocked?"🔒 ロック中(タップで解除)":"🔓 点をロック";
+  $("lockToggle").classList.toggle("mint",pointsLocked);
+  setMsg(pointsLocked?"点をロックしました。画像上のドラッグは常に表示の移動/拡大縮小になります。":"ロックを解除しました。");
+};
+[].forEach.call(document.querySelectorAll(".qbtn[data-help]"),b=>{
+  b.onclick=()=>{
+    const box=document.getElementById(b.dataset.help);
+    if(!box)return;
+    const willShow=box.classList.contains("hidden");
+    box.classList.toggle("hidden",!willShow);
+    b.classList.toggle("on",willShow);
+  };
+});
+function wireBoneToggle(overlayId,regionId){
+  const oEl=$(overlayId), rEl=$(regionId);
+  oEl.checked=boneOverlayOn; rEl.checked=boneRegionOn;
+  oEl.onchange=()=>{
+    boneOverlayOn=oEl.checked;
+    ["boneOverlayToggleLM"].forEach(id=>{const e=$(id);if(e)e.checked=boneOverlayOn;});
+    if(IMG_TABS.includes(curTab))draw();
+  };
+  rEl.onchange=()=>{
+    boneRegionOn=rEl.checked;
+    ["boneRegionToggleLM"].forEach(id=>{const e=$(id);if(e)e.checked=boneRegionOn;});
+    if(IMG_TABS.includes(curTab))draw();
+  };
+}
+wireBoneToggle("boneOverlayToggleLM","boneRegionToggleLM");
+buildLegend();
+renderParamsPanel();
+$("automaskLightbox").onclick=()=>{ $("automaskLightbox").classList.remove("on"); };
+// プレビュー表示項目の全選択/全解除。#automaskVisibilityRowも静的markupの
+// ボタンなので、renderAutomaskPreviews()を呼んでも壊れない。
+function setAllAutomaskVisible(v){
+  Object.keys(automaskVisible).forEach(k=>{ automaskVisible[k]=v; });
+  [].forEach.call(document.querySelectorAll(".automaskVisChk"),cb=>{ cb.checked=v; });
+  renderAutomaskPreviews();
+}
+$("automaskVisAllBtn").onclick=()=>setAllAutomaskVisible(true);
+$("automaskVisNoneBtn").onclick=()=>setAllAutomaskVisible(false);
+(function(){
+  // ★初期画面(サンプルモード/JSON読み込み/前回の続きの選択)。
+  // 「サンプルモード」は同梱の画像込みJSON(landmarks_ai_2_embedded.json)を
+  // 自動読込する(お試し用)。「JSONから読み込み」は画像込みのJSON
+  // (ゴーストスキャナー等で書き出したもの)を選んでもらう(2026-07-09、
+  // front/side/back画像を個別アップロードする「新規作成」モードは廃止し、
+  // 画像もJSONに埋め込む形式に統一した)。
+  // 複数サンプルをプルダウンで選べる作りになっている(増やす場合はSAMPLESに
+  // 追記するだけでよい)。配列の先頭が既定(プルダウンの初期選択)になる。
+  // サンプル3(2026-07-18追加)を既定にした。サンプル2は髪飾り・
+  // ツインテール・マフラー・スカート等アクセサリーが多い実データ検証用
+  // (旧サンプル1=多角形形式は2026-07-09に廃止)。
+  const SAMPLES=[
+    {id:"sample3", label:"サンプル3", landmarksFile:"landmarks_ai_3_embedded.json"},
+    {id:"sample2", label:"サンプル2", landmarksFile:"landmarks_ai_2_embedded.json"},
+  ];
+  const sampleSelectEl=$("sampleSelect");
+  sampleSelectEl.innerHTML=SAMPLES.map(function(s,i){ return '<option value="'+i+'">'+s.label+'</option>'; }).join("");
+  sampleSelectEl.addEventListener("click", function(e){ e.stopPropagation(); });
+  function currentSample(){ return SAMPLES[+sampleSelectEl.value]||SAMPLES[0]; }
+  function loadImageBlobIntoSlot(slot,blob){
+    return new Promise(function(res,rej){
+      // leftSide(側面・左)は元々任意の画像なので、blobが無い(その回のセッション
+      // にleftSideが無かった)場合は何もせずスキップする(loadColormapBlobIntoSlot
+      // と同じ扱い)。
+      if(!blob){ res(); return; }
+      var el=new Image();
+      el.onload=function(){
+        imgs[slot]={el:el,w:el.naturalWidth,h:el.naturalHeight};
+        var id="slot"+slot.charAt(0).toUpperCase()+slot.slice(1),s=document.getElementById(id);
+        if(s){s.classList.add("on");s.querySelector("small").textContent="✓ 読込済み";}
+        res();
+      };
+      el.onerror=function(){rej(new Error("画像の読込に失敗しました: "+slot));};
+      el.src=URL.createObjectURL(blob);
+    });
+  }
+  // ★2026-07-11追加: 通常モードの色分けマップ復元(saveNormalSessionImagesで
+  // 一緒に保存したBlob)をcolormaps[view]のオフスクリーンcanvasへ読み込む
+  // (loadColormapFromDataUrlのBlob版)。blobが無い(この修正より前の保存分、
+  // または元々leftSideが無いキャラ)場合は何もせずスキップする。
+  function loadColormapBlobIntoSlot(view,blob){
+    return new Promise(function(res,rej){
+      if(!blob){ res(); return; }
+      var el=new Image();
+      el.onload=function(){
+        var c=document.createElement("canvas"); c.width=el.naturalWidth; c.height=el.naturalHeight;
+        var ctx=c.getContext("2d"); ctx.drawImage(el,0,0);
+        colormaps[view]={canvas:c,ctx:ctx,w:c.width,h:c.height};
+        res();
+      };
+      el.onerror=function(){rej(new Error("色分けマップの読込に失敗しました: "+view));};
+      el.src=URL.createObjectURL(blob);
+    });
+  }
+  // ★2026-07-09(UIレビュー): サンプルも画像込みの1つのJSONファイル
+  // (landmarksFile)から読み込む形に統一した(以前はimagesDir配下の
+  // front/side/back.pngを個別fetchし、その後で別途JSONを読んでいた。
+  // 画像読み込み経路が通常モード/スキャナー引き継ぎ/サンプルモードでバラバラ
+  // だったことの一因)。
+  // ★2026-07-11(バグ修正): 以前は保存済みセッションJSON自体に画像・色分け
+  // マップも埋め込んだままlocalStorageに保存しようとしており、
+  // QuotaExceededErrorで保存自体が毎回(無言で)失敗していた(ユーザー指摘
+  // 「ビューアから戻ると設定値が消える」)。画像・色分けマップは常に同梱の
+  // landmarksFile(初期状態、決定的なデータ)から読み込み、保存済みJSON
+  // (stripHeavyFieldsForSessionSaveで画像・色分けマップを除いた軽量な差分)は
+  // その上からapplyLoadedJson()でランドマーク/設定値等だけを上書きする
+  // 2段階に分けた(旧・色分けマップ必須化以前の形式を破棄する特別扱いは、
+  // 画像・色分けマップを保存済みJSON側に依存しなくなったことで不要になった)。
+  function loadSampleImages(){
+    const sample=currentSample();
+    currentSampleId=sample.id;
+    let savedJson=null;
+    try{
+      const savedRaw=localStorage.getItem(SAMPLE_SESSION_KEY+":"+sample.id);
+      if(savedRaw) savedJson=JSON.parse(savedRaw);
+    }catch(e){ console.warn("サンプルセッションの復元に失敗しました、初期状態を読み込みます:",e); }
+    return fetch(sample.landmarksFile).then(function(r){ if(!r.ok)throw 0; return r.json(); })
+      .then(function(d){ return bootstrapFromJson(d); })
+      .then(function(ok){
+        if(ok && savedJson) applyLoadedJson(savedJson);
+        return ok;
+      });
+  }
+  // 「前回の続き」が選べるかどうかを、保存済みJSON(localStorage)+画像本体
+  // (IndexedDB)の両方が実際に揃っているかで判定する。片方だけ残っている
+  // 状態(保存途中の失敗等)は「無い」扱いにして、中途半端な復元を避ける。
+  async function checkContinueAvailable(){
+    let raw=null;
+    try{ raw=localStorage.getItem(NORMAL_SESSION_KEY); }catch(e){}
+    let blobs=null;
+    try{ blobs=window.P3D&&P3D.loadNormalSessionImages?await P3D.loadNormalSessionImages():null; }catch(e){}
+    const ok=!!(raw && blobs && blobs.front && blobs.side && blobs.back);
+    const card=$("modeContinueBtn");
+    card.classList.toggle("disabled",!ok);
+    $("modeContinueDesc").textContent=ok
+      ?"前回保存した通常モードの画像・ランドマークを読み込んで再開します。"
+      :"前回保存した通常モードの作業がまだありません(新規作成で3枚の画像を読み込むと、以後は自動保存されます)。";
+    return ok;
+  }
+  function refreshSampleModeCard(){
+    let hasSaved=null;
+    try{ hasSaved=localStorage.getItem(SAMPLE_SESSION_KEY+":"+currentSample().id); }catch(e){}
+    $("modeSampleDesc").textContent = hasSaved
+      ? "前回サンプルモードで編集した内容(ランドマーク/パラメータ等)を読み込んで再開します。"
+      : "同梱のサンプル画像(正面/側面/背面)とランドマークを自動読込してお試しできます。";
+    $("modeSampleResetRow").classList.toggle("hidden", !hasSaved);
+  }
+  sampleSelectEl.addEventListener("change", refreshSampleModeCard);
+  $("modeSampleReset").onclick=(e)=>{
+    e.stopPropagation();
+    try{ localStorage.removeItem(SAMPLE_SESSION_KEY+":"+currentSample().id); }catch(err){}
+    refreshSampleModeCard();
+    setMsg("サンプルの編集内容を破棄しました。");
+  };
+  function setModeMsg(t){
+    const el=$("modeMsg");
+    el.textContent=t||"";
+    el.classList.toggle("hidden",!t);
+  }
+  function showModeChoice(){
+    checkContinueAvailable();
+    refreshSampleModeCard();
+    $("modeChoice").classList.remove("hidden");
+  }
+  function startSampleMode(){
+    currentMode="sample";
+    setModeMsg("");
+    $("modeChoice").classList.add("hidden");
+    loadSampleImages().catch(function(e){
+      console.warn("サンプル画像の読込に失敗しました:",e);
+      setModeMsg("サンプル画像の読込に失敗しました: "+((e&&e.message)||e)+" 「JSONから読み込み」をお試しください。");
+      showModeChoice();
+    });
+  }
+  function startJsonMode(){
+    // 実体は常時表示の「📂 JSON読み込み」ボタンと同じ(#jsonFileのクリック)。
+    // モード選択画面に並べることで、他の2モードと並ぶ選択肢として発見しやすくする。
+    $("jsonFile").click();
+  }
+  async function startContinueNormalMode(){
+    if(!(await checkContinueAvailable())) return; // 念のための二重チェック(基本disabledでクリック不可)
+    currentMode="normal";
+    setModeMsg("");
+    $("modeChoice").classList.add("hidden");
+    try{
+      const raw=localStorage.getItem(NORMAL_SESSION_KEY);
+      const blobs=await P3D.loadNormalSessionImages();
+      await Promise.all(["front","side","back","leftSide"].map(function(slot){
+        return loadImageBlobIntoSlot(slot,blobs[slot]);
+      }));
+      colormaps={front:null,side:null,leftSide:null,back:null};
+      await Promise.all(["front","side","leftSide","back"].map(function(view){
+        return loadColormapBlobIntoSlot(view, blobs["colormap_"+view]);
+      }));
+      runAnalyze();syncViewBtns();
+      applyLoadedJson(JSON.parse(raw));
+    }catch(e){
+      console.warn("前回の続きの復元に失敗しました:",e);
+      setModeMsg("前回の続きの復元に失敗しました: "+((e&&e.message)||e)+" JSONから読み込みでやり直してください。");
+      showModeChoice();
+    }
+  }
+  $("modeSampleBtn").onclick=startSampleMode;
+  $("modeJsonBtn").onclick=startJsonMode;
+  $("modeContinueBtn").onclick=startContinueNormalMode;
+  $("backToIndex").onclick=()=>{ location.href="index.html"; };
+  // ゴーストスキャナー(ghost_scanner.html)からの引き継ぎ(GHOST_SCANNER_PLAN.md
+  // 「ジェネレータへの引き継ぎ」節)。
+  // ★2026-07-09(UIレビュー): 以前は画像本体をIndexedDB専用キー
+  // (SCANNER_IMAGES_KEY)経由のBlobで、JSON(点/アクセサリー等)をsessionStorage
+  // 経由で、と2系統に分けて渡していた。scanner側もimage.*.dataUrlをJSONに
+  // 埋め込むようになった(buildLandmarksAiJson参照)ため、sessionStorageの
+  // JSON1つをbootstrapFromJson()に渡すだけで完結する(通常モード/サンプル
+  // モードと同じ経路に統一)。読み込んだらsessionStorageを消費して(残って
+  // いると次回起動時に誤って再読込されるため)、以後は通常モードとして扱う
+  // (自動保存の対象にもなる)。
+  async function startScannerHandoffMode(){
+    currentMode="normal";
+    $("modeChoice").classList.add("hidden");
+    try{
+      const jsonRaw=sessionStorage.getItem("scanner_handoff_json");
+      if(!jsonRaw) throw new Error("スキャナーからの引き継ぎデータが見つかりません");
+      const ok=await bootstrapFromJson(JSON.parse(jsonRaw));
+      if(!ok) throw new Error("スキャナーからの引き継ぎデータに画像が含まれていません");
+      sessionStorage.removeItem("scanner_handoff_json");
+      setMsg("ゴーストスキャナーからの結果を読み込みました。");
+    }catch(e){
+      console.warn("スキャナーからの引き継ぎに失敗しました:",e);
+      setModeMsg("ゴーストスキャナーからの引き継ぎに失敗しました: "+((e&&e.message)||e)+" JSONから読み込みでやり直してください。");
+      showModeChoice();
+    }
+  }
+  const scannerSource = new URLSearchParams(location.search).get("source")==="scanner";
+  // モード選択画面は常に表示する(自動復元でモード選択を省略する挙動は撤去し、
+  // 毎回必ずここから選ぶ。「前回の続き」の可否だけその都度チェックする)。
+  // ただし?source=scannerの場合だけは例外的にモード選択をスキップし、直接
+  // スキャナーの結果を読み込む(スキャナー側の「ジェネレータへ」ボタンを
+  // 押した直後にもう一度モードを選ばせるのは冗長なため)。
+  if(scannerSource){
+    startScannerHandoffMode();
+  }else{
+    showModeChoice();
+  }
+  startAutosaveLoop();
+})();
+})();
+</script>
+</body></html>

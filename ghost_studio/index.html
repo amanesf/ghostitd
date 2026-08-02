@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ゴーストスタジオ(M1+M2実験版) - 動画から3Dモデル</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;background:#151821;color:#eee;}
+  header{padding:10px 16px;background:#1c2030;display:flex;align-items:center;gap:12px;border-bottom:1px solid #333;}
+  header h1{font-size:16px;margin:0;flex:1;}
+  header a{color:#8cf;text-decoration:none;font-size:13px;}
+  .tabs{display:flex;gap:4px;padding:8px 16px;background:#1c2030;border-bottom:1px solid #333;flex-wrap:wrap;}
+  .tabbtn{background:#2a2f42;color:#ccc;border:1px solid #3a3f55;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px;}
+  .tabbtn.active{background:#3a6ea5;color:#fff;border-color:#4a8ec5;}
+  .tabbtn:disabled{opacity:.4;cursor:not-allowed;}
+  main{padding:16px;max-width:960px;margin:0 auto;}
+  .panel{display:none;}
+  .panel.active{display:block;}
+  .card{background:#1e2233;border:1px solid #333a4d;border-radius:8px;padding:14px;margin-bottom:14px;}
+  .card h2{font-size:14px;margin:0 0 10px;color:#9db4e8;}
+  button.act{background:#3a6ea5;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;}
+  button.act:hover{background:#4a8ec5;}
+  button.act:disabled{opacity:.4;cursor:not-allowed;}
+  .muted{color:#999;font-size:12px;}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  progress{width:100%;height:10px;}
+  #thumbStrip{display:flex;gap:4px;overflow-x:auto;padding:4px 0;}
+  #thumbStrip canvas{border:1px solid #444;flex:none;}
+  table.frametbl{border-collapse:collapse;font-size:12px;width:100%;}
+  table.frametbl td,table.frametbl th{border-bottom:1px solid #333;padding:3px 6px;text-align:right;}
+  table.frametbl th{color:#9db4e8;text-align:right;}
+  table.frametbl td:first-child,table.frametbl th:first-child{text-align:left;}
+  tr.outlier td{color:#e88;}
+  #chartWrap canvas{background:#10131c;border:1px solid #333;border-radius:4px;}
+  #glCanvasWrap{position:relative;width:100%;height:420px;background:#0c0e15;border-radius:6px;overflow:hidden;}
+  #glCanvasWrap canvas{width:100%;height:100%;display:block;}
+  a.dl{display:inline-block;background:#2e7d4f;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:13px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>ゴーストスタジオ(実験版) — 動画から3Dモデル(M1+M2: 較正+彫刻プレビュー、頂点カラーGLB)</h1>
+  <a href="../index.html">← トップへ</a>
+</header>
+<div class="tabs">
+  <button class="tabbtn active" data-tab="upload">1. 動画投入</button>
+  <button class="tabbtn" data-tab="extract" disabled>2. フレーム抽出</button>
+  <button class="tabbtn" data-tab="calib" disabled>3. シルエット・較正</button>
+  <button class="tabbtn" data-tab="carve" disabled>4. 彫刻プレビュー</button>
+</div>
+<main>
+
+  <section class="panel active" data-panel="upload">
+    <div class="card">
+      <h2>1. ターンテーブル動画を投入</h2>
+      <p class="muted">VEO_VIDEO_TO_3D_PLAN.md §3.2のプロンプトVで生成した(または同等の規約の)mp4動画をアップロードしてください。フレーム0=正面(0度)、一定方向に連続回転し、末尾でほぼ1周する動画を前提にしています。</p>
+      <input type="file" id="videoInput" accept="video/mp4,video/*">
+      <div id="videoInfo" class="muted" style="margin-top:8px;"></div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="extract">
+    <div class="card">
+      <h2>2. フレーム抽出</h2>
+      <p class="muted">時間軸で均等にフレームをサンプリングし、ブレ・重複フレームを自動除外します(js/video_frames.js)。</p>
+      <div class="row">
+        <label>目標フレーム数 <input type="number" id="targetCount" value="64" min="16" max="400" style="width:60px;"></label>
+        <button class="act" id="btnExtract">フレームを抽出</button>
+      </div>
+      <progress id="extractProgress" value="0" max="1" style="display:none;"></progress>
+      <div id="extractInfo" class="muted" style="margin-top:8px;"></div>
+      <div id="thumbStrip"></div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="calib">
+    <div class="card">
+      <h2>3. シルエット抽出 + ターンテーブル較正 + 特徴追跡による同時較正(Stage B)</h2>
+      <p class="muted">各フレームのシルエット・符号付き距離場(js/edt.js)を作り、回転角度・スケール・信頼度を推定します(js/turntable_calib.js)。続けて、瞳・髪の房・服の柄の角等の特徴を隣接フレーム間でNCC追跡し(js/feature_tracks.js)、u_i-cx=s・(x・cosθ_i+z・sinθ_i)の線形最小二乗で3Dアンカー点群化した上で、全トラック残差の交互最小化によりフレーム別θ・cx・ybot・scaleを彫刻結果に依存せず精密化します(VEO_VIDEO_TO_3D_PLAN.md §16「回転ステレオ」方式。彫刻メッシュへの再投影IoU座標降下版だった旧refineCalibrationAnalysisBySynthesisの置き換え)。</p>
+      <button class="act" id="btnCalib">シルエット抽出+較正+特徴追跡精密化を実行</button>
+      <progress id="calibProgress" value="0" max="1" style="display:none;"></progress>
+      <div id="chartWrap" style="margin-top:10px;">
+        <canvas id="angleChart" width="900" height="220"></canvas>
+        <div class="muted">青=等速仮定の初期角度、橙=90/270度キーフレーム検出による区分線形補正後(Stage A)、緑=特徴追跡による同時較正後(Stage B)。破線=検出されたキーフレーム位置。</div>
+      </div>
+      <div id="trackRefineInfo" class="muted" style="margin-top:6px;"></div>
+      <div id="frameTableWrap" style="margin-top:10px;max-height:260px;overflow-y:auto;"></div>
+    </div>
+  </section>
+
+  <section class="panel" data-panel="carve">
+    <div class="card">
+      <h2>4. 多視点彫刻プレビュー(M2、頂点カラーGLB)</h2>
+      <p class="muted">全フレームを同格の直接証拠として扱い、各点にとって最も外側寄りの証拠から始めて隣接する値との差がclusterEpsPx(元動画のpx換算)以内である限り連鎖的に取り込む可変サイズのクラスタを平均して彫刻します(単一連結クラスタ平均、js/multiview_hull.js)。固定個数/固定比率を強制しないため、ツインテール間・帽子の裏側のような狭い可視窓の隙間(少数フレームしか外側と言わない箇所)は少数のまま平均され、無関係な多数派フレームに薄められて消えることがありません(以前のbottom-k固定比率方式で実際に発生した不具合)。一方で広い接線角度域を持つ表面(髪の生え際等)は較正ノイズが複数フレームの平均で打ち消されます。較正(角度・cx・ybot・scaleのフレーム別値)はタブ3で特徴追跡(Stage B、js/feature_tracks.js)により彫刻結果に依存せず精密化済みのものをそのまま使い、等値面近傍だけを画像の実ピクセル相当の解像度まで細かく再計算するcoarse-to-fine方式です。彫刻後は0/90/180/270度の実測フレームとの再投影IoUを表示し、目視でモデルを回転させなくても基準4方向での忠実度を確認できるようにしています。UVチャート展開・複数フレーム加重合成ベイク(M3)は行わないため、テクスチャは無く、法線ベースの簡易な頂点カラーで陰影を付けたプレビューになります。</p>
+      <div class="row">
+        <label>粗ボクセル <input type="number" id="coarseVox" value="0.02" step="0.002" min="0.01" max="0.05" style="width:70px;"></label>
+        <label>精細ボクセル <input type="number" id="fineVox" value="" step="0.0005" min="0.0005" max="0.02" style="width:80px;" placeholder="自動(1px相当)"></label>
+        <label>クラスタ許容差px(clusterEpsPx) <input type="number" id="clusterEpsPx" value="10.0" step="0.5" min="0.5" max="30" style="width:60px;"></label>
+        <label><input type="checkbox" id="refineCalibChk"> 旧IoU座標降下較正精密化も追加適用(非推奨・比較用。タブ3の特徴追跡較正の上書きになるため既定オフ)</label>
+        <label>目標頂点数(間引き後) <input type="number" id="targetVerts" value="50000" step="1000" min="1000" max="300000" style="width:80px;"></label>
+        <label><input type="checkbox" id="stageCChk" checked> Stage C(アンカー融合: 過彫刻の押し戻し+凹みのspace carving)</label>
+        <button class="act" id="btnCarve">彫刻する</button>
+      </div>
+      <progress id="carveProgress" value="0" max="1" style="display:none;"></progress>
+      <div id="carveInfo" class="muted" style="margin-top:8px;"></div>
+      <div id="stageCInfo" class="muted" style="margin-top:4px;"></div>
+      <div id="cardinalIoUInfo" class="muted" style="margin-top:4px;"></div>
+      <div id="glCanvasWrap" style="margin-top:10px;display:none;"></div>
+      <div id="downloadWrap" style="margin-top:10px;"></div>
+    </div>
+  </section>
+
+</main>
+
+<script src="../js/vendor/three.min.js"></script>
+<script src="../js/common.js"></script>
+<script src="../js/marching_cubes.js"></script>
+<script src="../js/carving.js"></script>
+<script src="../js/model_export.js"></script>
+<script src="../js/video_frames.js"></script>
+<script src="../js/edt.js"></script>
+<script src="../js/turntable_calib.js"></script>
+<script src="../js/multiview_hull.js"></script>
+<script src="../js/feature_tracks.js"></script>
+<script>
+(function(){
+"use strict";
+var state = {
+  videoFile: null,
+  extraction: null,
+  silhouettes: null,
+  sdfFrames: null,
+  calib: null,
+  excluded: new Set(),
+  carve: null,
+  mesh: null,
+  glbBuffer: null,
+};
+window.__gsState = state; // デバッグ用(実装検証時にコンソール/Playwrightから状態を覗くため)
+
+// ---- タブ切り替え ----
+var TAB_ORDER = ["upload","extract","calib","carve"];
+function switchTab(tab){
+  document.querySelectorAll(".tabbtn").forEach(function(b){ b.classList.toggle("active", b.dataset.tab===tab); });
+  document.querySelectorAll(".panel").forEach(function(p){ p.classList.toggle("active", p.dataset.panel===tab); });
+}
+document.querySelectorAll(".tabbtn").forEach(function(b){
+  b.addEventListener("click", function(){ if(!b.disabled) switchTab(b.dataset.tab); });
+});
+function unlockTab(tab){
+  var b = document.querySelector('.tabbtn[data-tab="'+tab+'"]');
+  if(b) b.disabled = false;
+}
+
+// ---- タブ1: 動画投入 ----
+document.getElementById("videoInput").addEventListener("change", function(e){
+  var f = e.target.files[0];
+  if(!f) return;
+  state.videoFile = f;
+  document.getElementById("videoInfo").textContent = f.name+"("+(f.size/1024/1024).toFixed(1)+"MB) を読み込みました。";
+  unlockTab("extract");
+  switchTab("extract");
+});
+
+// ---- タブ2: フレーム抽出 ----
+document.getElementById("btnExtract").addEventListener("click", async function(){
+  if(!state.videoFile) return;
+  var btn = this; btn.disabled = true;
+  var prog = document.getElementById("extractProgress");
+  prog.style.display = ""; prog.value = 0;
+  var targetCount = parseInt(document.getElementById("targetCount").value, 10) || 64;
+  try{
+    var result = await P3D.extractVideoFrames(state.videoFile, {
+      targetCount: targetCount,
+      onProgress: function(frac){ prog.value = frac; },
+    });
+    state.extraction = result;
+    document.getElementById("extractInfo").textContent =
+      "解像度 "+result.width+"x"+result.height+" / 長さ "+result.duration.toFixed(2)+"秒 / "+
+      "抽出候補 "+result.rawCount+"枚 → ブレ除外後 "+result.filteredCount+"枚 → 重複除外後 "+result.frames.length+"枚";
+    renderThumbStrip(result.frames);
+    unlockTab("calib");
+    switchTab("calib");
+  }catch(err){
+    alert("フレーム抽出に失敗しました: "+err.message);
+    console.error(err);
+  }finally{
+    btn.disabled = false;
+  }
+});
+
+function renderThumbStrip(frames){
+  var wrap = document.getElementById("thumbStrip");
+  wrap.innerHTML = "";
+  var thumbW = 64;
+  frames.forEach(function(f, idx){
+    var scale = thumbW / f.imageData.width;
+    var th = Math.round(f.imageData.height*scale);
+    var c = document.createElement("canvas");
+    c.width = thumbW; c.height = th;
+    c.title = "#"+idx+" t="+f.t.toFixed(2)+"s";
+    var srcCanvas = document.createElement("canvas");
+    srcCanvas.width = f.imageData.width; srcCanvas.height = f.imageData.height;
+    srcCanvas.getContext("2d").putImageData(f.imageData, 0, 0);
+    c.getContext("2d").drawImage(srcCanvas, 0, 0, thumbW, th);
+    wrap.appendChild(c);
+  });
+}
+
+// ---- タブ3: シルエット抽出 + 較正 ----
+document.getElementById("btnCalib").addEventListener("click", async function(){
+  if(!state.extraction) return;
+  var btn = this; btn.disabled = true;
+  var prog = document.getElementById("calibProgress");
+  prog.style.display = ""; prog.value = 0;
+  try{
+    var frames = state.extraction.frames;
+    var silhouettes = [];
+    var sdfFrames = [];
+    for(var i=0;i<frames.length;i++){
+      var sil = P3D.silhouetteFromImageData(frames[i].imageData, {colorTolerance:40, minAreaPx:16});
+      var w = frames[i].imageData.width, h = frames[i].imageData.height;
+      silhouettes.push({mask:sil.mask, w:w, h:h});
+      var sdf = P3D.signedDistanceField(sil.mask, w, h);
+      sdfFrames.push({sdf:sdf, w:w, h:h});
+      if(i%8===0){ prog.value = i/frames.length; await new Promise(function(r){ requestAnimationFrame(r); }); }
+    }
+    state.silhouettes = silhouettes;
+    state.sdfFrames = sdfFrames;
+
+    var calibInput = frames.map(function(f, idx){ return {t:f.t, mask:silhouettes[idx].mask, w:silhouettes[idx].w, h:silhouettes[idx].h}; });
+    var coarseCalib = P3D.calibrateTurntable(calibInput);
+    state.coarseCalib = coarseCalib;
+    prog.value = 1;
+
+    // ---- Stage B: 特徴追跡による同時較正精密化(VEO_VIDEO_TO_3D_PLAN.md §16) ----
+    // 彫刻結果(粗メッシュ)が不要になったため、彫刻の前段であるここで実行できる
+    // (旧IoU座標降下版refineCalibrationAnalysisBySynthesisは粗彫刻メッシュへの
+    // 再投影が必須で彫刻後にしか回せなかった)。
+    var trackInfo = document.getElementById("trackRefineInfo");
+    trackInfo.textContent = "特徴検出・追跡中...";
+    var masks = silhouettes.map(function(s){ return s.mask; });
+    var trackResult = await P3D.computeFeatureTracks(frames, masks, coarseCalib, {
+      onProgress: function(frac){ prog.value = frac; },
+    });
+    trackInfo.textContent = "特徴追跡: "+trackResult.rawTrackCount+"トラック検出 → 残差ゲート後 "+
+      trackResult.tracks.length+"トラックで同時較正中...";
+    await new Promise(function(r){ requestAnimationFrame(r); });
+    var refinedCalib = P3D.refineCalibrationByTracks(
+      coarseCalib, trackResult.tracks, trackResult.scalePxPerModelBase, trackResult.myMin,
+      {onProgress: function(frac){ prog.value = frac; }}
+    );
+    state.calib = refinedCalib;
+    state.featureTracks = trackResult;
+    trackInfo.textContent = "特徴追跡: "+trackResult.rawTrackCount+"トラック検出 → 残差ゲート後 "+
+      trackResult.tracks.length+"トラック採用 / 同時較正後の平均残差 "+
+      refinedCalib.trackRefineMeanResidualPx.toFixed(3)+"px(u方向、全トラック平均)";
+
+    state.excluded = new Set(refinedCalib.perFrame.filter(function(pf){ return pf.isOutlier; }).map(function(pf){ return pf.i; }));
+
+    renderAngleChart(refinedCalib, coarseCalib);
+    renderFrameTable(refinedCalib);
+    unlockTab("carve");
+    switchTab("carve");
+  }catch(err){
+    alert("シルエット抽出・較正に失敗しました: "+err.message);
+    console.error(err);
+  }finally{
+    btn.disabled = false;
+  }
+});
+
+// calib: Stage B(特徴追跡同時較正)後のcalib(state.calib)。省略時はStage A
+// までの表示になる。coarseCalib: Stage A(bboxベース)のcalib(state.coarseCalib)。
+// 省略時はStage A/Bの区別なくcalib.perFrame[].thetaのみ描く。
+function renderAngleChart(calib, coarseCalib){
+  var canvas = document.getElementById("angleChart");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height, pad = 30;
+  ctx.clearRect(0,0,W,H);
+  var n = calib.perFrame.length;
+  function xOf(i){ return pad + (W-2*pad)*i/(n-1); }
+  function yOf(theta){ return H-pad - (H-2*pad)*theta/360; }
+  // 軸
+  ctx.strokeStyle = "#555"; ctx.beginPath();
+  ctx.moveTo(pad,pad); ctx.lineTo(pad,H-pad); ctx.lineTo(W-pad,H-pad); ctx.stroke();
+  ctx.fillStyle = "#888"; ctx.font = "10px sans-serif";
+  [0,90,180,270,360].forEach(function(t){ ctx.fillText(t+"°", 2, yOf(t)+3); });
+  // キーフレーム縦破線
+  ctx.strokeStyle = "#666"; ctx.setLineDash([4,3]);
+  [calib.keyIdx.i90, calib.keyIdx.i270].forEach(function(idx){
+    if(idx===null || idx===undefined) return;
+    ctx.beginPath(); ctx.moveTo(xOf(idx),pad); ctx.lineTo(xOf(idx),H-pad); ctx.stroke();
+  });
+  ctx.setLineDash([]);
+  // 初期角度(青)
+  ctx.strokeStyle = "#5b8dee"; ctx.beginPath();
+  calib.perFrame.forEach(function(pf,i){ var x=xOf(i),y=yOf(pf.thetaInitial); if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+  ctx.stroke();
+  // Stage A(90/270度キーフレーム区分線形補正後、橙)
+  var stageA = coarseCalib || calib;
+  ctx.strokeStyle = "#e8a33d"; ctx.beginPath();
+  stageA.perFrame.forEach(function(pf,i){ var x=xOf(i),y=yOf(pf.theta); if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+  ctx.stroke();
+  // Stage B(特徴追跡同時較正後、緑)。coarseCalibが渡された場合のみ区別して描く。
+  if(coarseCalib){
+    ctx.strokeStyle = "#4fd67a"; ctx.beginPath();
+    calib.perFrame.forEach(function(pf,i){ var x=xOf(i),y=yOf(pf.theta); if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+    ctx.stroke();
+  }
+  // 外れ値フレームを赤点で
+  ctx.fillStyle = "#e85b5b";
+  calib.perFrame.forEach(function(pf,i){ if(pf.isOutlier){ ctx.beginPath(); ctx.arc(xOf(i), yOf(pf.theta), 3, 0, 7); ctx.fill(); } });
+}
+
+function renderFrameTable(calib){
+  var wrap = document.getElementById("frameTableWrap");
+  var rows = calib.perFrame.map(function(pf){
+    var checked = state.excluded.has(pf.i) ? "" : "checked";
+    return '<tr class="'+(pf.isOutlier?"outlier":"")+'" data-idx="'+pf.i+'">'+
+      '<td><input type="checkbox" class="frameUse" '+checked+'></td>'+
+      '<td>#'+pf.i+'</td><td>'+pf.t.toFixed(2)+'s</td>'+
+      '<td>'+pf.thetaInitial.toFixed(1)+'°</td><td>'+pf.theta.toFixed(1)+'°</td>'+
+      '<td>'+pf.scale.toFixed(3)+'</td><td>'+pf.bboxWidthNorm.toFixed(3)+'</td>'+
+      '<td>'+(pf.isOutlier?"除外候補":"")+'</td></tr>';
+  }).join("");
+  wrap.innerHTML = '<table class="frametbl"><thead><tr><th>採用</th><th>#</th><th>t</th><th>角度(初期)</th>'+
+    '<th>角度(補正後)</th><th>scale</th><th>幅/身長</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
+  wrap.querySelectorAll(".frameUse").forEach(function(cb){
+    cb.addEventListener("change", function(){
+      var idx = parseInt(cb.closest("tr").dataset.idx, 10);
+      if(cb.checked) state.excluded.delete(idx); else state.excluded.add(idx);
+    });
+  });
+}
+
+// ---- タブ4: 彫刻プレビュー ----
+document.getElementById("btnCarve").addEventListener("click", async function(){
+  if(!state.calib || !state.sdfFrames) return;
+  var btn = this; btn.disabled = true;
+  var prog = document.getElementById("carveProgress");
+  prog.style.display = ""; prog.value = 0;
+  document.getElementById("carveInfo").textContent = "";
+  try{
+    var coarseVox = parseFloat(document.getElementById("coarseVox").value) || 0.02;
+    var clusterEpsPx = parseFloat(document.getElementById("clusterEpsPx").value);
+    if(isNaN(clusterEpsPx)) clusterEpsPx = 10.0;
+    var refineCalibFlag = document.getElementById("refineCalibChk").checked;
+    var targetVerts = parseInt(document.getElementById("targetVerts").value, 10) || 50000;
+    // 精細ボクセルは既定で「画像の実ピクセル1個相当」を自動計算する
+    // (calib.refHeight[px] / モデル身長[units] = px/unit の逆数)。
+    var fineVoxInput = parseFloat(document.getElementById("fineVox").value);
+    var modelHeightSpan = P3D.MULTIVIEW_DEFAULT_BOUNDS.myBounds[1]-P3D.MULTIVIEW_DEFAULT_BOUNDS.myBounds[0];
+    var autoFineVox = modelHeightSpan / state.calib.refHeight;
+    var fineVox = isNaN(fineVoxInput) ? autoFineVox : fineVoxInput;
+    // 除外フレームは信頼度0にして投票から外す(calib.perFrameを複製して上書き)
+    var calibForCarve = {
+      perFrame: state.calib.perFrame.map(function(pf){
+        var pf2 = Object.assign({}, pf);
+        if(state.excluded.has(pf.i)) pf2.w = 0;
+        return pf2;
+      }),
+      refHeight: state.calib.refHeight, refYbot: state.calib.refYbot, refCx: state.calib.refCx,
+      keyIdx: state.calib.keyIdx,
+    };
+    var carveResult = await P3D.carveMultiviewFieldCoarseToFine(calibForCarve, state.sdfFrames, {
+      coarseVox: coarseVox, fineVox: fineVox, clusterEpsPx: clusterEpsPx, refineCalib: refineCalibFlag,
+      onProgress: function(frac){ prog.value = frac; },
+    });
+    state.carve = carveResult;
+
+    // ---- Stage C: アンカー(Stage Bのトラック)とhull SDFの融合 ----
+    var stageCInfo = document.getElementById("stageCInfo");
+    var fieldForMesh = carveResult.field, gridForMesh = carveResult.grid;
+    if(document.getElementById("stageCChk").checked && state.featureTracks && state.featureTracks.tracks.length){
+      var fuseResult = P3D.fuseAnchorsIntoHull(carveResult, state.sdfFrames, state.featureTracks, {});
+      state.fuse = fuseResult;
+      fieldForMesh = fuseResult.field; gridForMesh = fuseResult.grid;
+      var st = fuseResult.stats;
+      stageCInfo.textContent = "Stage C: 全"+st.totalAnchors+"アンカー中、過彫刻の押し戻し "+st.overCarved+
+        " / 凹みのspace carving "+st.concave+" / 補正不可(hull自体が外側) "+st.unfixable+
+        " / 補正不要 "+st.untouched;
+    }else{
+      state.fuse = null;
+      stageCInfo.textContent = "Stage Cはスキップ(チェックを外したか、トラックが無い)";
+    }
+
+    var meshResult = P3D.meshFromMultiviewField(fieldForMesh, gridForMesh);
+    var rawVertCount = meshResult.V.length/3;
+    if(rawVertCount > targetVerts){
+      var dec = P3D.gridClusterDecimate(meshResult.V, meshResult.F, targetVerts);
+      var fw2 = P3D.computeNormalsFixWinding(dec.V, dec.F);
+      meshResult = {V:dec.V, N:fw2.N, F:fw2.F};
+    }
+    var C = colorFromNormals(meshResult.N);
+    state.mesh = {V:meshResult.V, N:meshResult.N, F:meshResult.F, C:C};
+    state.rawVertCount = rawVertCount;
+
+    var refineInfo = "";
+    if(refineCalibFlag && carveResult.refinedCalib){
+      var refinedFrames = carveResult.refinedCalib.perFrame.filter(function(pf){ return pf.refineIoU!==undefined; });
+      if(refinedFrames.length){
+        var avgIoU = refinedFrames.reduce(function(s,pf){ return s+pf.refineIoU; },0)/refinedFrames.length;
+        var avgThetaShift = refinedFrames.reduce(function(s,pf){ return s+Math.abs(pf.theta-pf.thetaBeforeRefine); },0)/refinedFrames.length;
+        refineInfo = " / 較正精密化 平均IoU "+avgIoU.toFixed(3)+"、平均θ補正 "+avgThetaShift.toFixed(2)+"°("+refinedFrames.length+"フレーム)";
+      }
+    }
+    document.getElementById("carveInfo").textContent =
+      "精細grid "+carveResult.grid.nx+"x"+carveResult.grid.ny+"x"+carveResult.grid.nz+
+      "(精細ボクセル "+fineVox.toFixed(4)+"、自動="+(isNaN(fineVoxInput)?"はい":"いいえ")+") / "+
+      "彫刻直後 頂点"+rawVertCount+" → 間引き後 頂点"+(meshResult.V.length/3)+" / 面"+(meshResult.F.length/3)+refineInfo;
+
+    // ★0/90/180/270度での再投影IoU診断(§16「統計量の見直し」参照):
+    // 3Dプレビューを目視で回転させなくても、最も情報量の多い基準4方向で
+    // 実測フレームとどれだけ一致しているかを機械的に確認できるようにする。
+    var evalCalib = carveResult.refinedCalib || calibForCarve;
+    var ki = evalCalib.keyIdx || {};
+    var scalePxPerModelEval = evalCalib.refHeight / modelHeightSpan;
+    var cardinalResults = P3D.evaluateReprojectionIoU(
+      evalCalib, state.mesh, state.sdfFrames, scalePxPerModelEval,
+      P3D.MULTIVIEW_DEFAULT_BOUNDS.myBounds[0],
+      [ki.i0, ki.i90, ki.i180, ki.i270]
+    );
+    var labels = {};
+    labels[ki.i0]="0°"; labels[ki.i90]="90°"; labels[ki.i180]="180°"; labels[ki.i270]="270°";
+    document.getElementById("cardinalIoUInfo").textContent = cardinalResults.length ?
+      "基準4方向 再投影IoU: "+cardinalResults.map(function(r){
+        return (labels[r.idx]||("#"+r.idx))+"="+r.iou.toFixed(3);
+      }).join(" ") : "";
+
+    var glb = P3D.buildStaticVertexColorGLB(state.mesh);
+    state.glbBuffer = glb;
+    renderThreePreview(state.mesh);
+    offerDownload(glb);
+  }catch(err){
+    alert("彫刻に失敗しました: "+err.message);
+    console.error(err);
+  }finally{
+    btn.disabled = false;
+  }
+});
+
+// 法線ベースの簡易マットカラー的シェーディング(テクスチャ無しでも立体感が
+// 見えるようにするための仮の頂点カラー。M3で本物のベイクに置き換わる)。
+function colorFromNormals(N){
+  var n = N.length/3;
+  var C = new Float32Array(n*3);
+  var lx=0.4, ly=0.8, lz=0.5; var llen=Math.sqrt(lx*lx+ly*ly+lz*lz);
+  lx/=llen; ly/=llen; lz/=llen;
+  var base = [0.75,0.72,0.68];
+  for(var i=0;i<n;i++){
+    var nx=N[i*3],ny=N[i*3+1],nz=N[i*3+2];
+    var ndotl = Math.max(0, nx*lx+ny*ly+nz*lz);
+    var shade = 0.35 + 0.65*ndotl;
+    C[i*3]=base[0]*shade; C[i*3+1]=base[1]*shade; C[i*3+2]=base[2]*shade;
+  }
+  return C;
+}
+
+function offerDownload(glbBuffer){
+  var blob = new Blob([glbBuffer], {type:"model/gltf-binary"});
+  var url = URL.createObjectURL(blob);
+  var wrap = document.getElementById("downloadWrap");
+  wrap.innerHTML = "";
+  var a = document.createElement("a");
+  a.href = url; a.download = "multiview_hull_preview.glb"; a.className = "dl";
+  a.textContent = "GLBをダウンロード("+(glbBuffer.byteLength/1024).toFixed(0)+"KB)";
+  wrap.appendChild(a);
+}
+
+// ---- three.jsプレビュー ----
+var three = null;
+// ★彫刻をやり直すたびにrenderThreePreviewが呼ばれるが、以前はrequestAnimationFrame
+// の自己再帰ループを止めずに新しいループを追加で開始していたため、繰り返すほど
+// 同時に動くrender loop(+GPUリソース)が積み上がっていた(彫刻を連続実行すると
+// どんどん重くなる/Playwrightでの連続テストがタイムアウトする原因になっていた)。
+// 新しいプレビューを作る前に、直前のループを止めてGPUリソースを破棄する。
+function stopThreePreview(){
+  if(!three) return;
+  three.stopped = true;
+  if(three.renderer){
+    three.renderer.dispose();
+    if(three.renderer.domElement && three.renderer.domElement.parentNode){
+      three.renderer.domElement.parentNode.removeChild(three.renderer.domElement);
+    }
+  }
+  three = null;
+}
+function renderThreePreview(mesh){
+  stopThreePreview();
+  var wrap = document.getElementById("glCanvasWrap");
+  wrap.style.display = "";
+  wrap.innerHTML = "";
+  var W = wrap.clientWidth, H = wrap.clientHeight;
+  var renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(W, H);
+  wrap.appendChild(renderer.domElement);
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0c0e15);
+  var camera = new THREE.PerspectiveCamera(45, W/H, 0.01, 10);
+
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(mesh.V, 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(mesh.N, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(mesh.C, 3));
+  geo.setIndex(new THREE.BufferAttribute(mesh.F, 1));
+  var mat = new THREE.MeshStandardMaterial({vertexColors:true, roughness:0.9, metalness:0.0});
+  var obj = new THREE.Mesh(geo, mat);
+  scene.add(obj);
+
+  var light1 = new THREE.DirectionalLight(0xffffff, 1.0); light1.position.set(0.5,1,0.8); scene.add(light1);
+  var light2 = new THREE.AmbientLight(0xffffff, 0.5); scene.add(light2);
+
+  camera.position.set(0, 0.5, 1.6);
+  camera.lookAt(0, 0.5, 0);
+
+  var state3 = {renderer:renderer, scene:scene, camera:camera, stopped:false, angle:0, frozen:false};
+  three = state3;
+  window.__gsThree = state3; // デバッグ用(__gsStateと同様。Playwright等からangle/frozenを
+                              // 直接操作して特定角度(90度側面等)のスクリーンショットを撮る)
+  (function animate(){
+    if(state3.stopped) return;
+    if(!state3.frozen) state3.angle += 0.01;
+    var r = 1.6;
+    camera.position.set(Math.sin(state3.angle)*r, 0.5, Math.cos(state3.angle)*r);
+    camera.lookAt(0, 0.5, 0);
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  })();
+}
+
+})();
+</script>
+</body>
+</html>

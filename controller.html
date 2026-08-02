@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>ゴーストコントローラー</title>
+<style>
+  :root{--bg:#07080a;--panel:rgba(20,24,29,.92);--line:rgba(255,255,255,.10);--mut:#9aa3ad;--mint:#39ff9e;
+    --green:#39ff9e;--txt:#e8edf2;--mono:"SFMono-Regular",Consolas,Menlo,monospace}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  /* サイズはJS側(resize())がinnerWidth/innerHeightで管理。PIPカメラのビューポート計算と
+     ズレるとPIP映像が枠からはみ出て見えるため、ここでは!importantで固定しない。 */
+  #c{position:fixed;inset:0;display:block;touch-action:none}
+  /* 高感度ノイズ: 低解像度のランダムグレースケールをCSSで画面いっぱいに拡大表示するオーバーレイ。
+     #c(3D描画、PIP映像も同じcanvasにビューポート分割で描かれる)の真上、HUD/PIP枠より下のz-indexに
+     置くことで、メイン画面・PIP映像の両方に同時にノイズがかかる(PIP専用に別処理を書く必要がない)。 */
+  #noiseOverlay{position:fixed;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;
+    image-rendering:pixelated;mix-blend-mode:overlay;opacity:0}
+  /* 上部HUD(タイトル/戻るボタン)はPIPカメラ映像より上に配置 */
+  .title{position:fixed;top:10px;left:14px;z-index:5;font-size:15px;font-weight:700;pointer-events:none;
+    text-shadow:0 1px 6px rgba(0,0,0,.7)}
+  .title .eng{display:block;font-family:var(--mono);font-size:9px;font-weight:400;color:var(--green);
+    letter-spacing:.22em;margin-top:3px;opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+  #err{position:fixed;top:50px;left:14px;color:#ff8c8c;font-size:12px;z-index:9;pointer-events:none;max-width:260px}
+  #topNav{position:fixed;top:8px;right:10px;z-index:7;display:flex;gap:6px}
+  #topNav button{height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);
+    background:rgba(20,24,29,.85);color:var(--txt);font-size:12.5px;cursor:pointer}
+  #topNav button:active{background:rgba(57,255,158,.15)}
+
+  /* 自撮りカメラ/一人称カメラのPIP(found footage風、16:9、REC+経過秒数付き)。上部HUDの下に配置。 */
+  .pipBox{position:fixed;top:52px;left:10px;width:180px;height:101px;z-index:4;pointer-events:none;
+    border:1px solid rgba(255,255,255,.28);border-radius:4px;overflow:hidden;display:none;
+    box-shadow:0 0 0 1px rgba(0,0,0,.6),0 2px 10px rgba(0,0,0,.5)}
+  .pipBox.visible{display:block}
+  .pipBox.pipRight{left:auto;right:10px}
+  .pipBox .pipLabel{position:absolute;bottom:3px;left:6px;font-family:var(--mono);font-size:8px;
+    color:rgba(255,255,255,.75);letter-spacing:.08em;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  .pipBox .pipRec{position:absolute;top:4px;left:6px;display:flex;align-items:center;gap:4px;
+    font-family:var(--mono);font-size:9px;color:#ff5a6e;letter-spacing:.04em;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  .pipBox .pipRec .dot{width:5px;height:5px;border-radius:50%;background:#ff2d3d;animation:pipBlink 1.4s infinite}
+  .pipBox .pipTs{position:absolute;top:4px;right:6px;font-family:var(--mono);font-size:9px;
+    color:rgba(255,255,255,.8);text-shadow:0 1px 3px rgba(0,0,0,.9);font-variant-numeric:tabular-nums}
+  @keyframes pipBlink{0%,100%{opacity:1}50%{opacity:.15}}
+
+  /* center drop card (mode choice / file picker), same pattern as character_3d.html */
+  .drop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,86vw);padding:28px;
+    text-align:center;z-index:6;background:var(--panel);border:1px solid var(--line);border-radius:16px}
+  .drop.hide{display:none}
+  .drop h2{margin:.1em 0 .3em;font-size:16px}
+  .drop p{color:var(--mut);font-size:13px;margin:.3em 0 1.1em}
+  .btn{height:42px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.05);
+    color:var(--txt);font-size:13px;cursor:pointer;padding:0 20px}
+  .btn:active{transform:scale(.97)}
+
+  .modeCard{display:block;cursor:pointer;text-align:left;border:1px solid var(--line);border-radius:14px;
+    background:rgba(255,255,255,.04);padding:14px 16px;margin-bottom:10px}
+  .modeCard:active{background:rgba(57,255,158,.10);border-color:rgba(57,255,158,.4)}
+  .modeCard.mint{border-color:rgba(57,255,158,.4)}
+  .modeCard b{display:block;font-size:14px;color:var(--mint);margin-bottom:4px}
+  .modeCard span{display:block;font-size:11.5px;color:var(--mut);line-height:1.5}
+  .modeCard .sampleSelectRow{margin-top:10px}
+  .modeCard select{width:100%;height:32px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(255,255,255,.06);color:var(--txt);font-size:12px}
+
+  /* 描画設定パネル */
+  #configPanel{max-height:80vh;overflow-y:auto;text-align:left}
+  #configPanel h2{text-align:center}
+  .cfgRow{margin-bottom:16px;font-size:12.5px;color:var(--txt)}
+  .cfgRow>label{display:flex;flex-direction:column;gap:6px}
+  .cfgRow.cfgCheck>label{flex-direction:row;align-items:center;gap:8px;font-size:13px}
+  .cfgRow input[type=range]{width:100%}
+  .cfgRow select{height:34px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(255,255,255,.05);color:var(--txt);font-size:12.5px}
+  #creditsSection{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .creditsTitle{font-size:11px;color:var(--mut);margin:0 0 6px;letter-spacing:.04em}
+  #creditsList{margin:0;padding-left:18px;font-size:11px;color:var(--mut);line-height:1.7}
+  #creditsList a{color:var(--mint)}
+
+  /* virtual joystick (touch movement) */
+  #joyBase{position:fixed;left:24px;bottom:calc(24px + env(safe-area-inset-bottom));width:112px;height:112px;
+    border-radius:50%;background:rgba(255,255,255,.05);border:1px solid var(--line);z-index:6;
+    touch-action:none;display:none}
+  #joyBase.visible{display:block}
+  #joyKnob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;
+    background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.32);pointer-events:none}
+
+  /* flashlight toggle */
+  #flashToggle{display:none;position:fixed;right:16px;bottom:calc(24px + env(safe-area-inset-bottom));z-index:7;
+    width:54px;height:54px;border-radius:50%;border:1px solid var(--line);background:rgba(20,24,29,.85);
+    font-size:22px;cursor:pointer;color:var(--txt)}
+  #flashToggle.visible{display:block}
+  #flashToggle.on{border-color:var(--mint);box-shadow:0 0 14px rgba(57,255,158,.4)}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="noiseOverlay"></canvas>
+<div class="title">ゴーストコントローラー<span class="eng">GHOST CONTROLLER</span></div>
+<div id="topNav">
+  <button id="backToIndex" title="トップページに戻る">← トップ</button>
+  <button id="configBtn" title="描画設定">⚙ config</button>
+</div>
+<div id="err"></div>
+
+<div class="pipBox" id="selfieBox">
+  <div class="pipRec"><span class="dot"></span>REC</div>
+  <div class="pipTs" id="selfieTs">00:00</div>
+  <div class="pipLabel">SELF-CAM</div>
+</div>
+<div class="pipBox pipRight" id="fpsBox">
+  <div class="pipRec"><span class="dot"></span>REC</div>
+  <div class="pipTs" id="fpsTs">00:00</div>
+  <div class="pipLabel">POV-CAM</div>
+</div>
+
+<div class="drop hide" id="modeChoice">
+  <h2>モードを選んでください</h2>
+  <div class="modeCard mint" id="modeSampleBtn">
+    <b>サンプルモデルで開く</b>
+    <span>同梱のサンプルmodel.glbを自動読込して、その場で歩き回れます。</span>
+    <span class="sampleSelectRow"><select id="sampleSelect"></select></span>
+  </div>
+  <div class="modeCard" id="modeNormalBtn">
+    <b>モデルを読み込む</b>
+    <span>自分の.glbファイルを選択/ドラッグ&ドロップして操作します。</span>
+  </div>
+</div>
+
+<div class="drop hide" id="drop">
+  <h2>3Dモデルを読み込む</h2>
+  <p>.glb ファイルを選択、またはドラッグ＆ドロップしてください。</p>
+  <button class="btn" id="pick">ファイルを選択</button>
+  <input type="file" id="file" accept=".glb,.gltf" style="display:none"/>
+</div>
+
+<div class="drop hide" id="configPanel">
+  <h2>描画設定</h2>
+  <div class="cfgRow"><label>霧の濃さ
+    <input type="range" id="cfgFog" min="0" max="100" value="15">
+  </label></div>
+  <div class="cfgRow"><label>明るさ
+    <input type="range" id="cfgBrightness" min="0" max="100" value="0">
+  </label></div>
+  <div class="cfgRow"><label>キャラの明るさ
+    <input type="range" id="cfgCharBrightness" min="20" max="150" value="85">
+  </label></div>
+  <div class="cfgRow"><label>ノイズ(高感度)
+    <input type="range" id="cfgNoise" min="0" max="100" value="18">
+  </label></div>
+  <div class="cfgRow"><label>彩度
+    <input type="range" id="cfgSaturation" min="0" max="100" value="70">
+  </label></div>
+  <div class="cfgRow"><label>FPS上限
+    <select id="cfgFpsLimit">
+      <option value="0">無制限(画面のリフレッシュレートに追従)</option>
+      <option value="60">60fps</option>
+      <option value="30" selected>30fps</option>
+      <option value="24">24fps</option>
+      <option value="15">15fps</option>
+    </select>
+  </label></div>
+  <div class="cfgRow"><label>PIPカメラ画質
+    <select id="cfgPipQuality">
+      <option value="1" data-label="高(毎フレーム更新)">高(毎フレーム更新)</option>
+      <option value="2" selected data-label="標準">標準</option>
+      <option value="4" data-label="低(軽量)">低(軽量)</option>
+    </select>
+  </label></div>
+  <div class="cfgRow cfgCheck"><label>
+    <input type="checkbox" id="cfgPipEnable" checked> 自撮り/POVカメラを表示
+  </label></div>
+  <button class="btn" id="configClose">閉じる</button>
+  <div id="creditsSection" style="display:none">
+    <p class="creditsTitle">使用フリーモデル</p>
+    <ul id="creditsList"></ul>
+  </div>
+</div>
+
+<div id="joyBase"><div id="joyKnob"></div></div>
+<button id="flashToggle" class="on" title="懐中電灯 ON/OFF">🔦</button>
+
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/GLTFLoader.js"></script>
+<script src="js/idb.js?v=20260715"></script>
+<script src="maps/manifest.js?v=20260715"></script>
+<script src="maps/shrine.js?v=20260715"></script>
+<script>
+(function(){
+"use strict";
+const cvs=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.toneMapping=THREE.NoToneMapping;
+const maxAniso=renderer.capabilities.getMaxAnisotropy();
+
+// モバイル端末のスリープ復帰やGPUリソース逼迫でWebGLコンテキストが失われると、
+// 何のフィードバックもないまま画面が真っ黒/静止したままになる。最低限、
+// ユーザーに気づかせて復帰時に再描画できるようにしておく。
+let webglContextLost=false;
+cvs.addEventListener('webglcontextlost',e=>{
+  e.preventDefault(); // ブラウザ側での自動復旧を許可する
+  webglContextLost=true;
+  document.getElementById('err').textContent='描画コンテキストが失われました。復帰を待っています…';
+});
+cvs.addEventListener('webglcontextrestored',()=>{
+  webglContextLost=false;
+  document.getElementById('err').textContent='';
+  invalidate();
+});
+
+// --- 高感度ノイズ(画面全体+PIP、config「ノイズ」で強度調整可能) ---
+// 画面解像度の約半分のランダムグレースケールを毎フレーム生成し、CSSでフル画面まで
+// 引き伸ばす(image-rendering:pixelated)ことで、実際の高感度ISOノイズに近い粒状の
+// ちらつきを安価に表現する(フル解像度で毎フレームMath.randomを回すよりも軽い)。
+// #c(PIP映像も同じcanvasに描かれる)の真上に重ねているため、PIPにも自動的にノイズがかかる。
+const noiseCanvas=document.getElementById('noiseOverlay');
+const noiseCtx=noiseCanvas.getContext('2d');
+const NOISE_SCALE=0.5;
+let noiseImgData=null;
+let noisePct=18; // config「ノイズ」の現在値(初期値はcfgNoiseのvalue属性と一致させる)
+function resizeNoise(){
+  const w=Math.max(1,Math.round(innerWidth*NOISE_SCALE));
+  const h=Math.max(1,Math.round(innerHeight*NOISE_SCALE));
+  noiseCanvas.width=w; noiseCanvas.height=h;
+  noiseImgData=noiseCtx.createImageData(w,h);
+}
+function updateNoise(){
+  if(noisePct<=0)return; // opacity 0で見えないのに毎フレーム全画素書き換えるのは無駄
+  const d=noiseImgData.data;
+  for(let i=0;i<d.length;i+=4){
+    const v=(Math.random()*255)|0;
+    d[i]=v; d[i+1]=v; d[i+2]=v; d[i+3]=255;
+  }
+  noiseCtx.putImageData(noiseImgData,0,0);
+}
+function applyNoise(pct){
+  noisePct=pct;
+  noiseCanvas.style.opacity=(pct/100*0.5).toFixed(3);
+}
+
+// 夜霧の神社マップを見据えた暗く寒色寄りの背景+霧(Phase 1では地面は仮の平面のみ)。
+// フォグ色を背景と同じほぼ黒(0x0a0c10)にしていると、フォグで暗く沈んでいくのか
+// 単に光が届かず暗いのかが画面上で区別できず「霧が見えない」ことになるため、
+// 視認できる程度に明るいグレー系の霧色にする(背景色もこれに合わせる)。
+const FOG_COLOR=0x454e58;
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(FOG_COLOR);
+scene.fog=new THREE.FogExp2(FOG_COLOR,0.07);
+
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,80);
+
+// --- 自撮り/一人称のPIPカメラ(16:9固定、found footage風の演出) ---
+const PIP_W=180, PIP_H=Math.round(PIP_W*9/16), PIP_MARGIN=10, PIP_TOP=52;
+const selfieCam=new THREE.PerspectiveCamera(34,PIP_W/PIP_H,0.05,20);
+const fpsCam=new THREE.PerspectiveCamera(62,PIP_W/PIP_H,0.05,60);
+const selfieVP={x:0,y:0,w:PIP_W,h:PIP_H}, fpsVP={x:0,y:0,w:PIP_W,h:PIP_H};
+// PIPは毎フレーム重いシーン全体を描画すると負荷が大きいので、実際の描画はPIP_FRAME_SKIP
+// フレームに1回だけ行い、その結果をレンダーターゲット(テクスチャ)に焼き付けておく。
+// 表示自体は毎フレーム、そのテクスチャを画面に貼るだけ(激安)にすることで、
+// 「メインカメラがPIP領域を上書きしてしまい間だけちらつく」問題を避けつつ負荷も抑える。
+let PIP_FRAME_SKIP=2; // configパネルの「PIPカメラ画質」の既定値(FPS上限30fps時に約15fps相当)。変更可能
+let pipEnabled=true;
+let frameCount=0;
+// レンダーターゲットのtexture.encodingは既定でLinearEncodingになり、renderer.outputEncoding
+// (sRGBEncoding)を素通りしてしまう(three.jsはレンダーターゲット描画時にrenderer.outputEncoding
+// ではなくrenderTarget.texture.encodingを使う)。メイン画面と色味を合わせるため明示的に揃える。
+const selfieRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,encoding:THREE.sRGBEncoding});
+const fpsRT=new THREE.WebGLRenderTarget(PIP_W,PIP_H,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,encoding:THREE.sRGBEncoding});
+const blitCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+function makeBlitScene(rt){
+  const s=new THREE.Scene();
+  const mat=new THREE.MeshBasicMaterial({map:rt.texture,depthTest:false,depthWrite:false,toneMapped:false});
+  s.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat));
+  return s;
+}
+const selfieBlitScene=makeBlitScene(selfieRT);
+const fpsBlitScene=makeBlitScene(fpsRT);
+function layoutPIPs(){
+  const vy=innerHeight-PIP_TOP-PIP_H; // WebGLビューポートのyは下端起点のため変換
+  selfieVP.x=PIP_MARGIN; selfieVP.y=vy;
+  fpsVP.x=innerWidth-PIP_MARGIN-PIP_W; fpsVP.y=vy;
+}
+
+// 平行光はkeyLight1本に統合(hemiとあわせて2灯)。神社の灯籠やセンサーライト等と合わせると
+// ライト数が多く重くなるため、fill/rimは削り、その分だけ少し強めにして明るさを補う。
+const BASE_HEMI_INTENSITY=0.3, BASE_KEY_INTENSITY=0.42;
+const hemiLight=new THREE.HemisphereLight(0x8fa5c8,0x0d0f13,BASE_HEMI_INTENSITY);
+scene.add(hemiLight);
+const keyLight=new THREE.DirectionalLight(0xaac2ff,BASE_KEY_INTENSITY); // 月明かり的な弱い寒色キーライト
+keyLight.position.set(2,4,1.5);
+scene.add(keyLight);
+
+
+// --- 空気感演出: ふわふわ浮遊するホコリ状のパーティクル ---
+// キャラクター中心の一定範囲内にパーティクルを配置し、範囲外に出たら反対側へラップさせることで
+// 常にキャラクターの周囲だけを漂っているように見せる(全マップに敷き詰める必要がないため軽量)。
+const DUST_COUNT=220;
+const DUST_RANGE_XZ=22, DUST_RANGE_Y=6;
+const dustGeo=new THREE.BufferGeometry();
+const dustPosArr=new Float32Array(DUST_COUNT*3);
+const dustSpeed=new Float32Array(DUST_COUNT);
+const dustDrift=new Float32Array(DUST_COUNT*2);
+for(let i=0;i<DUST_COUNT;i++){
+  dustPosArr[i*3+0]=(Math.random()-0.5)*DUST_RANGE_XZ;
+  dustPosArr[i*3+1]=Math.random()*DUST_RANGE_Y;
+  dustPosArr[i*3+2]=(Math.random()-0.5)*DUST_RANGE_XZ;
+  dustSpeed[i]=0.15+Math.random()*0.25;
+  dustDrift[i*2+0]=(Math.random()-0.5)*0.15;
+  dustDrift[i*2+1]=(Math.random()-0.5)*0.15;
+}
+dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPosArr,3));
+const dustCanvas=document.createElement('canvas');
+dustCanvas.width=dustCanvas.height=32;
+const dustCtx=dustCanvas.getContext('2d');
+const dustGrad=dustCtx.createRadialGradient(16,16,0,16,16,16);
+dustGrad.addColorStop(0,'rgba(255,255,255,0.9)');
+dustGrad.addColorStop(1,'rgba(255,255,255,0)');
+dustCtx.fillStyle=dustGrad;
+dustCtx.fillRect(0,0,32,32);
+const dustTex=new THREE.CanvasTexture(dustCanvas);
+const dustMat=new THREE.PointsMaterial({size:0.045,map:dustTex,transparent:true,opacity:0.35,
+  depthWrite:false,fog:true,color:0xfff2d0,blending:THREE.AdditiveBlending});
+const dustPoints=new THREE.Points(dustGeo,dustMat);
+dustPoints.frustumCulled=false;
+scene.add(dustPoints);
+function updateDust(dt){
+  const arr=dustGeo.attributes.position.array;
+  const half=DUST_RANGE_XZ/2;
+  for(let i=0;i<DUST_COUNT;i++){
+    const ix=i*3;
+    arr[ix+1]+=dustSpeed[i]*dt;
+    arr[ix+0]+=dustDrift[i*2+0]*dt;
+    arr[ix+2]+=dustDrift[i*2+1]*dt;
+    if(arr[ix+1]>DUST_RANGE_Y)arr[ix+1]-=DUST_RANGE_Y;
+    let dx=arr[ix+0]-charPos.x;
+    if(dx>half)arr[ix+0]-=DUST_RANGE_XZ;else if(dx<-half)arr[ix+0]+=DUST_RANGE_XZ;
+    let dz=arr[ix+2]-charPos.z;
+    if(dz>half)arr[ix+2]-=DUST_RANGE_XZ;else if(dz<-half)arr[ix+2]+=DUST_RANGE_XZ;
+  }
+  dustGeo.attributes.position.needsUpdate=true;
+}
+
+// --- マップ分離アーキテクチャ(SHRINE_REDESIGN_PLAN.md参照): controller.htmlは
+// レンダラー/キャラクター/カメラ/config等の汎用ホストに徹し、神社固有のジオメトリ・
+// 当たり判定・地面・演出はすべてmaps/shrine.js(GhostMaps.shrine)側に持たせる。
+const colliders=[]; // {type:'circle',x,z,r} | {type:'box',minX,maxX,minZ,maxZ} マップ側がpushする
+const FREE_MODEL_CREDITS=[];
+function refreshCreditsUI(){
+  const list=document.getElementById('creditsList'), section=document.getElementById('creditsSection');
+  if(!FREE_MODEL_CREDITS.length){ section.style.display='none'; return; }
+  section.style.display='block';
+  list.innerHTML=FREE_MODEL_CREDITS.map(c=>
+    '<li>'+c.name+' — '+c.author+'('+c.license+') <a href="'+c.url+'" target="_blank" rel="noopener">link</a></li>'
+  ).join('');
+}
+function loadStaticGLB(url){
+  return fetch(url).then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
+    .then(buf=>new Promise((resolve,reject)=>{
+      new THREE.GLTFLoader().parse(buf,'',gltf=>resolve(gltf.scene),reject);
+    }));
+}
+function normalizeToHeight(obj,targetHeight){
+  obj.updateMatrixWorld(true);
+  const box=new THREE.Box3().setFromObject(obj);
+  const h=box.max.y-box.min.y;
+  if(h>0.0001) obj.scale.multiplyScalar(targetHeight/h);
+  obj.updateMatrixWorld(true);
+  const box2=new THREE.Box3().setFromObject(obj);
+  obj.position.y-=box2.min.y;
+  return obj;
+}
+function pushCredit(entry){
+  // 対で使うアセット(狛犬代替の神狐像+台座など)は左右2回呼ばれるため、同名の重複はまとめる。
+  if(FREE_MODEL_CREDITS.some(c=>c.name===entry.name&&c.author===entry.author))return;
+  FREE_MODEL_CREDITS.push(entry); refreshCreditsUI();
+}
+
+// マップは現状「神社」1つのみなので、マニフェストの選択UIは設けず決め打ちで読み込む
+// (2個目以降のマップを追加する際は、maps/<新マップ>.jsを同じインターフェースで書いて
+// manifest.jsに登録すればよい設計にしてある。詳細はSHRINE_REDESIGN_PLAN.md参照)。
+const currentMap=GhostMaps.shrine.build({scene,colliders,loadStaticGLB,normalizeToHeight,pushCredit});
+
+// --- キャラクター ---
+const characterRoot=new THREE.Group();
+scene.add(characterRoot);
+let model=null, mixer=null, idleAction=null, runAction=null, handBone=null, headBone=null;
+let flashLight=null, flashProp=null, flashOn=true;
+let charHeight=1.7, charCenterY=0.9; // モデル読込後にバウンディングボックスから実測して上書き
+let characterMaterials=[]; // キャラのMeshBasicMaterial一覧。configの「キャラの明るさ」で色を一括調整するために保持
+let charBrightnessPct=85; // configパネルの現在値。モデル差し替え時にも新しいマテリアルへ再適用する
+
+function clearCharacter(){
+  // モデル差し替えのたびにgeometry/material/textureをdisposeしないと、
+  // three.jsはGPU側リソースの解放をJSのGCに任せられずリークする。
+  if(model){
+    model.traverse(o=>{ if(o.isMesh&&o.geometry)o.geometry.dispose(); });
+    characterRoot.remove(model); model=null;
+  }
+  for(const mat of characterMaterials){ if(mat.map)mat.map.dispose(); mat.dispose(); }
+  mixer=null; idleAction=null; runAction=null; handBone=null; headBone=null;
+  characterMaterials=[];
+  removeFlashlight();
+}
+
+// --- PIPのREC経過秒数カウンター ---
+let pipTimerHandle=null;
+function startPipRecTimer(){
+  if(pipTimerHandle)clearInterval(pipTimerHandle);
+  const t0=Date.now();
+  const selfieTs=document.getElementById('selfieTs'), fpsTs=document.getElementById('fpsTs');
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function tick(){
+    const s=Math.floor((Date.now()-t0)/1000);
+    const txt=pad(Math.floor(s/60)%100)+':'+pad(s%60);
+    selfieTs.textContent=txt; fpsTs.textContent=txt;
+  }
+  tick(); pipTimerHandle=setInterval(tick,1000);
+}
+
+function attachFlashlight(){
+  removeFlashlight();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.026,0.14,10),
+    new THREE.MeshStandardMaterial({color:0x22262c,roughness:0.6}));
+  body.rotation.x=Math.PI/2;
+  const tip=new THREE.Mesh(new THREE.CylinderGeometry(0.023,0.023,0.02,10),
+    new THREE.MeshBasicMaterial({color:0xfff3cf,toneMapped:false}));
+  tip.rotation.x=Math.PI/2; tip.position.z=0.08;
+  flashProp=new THREE.Group();
+  flashProp.add(body); flashProp.add(tip);
+  flashProp.position.set(0.01,-0.02,0.04); // 握っているように見える程度のオフセット(目視調整前提)
+  const parent=handBone||model;
+  if(parent) parent.add(flashProp);
+
+  flashLight=new THREE.SpotLight(0xffe9b0, flashOn?1.5:0, 13, THREE.MathUtils.degToRad(20), 0.45, 1.3);
+  flashLight.target=new THREE.Object3D();
+  scene.add(flashLight);
+  scene.add(flashLight.target);
+  document.getElementById('flashToggle').classList.add('visible');
+}
+function removeFlashlight(){
+  if(flashProp){
+    if(flashProp.parent) flashProp.parent.remove(flashProp);
+    flashProp.traverse(o=>{ if(o.isMesh){ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); } });
+  }
+  if(flashLight){ scene.remove(flashLight); scene.remove(flashLight.target); }
+  flashProp=null; flashLight=null;
+  document.getElementById('flashToggle').classList.remove('visible');
+}
+const _flashWorldPos=new THREE.Vector3();
+function updateFlashlight(){
+  if(!flashProp||!flashLight) return;
+  flashProp.getWorldPosition(_flashWorldPos);
+  flashLight.position.copy(_flashWorldPos);
+  // ビームの狙う方向は手ボーンの生の回転(走行中に激しく振れる)ではなく、
+  // キャラクターの向き(charYaw)から求めた水平前方ベクトルを使い、揺れを抑える。
+  const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
+  flashLight.target.position.set(_flashWorldPos.x+fx*3, _flashWorldPos.y-0.15, _flashWorldPos.z+fz*3);
+  flashLight.target.updateMatrixWorld();
+}
+document.getElementById('flashToggle').onclick=()=>{
+  flashOn=!flashOn;
+  document.getElementById('flashToggle').classList.toggle('on',flashOn);
+  if(flashLight) flashLight.intensity=flashOn?1.5:0;
+};
+
+const MOTION_NAMES=['idle','run'];
+function loadMotions(){
+  if(!model||!mixer)return;
+  MOTION_NAMES.forEach(name=>{
+    fetch('motion_'+name+'.glb').then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); })
+      .then(buf=>new Promise((resolve,reject)=>{
+        new THREE.GLTFLoader().parse(buf,'',gltf=>resolve(gltf.animations||[]),reject);
+      }))
+      .then(clips=>{
+        if(!clips.length||!mixer)return;
+        const action=mixer.clipAction(clips[0]);
+        action.play();
+        if(name==='idle'){ idleAction=action; action.weight=1; }
+        else{ runAction=action; action.weight=0; }
+      }).catch(()=>{ /* モーションglbが無ければ静止表示のまま */ });
+  });
+}
+
+// キャラクターはシーンのライティングの影響を受けない(常に地の色のまま見える)不透明な
+// マテリアルにする。暗い神社の中でも自撮り/POVカメラで顔がちゃんと見え、光源計算も
+// 不要になる分軽くなる(懐中電灯のビームもキャラの見た目には影響しなくなる)。
+function applyCharacterMaterials(model){
+  model.traverse(o=>{ if(o.isMesh&&o.material){
+    const old=o.material;
+    const smoothMat=new THREE.MeshBasicMaterial({map:old.map||null,
+      transparent:!!old.transparent,alphaTest:old.alphaTest||0,side:THREE.DoubleSide,skinning:!!o.isSkinnedMesh,
+      toneMapped:false});
+    if(smoothMat.map){smoothMat.map.encoding=THREE.sRGBEncoding;smoothMat.map.anisotropy=maxAniso;}
+    o.material=smoothMat;
+    characterMaterials.push(smoothMat);
+  }});
+}
+// モデル原点(hipsボーン基準)は足裏と一致しないため、バウンディングボックスの
+// 最下点が地面(y=0)にちょうど接するよう補正する(でないと足が地面に埋まる)。
+// 補正後のバウンディングボックスからcharHeight/charCenterYも実測し直す。
+function groundCharacterToFeet(model){
+  model.position.y=0;
+  model.updateMatrixWorld(true);
+  let bbox=new THREE.Box3().setFromObject(model);
+  model.position.y=-bbox.min.y;
+  model.updateMatrixWorld(true);
+  bbox=new THREE.Box3().setFromObject(model);
+  charHeight=Math.max(0.5,bbox.max.y-bbox.min.y);
+  charCenterY=bbox.min.y+charHeight*0.5;
+}
+// ★2026-07-20(ユーザー報告「WebGLコンテキストロストのエラー表示が消える」
+// 調査・修正): GLTFLoader.parse()は非同期(モデルによってはデコードに数百ms
+// 〜数秒かかる)なので、そのロード完了コールバック(loadCharacter→ここ)が、
+// たまたまWebGLコンテキストロスト中に完了することがある。以前は無条件で
+// #errを空にしていたため、ロード完了のタイミング次第で「描画コンテキストが
+// 失われました」の警告表示がロード成功によって不可解に消えてしまっていた
+// (実測でスタックトレースを取って確認済み)。コンテキストロスト中は
+// このリセットで#errを触らないようにする(復帰はwebglcontextrestoredの
+// ハンドラが責任を持つ)。
+function resetCharacterUiState(){
+  document.getElementById('modeChoice').classList.add('hide');
+  document.getElementById('drop').classList.add('hide');
+  document.getElementById('joyBase').classList.add('visible');
+  document.getElementById('selfieBox').classList.toggle('visible',pipEnabled);
+  document.getElementById('fpsBox').classList.toggle('visible',pipEnabled);
+  if(!webglContextLost) document.getElementById('err').textContent='';
+}
+function loadCharacter(buf,onLoaded){
+  new THREE.GLTFLoader().parse(buf,'',function(gltf){
+    let hasMesh=false; gltf.scene.traverse(o=>{ if(o.isMesh)hasMesh=true; });
+    if(!hasMesh){ document.getElementById('err').textContent='モデルにメッシュが含まれていません'; return; }
+    clearCharacter();
+    model=gltf.scene; characterRoot.add(model);
+    applyCharacterMaterials(model);
+    applyCharBrightness(charBrightnessPct); // configの現在値を新しいマテリアルにも反映する
+    handBone=model.getObjectByName('hand_R')||null;
+    headBone=model.getObjectByName('head')||null;
+    groundCharacterToFeet(model);
+    attachFlashlight();
+    mixer=new THREE.AnimationMixer(model);
+    resetCharacterUiState();
+    charPos.set(currentMap.spawnPoint.x,0,currentMap.spawnPoint.z);
+    charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z);
+    charYaw=currentMap.spawnPoint.yaw;
+    startPipRecTimer();
+    invalidate();
+    if(onLoaded)onLoaded();
+  }, e=>{ document.getElementById('err').textContent='読み込み失敗: '+((e&&e.message)||e); });
+}
+
+// file picker / drag&drop
+const fileEl=document.getElementById('file');
+document.getElementById('pick').onclick=()=>fileEl.click();
+fileEl.onchange=e=>{ const f=e.target.files[0]; if(f) readCharacterFile(f); };
+function readCharacterFile(f){
+  const r=new FileReader();
+  r.onload=()=>loadCharacter(r.result, loadMotions);
+  r.readAsArrayBuffer(f);
+}
+['dragover','drop'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+document.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0];
+  if(f&&/\.(glb|gltf)$/i.test(f.name)) readCharacterFile(f);
+});
+
+// 複数サンプルを選べるようプルダウンで選択させる作りにしておく
+// (増やす場合はSAMPLESに追記するだけでよい)。
+const SAMPLES=[
+  {id:'default', label:'サンプル1', model:'model.glb'},
+  {id:'sample2', label:'サンプル2', model:'model2.glb'},
+];
+const sampleSelectEl=document.getElementById('sampleSelect');
+sampleSelectEl.innerHTML=SAMPLES.map((s,i)=>`<option value="${i}">${s.label}</option>`).join('');
+sampleSelectEl.addEventListener('click', e=>e.stopPropagation());
+function tryAutoLoadSample(){
+  const sample=SAMPLES[+sampleSelectEl.value]||SAMPLES[0];
+  fetch(sample.model).then(r=>{ if(!r.ok)throw 0; return r.arrayBuffer(); }).then(buf=>{
+    loadCharacter(buf, loadMotions);
+  }).catch(()=>{
+    document.getElementById('modeChoice').classList.add('hide');
+    document.getElementById('drop').classList.remove('hide');
+  });
+}
+document.getElementById('modeSampleBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  tryAutoLoadSample();
+};
+document.getElementById('modeNormalBtn').onclick=()=>{
+  document.getElementById('modeChoice').classList.add('hide');
+  document.getElementById('drop').classList.remove('hide');
+};
+// ランドマークツールからの生成直後ハンドオフ(IndexedDB)を最優先、無ければモード選択。
+(async function(){
+  try{
+    const buf=window.P3D && await P3D.loadGeneratedModel();
+    if(buf){
+      await P3D.clearGeneratedModel();
+      loadCharacter(buf, loadMotions);
+      return;
+    }
+  }catch(e){ console.warn('generated model load failed', e); }
+  document.getElementById('modeChoice').classList.remove('hide');
+})();
+
+document.getElementById('backToIndex').onclick=()=>{ location.href='index.html'; };
+
+// --- 描画設定パネル ---
+let TARGET_FPS=30; // configの「FPS上限」の既定値(30fps)。0=無制限(画面のリフレッシュレートに追従)
+let _fpsAccum=0; // TARGET_FPS>0の時、tick()で経過時間を貯めて間引くためのアキュムレータ
+function applyFogDensity(pct){ scene.fog.density=0.02+(pct/100)*0.10; invalidate(); }
+function applyBrightness(pct){
+  const m=pct/100;
+  hemiLight.intensity=BASE_HEMI_INTENSITY*m;
+  keyLight.intensity=BASE_KEY_INTENSITY*m;
+  invalidate();
+}
+function applyCharBrightness(pct){
+  // キャラはMeshBasicMaterialで常時ライティング無効のため、シーンの明るさスライダーでは
+  // 変化しない。ここではマテリアルのcolorを直接スケールして明暗を付ける
+  // (1.0超は既定でtoneMapped:falseかつHDRレンダーターゲットではないため白飛びで頭打ちになる)。
+  charBrightnessPct=pct;
+  const m=pct/100;
+  for(const mat of characterMaterials)mat.color.setScalar(m);
+  invalidate();
+}
+// 彩度: WebGL側の色を個々に触らず、canvas全体にCSSのsaturate()フィルタをかけるだけの
+// お手軽な実装(0=無彩色/グレースケール、100=素の彩度)。PIP映像も同じcanvas上に
+// ビューポート分割で描かれているため、これだけでPIPにも自動的に効く。
+function applySaturation(pct){
+  cvs.style.filter=pct>=100?'':'saturate('+pct+'%)';
+  invalidate();
+}
+function applyPipEnabled(on){
+  pipEnabled=on;
+  document.getElementById('selfieBox').classList.toggle('visible',on&&!!model);
+  document.getElementById('fpsBox').classList.toggle('visible',on&&!!model);
+  invalidate();
+}
+// PIPカメラ画質のプルダウンは「毎フレーム更新から何フレームおきに描画するか」の間引き数
+// (PIP_FRAME_SKIP)を選ばせているだけなので、実際の見た目のfpsは
+// 「メインループの実効fps(FPS上限設定 or 無制限時は画面リフレッシュレート想定60fps) / 間引き数」
+// で決まる。選択肢のラベルにその概算fpsを都度書き足して分かりやすくする。
+function pipQualityBaseFps(){ return TARGET_FPS>0?TARGET_FPS:60; }
+function refreshPipQualityLabels(){
+  const base=pipQualityBaseFps();
+  const sel=document.getElementById('cfgPipQuality');
+  for(const opt of sel.options){
+    const skip=+opt.value;
+    const fps=base/skip;
+    const fpsTxt=Number.isInteger(fps)?fps:fps.toFixed(1);
+    opt.textContent=`${opt.dataset.label}: 約${fpsTxt}fps`;
+  }
+}
+function applyFpsLimit(v){
+  TARGET_FPS=+v;
+  _fpsAccum=0;
+  refreshPipQualityLabels();
+  invalidate();
+}
+document.getElementById('configBtn').onclick=()=>{ document.getElementById('configPanel').classList.remove('hide'); };
+document.getElementById('configClose').onclick=()=>{ document.getElementById('configPanel').classList.add('hide'); };
+document.getElementById('cfgFog').oninput=e=>applyFogDensity(+e.target.value);
+document.getElementById('cfgBrightness').oninput=e=>applyBrightness(+e.target.value);
+document.getElementById('cfgCharBrightness').oninput=e=>applyCharBrightness(+e.target.value);
+document.getElementById('cfgNoise').oninput=e=>applyNoise(+e.target.value);
+document.getElementById('cfgSaturation').oninput=e=>applySaturation(+e.target.value);
+document.getElementById('cfgFpsLimit').onchange=e=>applyFpsLimit(e.target.value);
+document.getElementById('cfgPipQuality').onchange=e=>{ PIP_FRAME_SKIP=+e.target.value; refreshPipQualityLabels(); };
+document.getElementById('cfgPipEnable').onchange=e=>applyPipEnabled(e.target.checked);
+
+// ============ 三人称カメラ・移動コントローラー ============
+let needsRender=true;
+function invalidate(){ needsRender=true; }
+function resize(){
+  renderer.setSize(innerWidth,innerHeight,false);
+  cvs.style.width=innerWidth+'px'; cvs.style.height=innerHeight+'px';
+  cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
+  layoutPIPs();
+  resizeNoise();
+  invalidate();
+}
+addEventListener('resize',resize); resize();
+
+// 神社は+Z方向に伸びるレイアウトのため、既定のオービット角はカメラが-Z側(参道の手前)に
+// 位置し+Z(鳥居の方)を向くようπにする。こうしないと既定状態でWキーが参道と逆に進んでしまう。
+let orbitYaw=Math.PI, orbitPitch=0.35;
+let camDist=3.6; const CAM_DIST_MIN=1.6, CAM_DIST_MAX=8.0;
+let charYaw=currentMap.spawnPoint.yaw;
+const charPos=new THREE.Vector3(currentMap.spawnPoint.x,currentMap.groundHeightAt(currentMap.spawnPoint.x,currentMap.spawnPoint.z),currentMap.spawnPoint.z);
+const MOVE_SPEED=3.2, YAW_LERP=12, BLEND_LERP=8, CHAR_R=0.3;
+let currentBlend=0;
+
+function lerpAngle(a,b,t){
+  let diff=(b-a+Math.PI*3)%(Math.PI*2)-Math.PI;
+  return a+diff*t;
+}
+
+// --- キーボード入力 ---
+const keys={};
+addEventListener('keydown',e=>{ keys[e.code]=true; });
+addEventListener('keyup',e=>{ keys[e.code]=false; });
+function keyboardVec(){
+  let x=0,y=0;
+  if(keys.KeyW||keys.ArrowUp)y+=1;
+  if(keys.KeyS||keys.ArrowDown)y-=1;
+  if(keys.KeyA||keys.ArrowLeft)x-=1;
+  if(keys.KeyD||keys.ArrowRight)x+=1;
+  const len=Math.hypot(x,y);
+  return len>1?{x:x/len,y:y/len}:{x,y};
+}
+
+// --- 仮想ジョイスティック(タッチ) ---
+const joyBase=document.getElementById('joyBase'), joyKnob=document.getElementById('joyKnob');
+let joyActive=false, joyPtrId=null, joyVec={x:0,y:0};
+const JOY_R=56;
+function joySetFromEvent(e){
+  const rc=joyBase.getBoundingClientRect();
+  const cx=rc.left+rc.width/2, cy=rc.top+rc.height/2;
+  let dx=e.clientX-cx, dy=e.clientY-cy;
+  const d=Math.hypot(dx,dy);
+  if(d>JOY_R){ dx=dx/d*JOY_R; dy=dy/d*JOY_R; }
+  joyKnob.style.transform='translate('+dx+'px,'+dy+'px)';
+  joyVec={x:dx/JOY_R, y:-dy/JOY_R}; // 画面上方向=前進(y+)
+}
+function joyReset(){
+  joyActive=false; joyPtrId=null; joyVec={x:0,y:0};
+  joyKnob.style.transform='translate(0,0)';
+}
+joyBase.addEventListener('pointerdown',e=>{
+  joyActive=true; joyPtrId=e.pointerId;
+  try{ joyBase.setPointerCapture(e.pointerId); }catch(_){}
+  joySetFromEvent(e);
+});
+joyBase.addEventListener('pointermove',e=>{ if(joyActive&&e.pointerId===joyPtrId) joySetFromEvent(e); });
+joyBase.addEventListener('pointerup',e=>{ if(e.pointerId===joyPtrId) joyReset(); });
+joyBase.addEventListener('pointercancel',e=>{ if(e.pointerId===joyPtrId) joyReset(); });
+
+// --- カメラオービット・ズーム(canvas上のドラッグ/ホイール/ピンチ) ---
+const ptrs=new Map(); let dragging=false, lx=0, ly=0, pinchDist=0;
+function dist2(){ const v=[...ptrs.values()]; const dx=v[0].x-v[1].x, dy=v[0].y-v[1].y; return Math.hypot(dx,dy); }
+cvs.addEventListener('pointerdown',e=>{
+  try{ cvs.setPointerCapture(e.pointerId); }catch(_){}
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){ dragging=true; lx=e.clientX; ly=e.clientY; }
+  else if(ptrs.size===2){ dragging=false; pinchDist=dist2(); }
+});
+cvs.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size>=2){
+    const d=dist2();
+    if(pinchDist>0){ camDist*=pinchDist/d; camDist=Math.max(CAM_DIST_MIN,Math.min(CAM_DIST_MAX,camDist)); invalidate(); }
+    pinchDist=d;
+  }else if(dragging){
+    orbitYaw-=(e.clientX-lx)*0.008;
+    orbitPitch+=(e.clientY-ly)*0.008;
+    orbitPitch=Math.max(0.05,Math.min(1.1,orbitPitch));
+    lx=e.clientX; ly=e.clientY; invalidate();
+  }
+});
+function endPtr(e){
+  ptrs.delete(e.pointerId); if(ptrs.size<2)pinchDist=0; if(ptrs.size===0)dragging=false;
+  else if(ptrs.size===1){ const v=[...ptrs.values()][0]; dragging=true; lx=v.x; ly=v.y; }
+}
+cvs.addEventListener('pointerup',endPtr);
+cvs.addEventListener('pointercancel',endPtr);
+cvs.addEventListener('wheel',e=>{
+  e.preventDefault();
+  camDist*=(1+Math.sign(e.deltaY)*0.08);
+  camDist=Math.max(CAM_DIST_MIN,Math.min(CAM_DIST_MAX,camDist));
+  invalidate();
+},{passive:false});
+
+function resolveCollision(pos){
+  const b=currentMap.corridorBoundsAt(pos.z);
+  pos.x=Math.max(b.left+CHAR_R,Math.min(b.right-CHAR_R,pos.x));
+  pos.z=Math.max(currentMap.zMin+CHAR_R,Math.min(currentMap.zMax-CHAR_R,pos.z));
+  colliders.forEach(col=>{
+    if(col.type==='circle'){
+      const dx=pos.x-col.x, dz=pos.z-col.z, d=Math.hypot(dx,dz), minD=col.r+CHAR_R;
+      if(d<minD&&d>1e-5){ pos.x=col.x+dx/d*minD; pos.z=col.z+dz/d*minD; }
+    }else if(col.type==='box'){
+      const inMinX=col.minX-CHAR_R, inMaxX=col.maxX+CHAR_R, inMinZ=col.minZ-CHAR_R, inMaxZ=col.maxZ+CHAR_R;
+      if(pos.x>inMinX&&pos.x<inMaxX&&pos.z>inMinZ&&pos.z<inMaxZ){
+        const dLeft=pos.x-inMinX, dRight=inMaxX-pos.x, dNear=pos.z-inMinZ, dFar=inMaxZ-pos.z;
+        const m=Math.min(dLeft,dRight,dNear,dFar);
+        if(m===dLeft)pos.x=inMinX; else if(m===dRight)pos.x=inMaxX;
+        else if(m===dNear)pos.z=inMinZ; else pos.z=inMaxZ;
+      }
+    }
+  });
+  return pos;
+}
+
+// 画面上部に自撮り/一人称のPIPを置いた分、メインカメラの注視点を実際の
+// キャラ中心よりやや上に取り、キャラの見え方を画面下寄りにしてPIPと被らないようにする。
+const FRAME_BIAS_FRAC=0.22;
+const _camTarget=new THREE.Vector3(), _camOffset=new THREE.Vector3(), _camDesired=new THREE.Vector3();
+const _camRaycaster=new THREE.Raycaster(), _camDir=new THREE.Vector3();
+function updateCamera(dt){
+  _camTarget.set(charPos.x, charPos.y+charCenterY+charHeight*FRAME_BIAS_FRAC, charPos.z);
+  _camOffset.set(
+    Math.sin(orbitYaw)*Math.cos(orbitPitch),
+    Math.sin(orbitPitch),
+    Math.cos(orbitYaw)*Math.cos(orbitPitch)
+  ).multiplyScalar(camDist);
+  _camDesired.copy(_camTarget).add(_camOffset);
+
+  // 木や岩などの神社オブジェクトにカメラがめり込まないよう、注視点→希望位置へレイを飛ばし
+  // 手前で遮られていたらそこで止める(見た目上の"カメラが茂みの中に埋まる"問題を防ぐ)。
+  _camDir.copy(_camOffset); const desiredDist=_camDir.length(); _camDir.normalize();
+  _camRaycaster.set(_camTarget,_camDir); _camRaycaster.near=0.1; _camRaycaster.far=desiredDist;
+  const hits=_camRaycaster.intersectObject(currentMap.group,true);
+  const dist=hits.length?Math.max(0.6,hits[0].distance-0.3):desiredDist;
+  _camDesired.copy(_camTarget).addScaledVector(_camDir,dist);
+
+  const t=1-Math.pow(0.0001,Math.min(dt,0.1));
+  cam.position.lerp(_camDesired,t);
+  cam.lookAt(_camTarget);
+}
+
+const _headWP=new THREE.Vector3();
+function updatePipCameras(){
+  if(!headBone)return;
+  headBone.getWorldPosition(_headWP);
+  // 手ボーンの生の回転をそのまま使わない懐中電灯と同じ理由で、向きはcharYaw基準の
+  // 水平前方ベクトルを使い、走行アニメーション中の頭の細かな回転で揺れないようにする。
+  const fx=Math.sin(charYaw), fz=Math.cos(charYaw);
+  // 自撮りなので顔(頭ボーン中心)そのものを画面中央に、もっとアップで捉える。
+  selfieCam.position.set(_headWP.x+fx*0.55, _headWP.y+0.04, _headWP.z+fz*0.55);
+  selfieCam.lookAt(_headWP.x, _headWP.y+0.02, _headWP.z);
+  fpsCam.position.set(_headWP.x+fx*0.08, _headWP.y+0.05, _headWP.z+fz*0.08);
+  fpsCam.lookAt(_headWP.x+fx*5, _headWP.y+0.03, _headWP.z+fz*5);
+}
+
+const clock=new THREE.Clock();
+// デバッグ/検証用に主要な状態を露出(Playwrightでの自動確認に使う)。
+window.__ghostController={ get charPos(){return charPos;}, get charYaw(){return charYaw;},
+  get orbitYaw(){return orbitYaw;}, get orbitPitch(){return orbitPitch;}, get camDist(){return camDist;},
+  get currentBlend(){return currentBlend;}, get model(){return model;}, get scene(){return scene;},
+  get charHeight(){return charHeight;}, get charCenterY(){return charCenterY;}, get currentMap(){return currentMap;},
+  get camPosition(){return cam.position;}, get camTarget(){return _camTarget;},
+  setCharPos(x,z){ charPos.set(x,0,z); resolveCollision(charPos); charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z); invalidate(); } };
+
+// tick(): requestAnimationFrameループ本体(FPS上限の間引きのみ担当)。
+// 実際の状態更新/描画は毎回frame()に委譲する(名前が紛らわしいので注記)。
+function tick(){
+  requestAnimationFrame(tick);
+  if(webglContextLost)return; // 復帰を待つ間はrender呼び出し自体をスキップする
+  const rawDt=Math.min(clock.getDelta(),0.05);
+  if(TARGET_FPS>0){
+    // FPS上限が設定されている場合は、経過時間を貯めて1/TARGET_FPS秒に満たない間は
+    // 更新も描画もせずスキップする(requestAnimationFrame自体は毎回呼び続けて次回に備える)。
+    _fpsAccum+=rawDt;
+    const step=1/TARGET_FPS;
+    if(_fpsAccum<step)return;
+    frame(_fpsAccum);
+    _fpsAccum=0;
+  }else{
+    frame(rawDt);
+  }
+}
+// 入力→移動方向/向き/位置更新、懐中電灯・PIPカメラの追従、待機モーション分の
+// 再描画フラグ立て(idleAction自体が常時動くため)。model読込済みの時のみ呼ばれる。
+function updateCharacterMovement(dt){
+  const inputVec=joyActive?joyVec:keyboardVec();
+  const inputMag=Math.min(1,Math.hypot(inputVec.x,inputVec.y));
+  const camForward=new THREE.Vector3(-Math.sin(orbitYaw),0,-Math.cos(orbitYaw));
+  const camRight=new THREE.Vector3(-camForward.z,0,camForward.x);
+  const dir=camForward.multiplyScalar(inputVec.y).add(camRight.multiplyScalar(inputVec.x));
+  const hasDir=dir.lengthSq()>1e-6;
+  if(hasDir)dir.normalize();
+
+  currentBlend+=(Math.min(1,inputMag)-currentBlend)*Math.min(1,BLEND_LERP*dt);
+  if(idleAction&&runAction){ idleAction.weight=1-currentBlend; runAction.weight=currentBlend; }
+  if(mixer)mixer.update(dt);
+
+  if(hasDir){
+    const targetYaw=Math.atan2(dir.x,dir.z);
+    charYaw=lerpAngle(charYaw,targetYaw,Math.min(1,YAW_LERP*dt));
+  }
+  characterRoot.rotation.y=charYaw;
+
+  if(hasDir&&currentBlend>0.001){
+    const disp=dir.multiplyScalar(MOVE_SPEED*currentBlend*dt);
+    charPos.add(disp);
+    resolveCollision(charPos);
+  }
+  charPos.y=currentMap.groundHeightAt(charPos.x,charPos.z);
+  characterRoot.position.set(charPos.x,charPos.y,charPos.z);
+
+  updateFlashlight();
+  updatePipCameras();
+  invalidate(); // idle待機モーション自体が常に動くため毎フレーム再描画
+}
+// 重いPIPシーン描画はここで間引いて行い、結果をレンダーターゲットに焼き付けるだけ
+// (画面には直接出さない)。表示は下のrenderMainAndPipBlit()で毎フレーム安価に行う。
+function renderPipTargets(){
+  renderer.setScissorTest(false);
+  // PIPカメラはキャラクターのすぐ近くに寄るため、メイン画面と同じ密度のホコリだと
+  // 画面手前で大きく・濃く重なって見えてしまう。PIP描画時だけ薄く/小さくする
+  // (メイン画面の見た目には一切影響しない、このブロックの中だけの一時変更)。
+  const _dustSizeOrig=dustMat.size, _dustOpOrig=dustMat.opacity;
+  dustMat.size=_dustSizeOrig*0.55;
+  dustMat.opacity=_dustOpOrig*0.4;
+  renderer.setRenderTarget(selfieRT);
+  renderer.render(scene,selfieCam);
+  renderer.setRenderTarget(fpsRT);
+  renderer.render(scene,fpsCam);
+  renderer.setRenderTarget(null);
+  dustMat.size=_dustSizeOrig;
+  dustMat.opacity=_dustOpOrig;
+}
+function renderMainAndPipBlit(){
+  renderer.setScissorTest(false);
+  renderer.setViewport(0,0,innerWidth,innerHeight);
+  renderer.render(scene,cam);
+  // PIPは毎フレーム、焼き付け済みのテクスチャを該当領域に貼るだけ(激安)にすることで、
+  // メインカメラの描画がPIP領域を上書きしてちらつくのを防ぎつつ、負荷も抑えている。
+  if(model&&pipEnabled){
+    renderer.setScissorTest(true);
+    renderer.setViewport(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
+    renderer.setScissor(selfieVP.x,selfieVP.y,selfieVP.w,selfieVP.h);
+    renderer.clearDepth();
+    renderer.render(selfieBlitScene,blitCam);
+    renderer.setViewport(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
+    renderer.setScissor(fpsVP.x,fpsVP.y,fpsVP.w,fpsVP.h);
+    renderer.clearDepth();
+    renderer.render(fpsBlitScene,blitCam);
+    renderer.setScissorTest(false);
+  }
+  needsRender=false;
+}
+function frame(dt){
+  currentMap.update(dt,charPos);
+  updateDust(dt);
+  updateNoise();
+  invalidate(); // 点滅灯・吊り電球の揺れ・ホコリの浮遊は常時アニメーションするため毎フレーム再描画
+
+  if(model) updateCharacterMovement(dt);
+
+  updateCamera(dt);
+  frameCount++;
+  if(model&&pipEnabled&&frameCount%PIP_FRAME_SKIP===0) renderPipTargets();
+  if(needsRender) renderMainAndPipBlit();
+}
+// configパネルの各スライダー/セレクトのvalue属性(HTML側の初期値)に描画状態を同期させる
+// (needsRender/charPos等、後方で宣言されるletを参照するinvalidate()を呼ぶため、
+// それらの宣言が済んだ最後にまとめて実行する)
+applyFogDensity(+document.getElementById('cfgFog').value);
+applyBrightness(+document.getElementById('cfgBrightness').value);
+applyCharBrightness(+document.getElementById('cfgCharBrightness').value);
+applyNoise(+document.getElementById('cfgNoise').value);
+applySaturation(+document.getElementById('cfgSaturation').value);
+applyFpsLimit(document.getElementById('cfgFpsLimit').value);
+tick();
+})();
+</script>
+</body></html>
